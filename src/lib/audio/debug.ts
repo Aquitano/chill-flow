@@ -38,7 +38,7 @@ class AudioDebugLogger {
         }
         if (level === 'error') {
             const ts = new Date(event.timestamp).toISOString().split('T')[1]?.slice(0, -1);
-            const prefix = `[${ts}] 🎵 ${category}`;
+            const prefix = `[${ts}] - ${category}`;
             if (event.stack || data) {
                 console.error(`${prefix}: ${message}`, { data, stack: event.stack });
             } else {
@@ -84,11 +84,11 @@ class AudioDebugLogger {
         if (!this.enabled) return () => { };
 
         const start = performance.now();
-        this.debug(category, `⏱️ Started: ${label}`);
+        this.debug(category, `Started: ${label}`);
 
         return () => {
             const duration = performance.now() - start;
-            this.info(category, `⏱️ Completed: ${label}`, {
+            this.info(category, `Completed: ${label}`, {
                 duration: `${duration.toFixed(2)}ms`,
                 durationMs: duration
             });
@@ -130,13 +130,13 @@ class AudioDebugLogger {
             src: element.src ? element.src.substring(element.src.lastIndexOf('/') + 1) : 'none',
             readyState: this.getReadyStateText(element.readyState),
             networkState: this.getNetworkStateText(element.networkState),
-            currentTime: element.currentTime.toFixed(3),
-            duration: element.duration?.toFixed(3) ?? 'unknown',
+            currentTime: Number(element.currentTime ?? 0).toFixed(3),
+            duration: Number(element.duration ?? 0).toFixed(3),
             paused: element.paused,
             ended: element.ended,
             muted: element.muted,
-            volume: element.volume.toFixed(2),
-            playbackRate: element.playbackRate,
+            volume: Number(element.volume ?? 1).toFixed(2),
+            playbackRate: element.playbackRate ?? 1,
             buffered,
             error: element.error ? {
                 code: element.error.code,

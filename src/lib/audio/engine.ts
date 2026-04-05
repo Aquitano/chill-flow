@@ -42,7 +42,6 @@ class AudioEngineImpl {
 
         try {
             const w = window as Window & { webkitAudioContext?: typeof AudioContext };
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const Ctor = (window as any).AudioContext ?? w.webkitAudioContext;
 
             if (!Ctor) {
@@ -568,7 +567,6 @@ class AudioEngineImpl {
     }
 
     private dispatch<K extends keyof AudioEventMap>(type: K, detail: AudioEventMap[K]['detail']): void {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const evt = new CustomEvent(type as any, { detail }) as AudioEventMap[K];
 
         if (type === 'error' || type === 'ended') {
