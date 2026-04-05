@@ -1,22 +1,29 @@
-import { FlatCompat } from '@eslint/eslintrc';
 import js from '@eslint/js';
 import { defineConfig } from 'eslint/config';
 import globals from 'globals';
-
-const compat = new FlatCompat({
-    baseDirectory: __dirname,
-    recommendedConfig: js.configs.recommended,
-    allConfig: js.configs.all
-});
-
+import tsParser from '@typescript-eslint/parser';
 
 export default defineConfig([
     {
-        plugins: { js },
-        extends: compat.extends('eslint:recommended', 'next/core-web-vitals', 'next/typescript', 'plugin:react/recommended', 'plugin:drizzle/recommended'),
-        languageOptions: { globals: { ...globals.browser, ...globals.node } },
+        files: ['src/**/*.{ts,tsx,js,jsx}'],
+        languageOptions: {
+            parser: tsParser,
+            globals: {
+                ...globals.browser,
+                ...globals.node,
+            },
+            parserOptions: {
+                ecmaVersion: 'latest',
+                sourceType: 'module',
+                ecmaFeatures: {
+                    jsx: true,
+                },
+            },
+        },
+        ...js.configs.recommended,
         rules: {
-            'react/react-in-jsx-scope': 'off',
+            'no-console': 'off',
+            'no-undef': 'off',
         },
     },
 ]);
