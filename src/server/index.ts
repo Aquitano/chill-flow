@@ -1,5 +1,8 @@
 import { j } from './jstack';
-import { postRouter } from './routers/post-router';
+import { preferencesRouter } from './routers/preferences-router';
+import { sessionsRouter } from './routers/sessions-router';
+import { tasksRouter } from './routers/tasks-router';
+import { tracksRouter } from './routers/tracks-router';
 
 /**
  * This is your base API.
@@ -14,7 +17,10 @@ const api = j.router().basePath('/api').use(j.defaults.cors).onError(j.defaults.
  * All routers in /server/routers should be added here manually.
  */
 const appRouter = j.mergeRouters(api, {
-    post: postRouter,
+    preferences: preferencesRouter,
+    sessions: sessionsRouter,
+    tasks: tasksRouter,
+    tracks: tracksRouter,
 });
 
 export type AppRouter = typeof appRouter;

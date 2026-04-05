@@ -6,6 +6,9 @@ import { j, publicProcedure } from '../jstack';
 export const postRouter = j.router({
     recent: publicProcedure.query(async ({ c, ctx }) => {
         const { db } = ctx;
+        if (!db) {
+            return c.superjson(null);
+        }
 
         const [recentPost] = await db.select().from(posts).orderBy(desc(posts.createdAt)).limit(1);
 
@@ -15,6 +18,9 @@ export const postRouter = j.router({
     create: publicProcedure.input(z.object({ name: z.string().min(1) })).mutation(async ({ ctx, c, input }) => {
         const { name } = input;
         const { db } = ctx;
+        if (!db) {
+            return c.superjson(null);
+        }
 
         const post = await db.insert(posts).values({ name });
 

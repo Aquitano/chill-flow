@@ -1,10 +1,13 @@
+import { appEnv } from '@/lib/env';
+import { auth } from '@clerk/nextjs/server';
 import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
 import { env } from 'hono/adapter';
+import { HTTPException } from 'hono/http-exception';
 import { jstack } from 'jstack';
 
 interface Env {
-    Bindings: { DATABASE_URL: string };
+    Bindings: { DATABASE_URL?: string };
 }
 
 export const j = jstack.init<Env>();
@@ -16,6 +19,10 @@ export const j = jstack.init<Env>();
  */
 const databaseMiddleware = j.middleware(async ({ c, next }) => {
     const { DATABASE_URL } = env(c);
+
+    if (!DATABASE_URL) {
+        return await next({ db: null });
+    }
 
     const sql = neon(DATABASE_URL);
     const db = drizzle(sql);
@@ -29,3 +36,19 @@ const databaseMiddleware = j.middleware(async ({ c, next }) => {
  * This is the base piece you use to build new queries and mutations on your API.
  */
 export const publicProcedure = j.procedure.use(databaseMiddleware);
+
+const authMiddleware = j.middleware(async ({ next }) => {
+    if (!appEnv.isClerkConfigured) {
+        throw new HTTPException(500, { message: 'Authentication is not configured.' });
+    }
+
+    const authState = await auth();
+
+    if (!authState.userId) {
+        throw new HTTPException(401, { message: 'Unauthorized' });
+    }
+
+    return next({ userId: authState.userId });
+});
+
+export const protectedProcedure = publicProcedure.use(authMiddleware);
