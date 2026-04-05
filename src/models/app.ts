@@ -7,6 +7,7 @@ export interface Track {
     audioUrl: string;
     duration: number;
     tags: string[];
+    category?: string;
     isLiked?: boolean;
 }
 
@@ -28,6 +29,7 @@ export interface Task {
 export interface Background {
     id: string;
     type: 'color' | 'image' | 'video';
+    name: string;
     url?: string;
     color?: string;
     thumbnailUrl?: string;
@@ -42,6 +44,9 @@ export interface UserPreferences {
     showNotifications: boolean;
     theme: 'light' | 'dark' | 'system';
     customModes: AppMode[];
+    selectedTrackId: string | null;
+    selectedBackgroundId: string | null;
+    likedTrackIds: string[];
 }
 
 export interface AppMode {
@@ -56,4 +61,12 @@ export interface AppMode {
         playlistIds?: string[];
         quoteCategories?: string[];
     };
+}
+
+export interface FocusSession {
+    id: string;
+    mode: string;
+    durationSeconds: number;
+    trackId: string | null;
+    completedAt: string;
 }
