@@ -46,7 +46,7 @@ export const tasks = pgTable(
         createdAt: timestamp('createdAt').defaultNow().notNull(),
         updatedAt: timestamp('updatedAt').defaultNow().notNull(),
     },
-    (table) => [index('Tasks_userId_idx').on(table.userId)],
+    (table) => [index('Tasks_userId_createdAt_idx').on(table.userId, table.createdAt)],
 );
 
 export const userPreferences = pgTable(
@@ -74,11 +74,13 @@ export const focusSessions = pgTable(
         id: text('id').primaryKey(),
         userId: text('userId').notNull(),
         mode: text('mode').notNull(),
+        status: text('status').notNull().default('active'),
         durationSeconds: integer('durationSeconds').notNull(),
         trackId: text('trackId'),
-        completedAt: timestamp('completedAt').defaultNow().notNull(),
+        startedAt: timestamp('startedAt').defaultNow().notNull(),
+        completedAt: timestamp('completedAt'),
     },
-    (table) => [index('FocusSessions_userId_idx').on(table.userId)],
+    (table) => [index('FocusSessions_userId_status_completedAt_idx').on(table.userId, table.status, table.completedAt)],
 );
 
 export const savedPresets = pgTable(

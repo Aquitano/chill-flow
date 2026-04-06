@@ -1,20 +1,11 @@
 import { backgroundCatalog } from '@/lib/backgrounds';
 import { quotes } from '@/lib/quotes';
 import { Background, FocusSession, Task, Track, UserPreferences } from '@/models/app';
+import { and, desc, eq, isNotNull } from 'drizzle-orm';
+import { Database } from '../db/client';
+import { focusSessions, tasks, userPreferences } from '../db/schema';
 
-type SessionStatus = 'active' | 'completed';
-
-type StoredSession = FocusSession & {
-    status: SessionStatus;
-};
-
-type UserState = {
-    tasks: Task[];
-    preferences: UserPreferences;
-    sessions: StoredSession[];
-};
-
-const trackCatalog: Track[] = [
+export const trackCatalog: Track[] = [
     {
         id: 'deep-focus-01',
         title: 'Deep Focus Loop',
@@ -44,10 +35,10 @@ const trackCatalog: Track[] = [
     },
 ];
 
-const defaultTasks: Task[] = [
-    { id: 'task-1', text: 'Review notes', isCompleted: false, priority: 'medium' },
-    { id: 'task-2', text: 'Practice coding', isCompleted: false, priority: 'high' },
-    { id: 'task-3', text: 'Write summary', isCompleted: false, priority: 'low' },
+export const defaultTasks: Task[] = [
+    { id: crypto.randomUUID(), text: 'Review notes', isCompleted: false, priority: 'medium' },
+    { id: crypto.randomUUID(), text: 'Practice coding', isCompleted: false, priority: 'high' },
+    { id: crypto.randomUUID(), text: 'Write summary', isCompleted: false, priority: 'low' },
 ];
 
 const defaultPreferences: UserPreferences = {
@@ -63,27 +54,119 @@ const defaultPreferences: UserPreferences = {
     likedTrackIds: [],
 };
 
-const userState = new Map<string, UserState>();
-
 function clone<T>(value: T): T {
     return structuredClone(value) as T;
 }
 
-function createDefaultState(): UserState {
+function asIsoString(value: Date | string | null | undefined) {
+    if (!value) {
+        return new Date().toISOString();
+    }
+
+    return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+function mapTask(row: typeof tasks.$inferSelect): Task {
     return {
-        tasks: clone(defaultTasks),
-        preferences: clone(defaultPreferences),
-        sessions: [],
+        id: row.id,
+        text: row.text,
+        priority: row.priority as Task['priority'],
+        isCompleted: row.isCompleted,
+        date: row.createdAt,
     };
 }
 
-function getUserState(userId: string) {
-    const state = userState.get(userId);
-    if (state) return state;
+function mapSession(row: typeof focusSessions.$inferSelect): FocusSession {
+    return {
+        id: row.id,
+        mode: row.mode,
+        durationSeconds: row.durationSeconds,
+        trackId: row.trackId,
+        completedAt: asIsoString(row.completedAt ?? row.startedAt),
+    };
+}
 
-    const nextState = createDefaultState();
-    userState.set(userId, nextState);
-    return nextState;
+function mapPreferences(row: typeof userPreferences.$inferSelect): UserPreferences {
+    return {
+        defaultMode: row.defaultMode,
+        autoPlay: row.autoPlay,
+        transitionSpeed: row.transitionSpeed,
+        volume: row.volume,
+        showNotifications: row.showNotifications,
+        theme: row.theme as UserPreferences['theme'],
+        customModes: [],
+        selectedTrackId: row.selectedTrackId,
+        selectedBackgroundId: row.selectedBackgroundId,
+        likedTrackIds: row.likedTrackIds,
+    };
+}
+
+async function ensureUserPreferences(database: Database, userId: string) {
+    const [existingPreferences] = await database
+        .select()
+        .from(userPreferences)
+        .where(eq(userPreferences.userId, userId))
+        .limit(1);
+
+    if (existingPreferences) {
+        return existingPreferences;
+    }
+
+    const [createdPreferences] = await database
+        .insert(userPreferences)
+        .values({
+            userId,
+            defaultMode: defaultPreferences.defaultMode,
+            autoPlay: defaultPreferences.autoPlay,
+            transitionSpeed: defaultPreferences.transitionSpeed,
+            volume: defaultPreferences.volume,
+            showNotifications: defaultPreferences.showNotifications,
+            theme: defaultPreferences.theme,
+            selectedTrackId: defaultPreferences.selectedTrackId,
+            selectedBackgroundId: defaultPreferences.selectedBackgroundId,
+            likedTrackIds: defaultPreferences.likedTrackIds,
+        })
+        .onConflictDoNothing()
+        .returning();
+
+    if (createdPreferences) {
+        return createdPreferences;
+    }
+
+    const [storedPreferences] = await database
+        .select()
+        .from(userPreferences)
+        .where(eq(userPreferences.userId, userId))
+        .limit(1);
+
+    if (!storedPreferences) {
+        throw new Error('User preferences could not be initialized.');
+    }
+
+    return storedPreferences;
+}
+
+function calculateCurrentStreak(sessionDates: string[]) {
+    if (sessionDates.length === 0) {
+        return 0;
+    }
+
+    const sortedDays = Array.from(new Set(sessionDates)).sort((left, right) => right.localeCompare(left));
+    let streak = 1;
+    let cursor = new Date(`${sortedDays[0]}T00:00:00.000Z`);
+
+    for (let index = 1; index < sortedDays.length; index += 1) {
+        const nextDate = new Date(`${sortedDays[index]}T00:00:00.000Z`);
+        cursor.setUTCDate(cursor.getUTCDate() - 1);
+
+        if (nextDate.getTime() !== cursor.getTime()) {
+            break;
+        }
+
+        streak += 1;
+    }
+
+    return streak;
 }
 
 export const appRepository = {
@@ -103,101 +186,150 @@ export const appRepository = {
         return clone(quotes);
     },
 
-    listTasks(userId: string) {
-        return clone(getUserState(userId).tasks);
+    async listTasks(database: Database, userId: string) {
+        const storedTasks = await database.select().from(tasks).where(eq(tasks.userId, userId)).orderBy(desc(tasks.createdAt));
+        return storedTasks.map(mapTask);
     },
 
-    createTask(userId: string, input: Pick<Task, 'text' | 'priority'>) {
-        const state = getUserState(userId);
-        const task: Task = {
-            id: `task-${Date.now()}`,
-            text: input.text,
-            priority: input.priority,
-            isCompleted: false,
-            date: new Date(),
-        };
-        state.tasks.unshift(task);
-        return clone(task);
+    async createTask(database: Database, userId: string, input: Pick<Task, 'text' | 'priority'>) {
+        const [createdTask] = await database
+            .insert(tasks)
+            .values({
+                id: crypto.randomUUID(),
+                userId,
+                text: input.text,
+                priority: input.priority,
+                isCompleted: false,
+            })
+            .returning();
+
+        if (!createdTask) {
+            throw new Error('Task could not be created.');
+        }
+
+        return mapTask(createdTask);
     },
 
-    updateTask(userId: string, taskId: string, input: Partial<Pick<Task, 'text' | 'priority' | 'isCompleted'>>) {
-        const state = getUserState(userId);
-        const task = state.tasks.find((entry) => entry.id === taskId);
-        if (!task) return null;
+    async updateTask(
+        database: Database,
+        userId: string,
+        taskId: string,
+        input: Partial<Pick<Task, 'text' | 'priority' | 'isCompleted'>>,
+    ) {
+        const [updatedTask] = await database
+            .update(tasks)
+            .set({
+                ...input,
+                updatedAt: new Date(),
+            })
+            .where(and(eq(tasks.userId, userId), eq(tasks.id, taskId)))
+            .returning();
 
-        Object.assign(task, input);
-        return clone(task);
+        return updatedTask ? mapTask(updatedTask) : null;
     },
 
-    deleteTask(userId: string, taskId: string) {
-        const state = getUserState(userId);
-        state.tasks = state.tasks.filter((task) => task.id !== taskId);
-        return { success: true };
+    async deleteTask(database: Database, userId: string, taskId: string) {
+        const deletedTasks = await database
+            .delete(tasks)
+            .where(and(eq(tasks.userId, userId), eq(tasks.id, taskId)))
+            .returning({ id: tasks.id });
+
+        return { success: deletedTasks.length > 0 };
     },
 
-    getPreferences(userId: string) {
+    async getPreferences(database: Database, userId: string) {
+        const storedPreferences = await ensureUserPreferences(database, userId);
+
         return {
-            preferences: clone(getUserState(userId).preferences),
+            preferences: mapPreferences(storedPreferences),
             backgrounds: clone(backgroundCatalog),
             quotes: clone(quotes),
         };
     },
 
-    updatePreferences(userId: string, input: Partial<UserPreferences>) {
-        const state = getUserState(userId);
-        state.preferences = {
-            ...state.preferences,
-            ...input,
-        };
-        return clone(state.preferences);
-    },
+    async updatePreferences(database: Database, userId: string, input: Partial<UserPreferences>) {
+        await ensureUserPreferences(database, userId);
 
-    listSessions(userId: string) {
-        const sessions = getUserState(userId).sessions
-            .filter((session) => session.status === 'completed')
-            .sort((a, b) => b.completedAt.localeCompare(a.completedAt));
+        const [updatedPreferences] = await database
+            .update(userPreferences)
+            .set({
+                ...input,
+                updatedAt: new Date(),
+            })
+            .where(eq(userPreferences.userId, userId))
+            .returning();
 
-        return clone(sessions);
-    },
-
-    startSession(userId: string, input: Pick<FocusSession, 'mode' | 'durationSeconds' | 'trackId'>) {
-        const state = getUserState(userId);
-        const session: StoredSession = {
-            id: `session-${Date.now()}`,
-            mode: input.mode,
-            durationSeconds: input.durationSeconds,
-            trackId: input.trackId,
-            completedAt: new Date().toISOString(),
-            status: 'active',
-        };
-        state.sessions.push(session);
-        return clone(session);
-    },
-
-    completeSession(userId: string, sessionId: string, durationSeconds?: number) {
-        const state = getUserState(userId);
-        const session = state.sessions.find((entry) => entry.id === sessionId);
-        if (!session) return null;
-
-        session.status = 'completed';
-        session.completedAt = new Date().toISOString();
-        if (durationSeconds) {
-            session.durationSeconds = durationSeconds;
+        if (!updatedPreferences) {
+            throw new Error('User preferences could not be updated.');
         }
 
-        return clone(session);
+        return mapPreferences(updatedPreferences);
     },
 
-    getSessionSummary(userId: string) {
-        const sessions = getUserState(userId).sessions.filter((session) => session.status === 'completed');
-        const totalSessions = sessions.length;
-        const totalMinutes = Math.round(sessions.reduce((sum, session) => sum + session.durationSeconds, 0) / 60);
-        const distinctDays = new Set(sessions.map((session) => session.completedAt.slice(0, 10)));
+    async listSessions(database: Database, userId: string) {
+        const storedSessions = await database
+            .select()
+            .from(focusSessions)
+            .where(and(eq(focusSessions.userId, userId), eq(focusSessions.status, 'completed'), isNotNull(focusSessions.completedAt)))
+            .orderBy(desc(focusSessions.completedAt));
+
+        return storedSessions.map(mapSession);
+    },
+
+    async startSession(database: Database, userId: string, input: Pick<FocusSession, 'mode' | 'durationSeconds' | 'trackId'>) {
+        const now = new Date();
+        const [createdSession] = await database
+            .insert(focusSessions)
+            .values({
+                id: crypto.randomUUID(),
+                userId,
+                mode: input.mode,
+                status: 'active',
+                durationSeconds: input.durationSeconds,
+                trackId: input.trackId,
+                startedAt: now,
+                completedAt: null,
+            })
+            .returning();
+
+        if (!createdSession) {
+            throw new Error('Session could not be created.');
+        }
+
+        return mapSession(createdSession);
+    },
+
+    async completeSession(database: Database, userId: string, sessionId: string, durationSeconds?: number) {
+        const [completedSession] = await database
+            .update(focusSessions)
+            .set({
+                status: 'completed',
+                completedAt: new Date(),
+                durationSeconds: durationSeconds ?? undefined,
+            })
+            .where(and(eq(focusSessions.userId, userId), eq(focusSessions.id, sessionId), eq(focusSessions.status, 'active')))
+            .returning();
+
+        return completedSession ? mapSession(completedSession) : null;
+    },
+
+    async getSessionSummary(database: Database, userId: string) {
+        const storedSessions = await database
+            .select({
+                durationSeconds: focusSessions.durationSeconds,
+                completedAt: focusSessions.completedAt,
+            })
+            .from(focusSessions)
+            .where(and(eq(focusSessions.userId, userId), eq(focusSessions.status, 'completed'), isNotNull(focusSessions.completedAt)));
+
+        const totalSessions = storedSessions.length;
+        const totalMinutes = Math.round(storedSessions.reduce((sum, session) => sum + session.durationSeconds, 0) / 60);
+        const distinctDays = storedSessions.map((session) => asIsoString(session.completedAt).slice(0, 10));
 
         return {
             totalSessions,
             totalMinutes,
-            currentStreak: distinctDays.size,
+            currentStreak: calculateCurrentStreak(distinctDays),
         };
     },
 };
