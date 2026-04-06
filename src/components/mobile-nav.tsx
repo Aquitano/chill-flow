@@ -104,7 +104,7 @@ export function MobileNav() {
                                 <SignUpButton mode="modal">
                                     <Button
                                         variant="default"
-                                        className="w-full justify-center bg-gradient-to-r from-blue-600 to-violet-600 py-6 text-base"
+                                        className="w-full justify-center bg-linear-to-r from-blue-600 to-violet-600 py-6 text-base"
                                         onClick={() => setOpen(false)}
                                     >
                                         Sign Up

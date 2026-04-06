@@ -26,6 +26,10 @@ class FakeAudioElement extends EventTarget implements Partial<HTMLAudioElement> 
     currentTime = 0;
     duration = 60;
     loop = false;
+    paused = true;
+    ended = false;
+    muted = false;
+    volume = 1;
     preload: 'none' | 'metadata' | 'auto' = 'none';
     crossOrigin: string | null = null;
     playbackRate = 1;
@@ -34,10 +38,18 @@ class FakeAudioElement extends EventTarget implements Partial<HTMLAudioElement> 
     buffered = new FakeBuffered([[0, 30]]);
     load = vi.fn(() => {
         this.readyState = (HTMLMediaElement).HAVE_FUTURE_DATA ?? 3;
+        this.dispatchEvent(new Event('loadeddata'));
+        this.dispatchEvent(new Event('canplay'));
         this.dispatchEvent(new Event('loadedmetadata'));
     });
-    play = vi.fn(async () => { this.dispatchEvent(new Event('play')); });
-    pause = vi.fn(() => { this.dispatchEvent(new Event('pause')); });
+    play = vi.fn(async () => {
+        this.paused = false;
+        this.dispatchEvent(new Event('play'));
+    });
+    pause = vi.fn(() => {
+        this.paused = true;
+        this.dispatchEvent(new Event('pause'));
+    });
 }
 
 beforeEach(() => {
@@ -58,5 +70,15 @@ beforeEach(() => {
     g.AudioContext = FakeAudioContext;
     g.webkitAudioContext = undefined;
     g.Audio = FakeAudioElement;
-    g.HTMLMediaElement = { HAVE_FUTURE_DATA: 3 };
+    g.HTMLMediaElement = {
+        HAVE_NOTHING: 0,
+        HAVE_METADATA: 1,
+        HAVE_CURRENT_DATA: 2,
+        HAVE_FUTURE_DATA: 3,
+        HAVE_ENOUGH_DATA: 4,
+        NETWORK_EMPTY: 0,
+        NETWORK_IDLE: 1,
+        NETWORK_LOADING: 2,
+        NETWORK_NO_SOURCE: 3,
+    };
 });

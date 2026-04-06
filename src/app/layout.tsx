@@ -3,6 +3,7 @@ import { Cormorant, Inter } from 'next/font/google';
 import { Providers } from '../components/providers';
 
 import { ClerkProvider } from '@clerk/nextjs';
+import { appEnv } from '@/lib/env';
 
 import './globals.css';
 
@@ -39,7 +40,7 @@ export default function RootLayout({
     children: React.ReactNode;
 }>) {
     return (
-        <ClerkProvider>
+        <ClerkProvider publishableKey={appEnv.clerkPublishableKey}>
             <html lang="en" className={`${inter.className} ${cormorant.className} dark`}>
                 <body className="antialiased">
                     <Providers>{children}</Providers>

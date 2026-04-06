@@ -222,7 +222,7 @@ export function AudioDebugTrigger() {
                 className="fixed right-4 bottom-4 z-40 rounded-full bg-blue-600 p-3 text-white shadow-lg hover:bg-blue-700"
                 title="Open Audio Debug Panel"
             >
-                🎵
+                Debug
             </button>
             <AudioDebugPanel isOpen={isOpen} onClose={() => setIsOpen(false)} />
         </>

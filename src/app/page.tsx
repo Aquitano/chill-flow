@@ -31,7 +31,7 @@ export default function Home() {
                 transition={{ duration: 1 }}
                 className="relative z-10 my-25 h-px w-full"
             >
-                <div className="absolute inset-x-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+                <div className="absolute inset-x-0 h-px bg-linear-to-r from-transparent via-white/20 to-transparent" />
             </motion.div>
 
             <FeaturesSection />
@@ -43,7 +43,7 @@ export default function Home() {
                 transition={{ duration: 0.8 }}
                 className="relative z-10 my-16 flex justify-center"
             >
-                <div className="h-12 w-[1px] bg-gradient-to-b from-transparent via-white/20 to-transparent" />
+                <div className="h-12 w-px bg-linear-to-b from-transparent via-white/20 to-transparent" />
             </motion.div>
 
             <StepsSection />

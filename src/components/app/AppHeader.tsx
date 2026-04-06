@@ -11,11 +11,12 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useAppStore } from '@/store/app-store';
 import { motion } from 'framer-motion';
-import { Activity, ChevronDown, Menu } from 'lucide-react';
+import { Activity, BarChart3, ChevronDown, Menu } from 'lucide-react';
 
 export const AppHeader: React.FC = () => {
     const modes = useAppStore((state) => state.modes);
     const currentMode = useAppStore((state) => state.currentMode);
+    const sessionSummary = useAppStore((state) => state.sessionSummary);
     const toggleMenu = useAppStore((state) => state.toggleMenu);
     const setMode = useAppStore((state) => state.setMode);
 
@@ -28,8 +29,7 @@ export const AppHeader: React.FC = () => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
         >
-            {/* Activity select dropdown with mode description */}
-            <div className="flex items-center">
+            <div className="flex items-center gap-3">
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <Button variant="ghost" className="flex items-center gap-2 pl-1 text-sm font-normal">
@@ -38,37 +38,36 @@ export const AppHeader: React.FC = () => {
                             <ChevronDown size={16} className="ml-1 text-neutral-400" />
                         </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent className="w-56 border-neutral-800 bg-black/90 backdrop-blur-md">
+                    <DropdownMenuContent className="w-64 border-neutral-800 bg-black/90 backdrop-blur-md">
                         <DropdownMenuLabel>Flow Modes</DropdownMenuLabel>
                         <DropdownMenuSeparator className="bg-neutral-800" />
-                        {Object.keys(modes ?? {}).map((modeKey) => (
+                        {Object.keys(modes).map((modeKey) => (
                             <DropdownMenuItem
                                 key={modeKey}
-                                className={`flex flex-col items-start py-3 ${currentMode === modeKey ? 'bg-neutral-800/50' : ''}`}
+                                className={`flex flex-col items-start py-3 ${
+                                    currentMode === modeKey ? 'bg-neutral-800/50' : ''
+                                }`}
                                 onClick={() => setMode(modeKey)}
                             >
                                 <span className="font-medium">{modes[modeKey]?.label ?? modeKey}</span>
-                                <span className="mt-1 text-xs text-neutral-400">
-                                    {modes[modeKey]?.description ?? ''}
-                                </span>
+                                <span className="mt-1 text-xs text-neutral-400">{modes[modeKey]?.description ?? ''}</span>
                             </DropdownMenuItem>
                         ))}
                     </DropdownMenuContent>
                 </DropdownMenu>
+
+                <div className="hidden rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-neutral-300 md:block">
+                    {currentModeSettings?.description}
+                </div>
             </div>
 
-            <div className="flex items-center">
-                <motion.div
-                    className="mr-4 rounded-full bg-yellow-400/20 px-4 py-1 text-sm text-yellow-200"
-                    initial={{ scale: 0.9, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    transition={{ delay: 0.8, duration: 0.5 }}
-                >
-                    Trial ends in 2 days
-                </motion.div>
-                <Button variant="outline" size="sm" className="mr-2 border-white/20">
-                    Subscribe
-                </Button>
+            <div className="flex items-center gap-3">
+                <div className="hidden items-center gap-2 rounded-full bg-emerald-500/10 px-4 py-1.5 text-sm text-emerald-200 md:flex">
+                    <BarChart3 size={16} />
+                    <span>{sessionSummary.totalSessions} sessions</span>
+                    <span className="text-emerald-400">·</span>
+                    <span>{sessionSummary.currentStreak} day streak</span>
+                </div>
                 <Button variant="ghost" size="icon" onClick={toggleMenu}>
                     <Menu size={18} />
                 </Button>
