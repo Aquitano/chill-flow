@@ -1,10 +1,10 @@
 import { appEnv } from '@/lib/env';
 import { auth } from '@clerk/nextjs/server';
-import { neon } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-http';
 import { env } from 'hono/adapter';
 import { HTTPException } from 'hono/http-exception';
 import { jstack } from 'jstack';
+import { getDatabase } from './db/client';
+import { isTrustedOrigin } from './security/origin';
 
 interface Env {
     Bindings: { DATABASE_URL?: string };
@@ -19,13 +19,11 @@ export const j = jstack.init<Env>();
  */
 const databaseMiddleware = j.middleware(async ({ c, next }) => {
     const { DATABASE_URL } = env(c);
+    const db = getDatabase(DATABASE_URL ?? appEnv.databaseUrl);
 
-    if (!DATABASE_URL) {
+    if (!db) {
         return await next({ db: null });
     }
-
-    const sql = neon(DATABASE_URL);
-    const db = drizzle(sql);
 
     return await next({ db });
 });
@@ -52,3 +50,20 @@ const authMiddleware = j.middleware(async ({ next }) => {
 });
 
 export const protectedProcedure = publicProcedure.use(authMiddleware);
+export const protectedDataProcedure = protectedProcedure.use(async ({ ctx, next }) => {
+    if (!ctx.db) {
+        throw new HTTPException(503, { message: 'Database access is not configured.' });
+    }
+
+    return next({ db: ctx.db });
+});
+
+export const protectedMutationProcedure = protectedDataProcedure.use(async ({ c, next }) => {
+    const requestOrigin = c.req.header('origin');
+
+    if (requestOrigin && !isTrustedOrigin(requestOrigin, c.req.url, appEnv.allowedCorsOrigins)) {
+        throw new HTTPException(403, { message: 'Untrusted origin.' });
+    }
+
+    return next();
+});

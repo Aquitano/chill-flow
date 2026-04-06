@@ -1,3 +1,4 @@
+import { parseAllowedOrigins } from '@/server/security/origin';
 import { z } from 'zod';
 
 const envSchema = z.object({
@@ -5,6 +6,7 @@ const envSchema = z.object({
     CLERK_SECRET_KEY: z.string().optional(),
     DATABASE_URL: z.url().optional(),
     NEXT_PUBLIC_SENTRY_DSN: z.url().optional(),
+    ALLOWED_CORS_ORIGINS: z.string().optional(),
 });
 
 const parsedEnv = envSchema.safeParse({
@@ -12,6 +14,7 @@ const parsedEnv = envSchema.safeParse({
     CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY,
     DATABASE_URL: process.env.DATABASE_URL,
     NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN,
+    ALLOWED_CORS_ORIGINS: process.env.ALLOWED_CORS_ORIGINS,
 });
 
 const rawEnv = parsedEnv.success ? parsedEnv.data : {};
@@ -21,6 +24,7 @@ export const appEnv = {
     clerkSecretKey: rawEnv.CLERK_SECRET_KEY,
     databaseUrl: rawEnv.DATABASE_URL,
     sentryDsn: rawEnv.NEXT_PUBLIC_SENTRY_DSN,
+    allowedCorsOrigins: parseAllowedOrigins(rawEnv.ALLOWED_CORS_ORIGINS),
     isClerkConfigured: Boolean(rawEnv.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && rawEnv.CLERK_SECRET_KEY),
     isDatabaseConfigured: Boolean(rawEnv.DATABASE_URL),
     isSentryConfigured: Boolean(rawEnv.NEXT_PUBLIC_SENTRY_DSN),
@@ -34,7 +38,7 @@ export function getEnvWarnings() {
     }
 
     if (!appEnv.isDatabaseConfigured) {
-        warnings.push('DATABASE_URL is missing. The API uses an in-memory development store.');
+        warnings.push('DATABASE_URL is missing. Protected workspace APIs are disabled until the database is configured.');
     }
 
     if (!appEnv.isSentryConfigured) {
