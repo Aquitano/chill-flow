@@ -1,13 +1,30 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { useCreateTaskMutation, useDeleteTaskMutation, useUpdateTaskMutation } from '@/hooks/use-app-data';
+import { Task } from '@/models/app';
 import { useAppStore } from '@/store/app-store';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, Plus, Trash2 } from 'lucide-react';
+import { Check, Flag, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { TimerPanel } from './TimerPanel';
+
+const priorityOptions: Array<{ value: Task['priority']; label: string; className: string }> = [
+    { value: 'low', label: 'Low', className: 'border-sky-400/30 bg-sky-400/10 text-sky-200' },
+    { value: 'medium', label: 'Medium', className: 'border-amber-300/30 bg-amber-300/10 text-amber-100' },
+    { value: 'high', label: 'High', className: 'border-rose-400/30 bg-rose-400/10 text-rose-100' },
+];
+
+function getPriorityOption(priority: Task['priority']) {
+    return priorityOptions.find((option) => option.value === priority) ?? priorityOptions[1];
+}
 
 export const CenterContent: React.FC = () => {
     const currentMode = useAppStore((state) => state.currentMode);
@@ -21,6 +38,7 @@ export const CenterContent: React.FC = () => {
     const deleteTask = useDeleteTaskMutation();
 
     const [draftTask, setDraftTask] = useState('');
+    const [draftPriority, setDraftPriority] = useState<Task['priority']>('medium');
 
     const showQuote = modes[currentMode]?.showQuote || false;
     const showBackground = modes[currentMode]?.showBackground || false;
@@ -46,11 +64,11 @@ export const CenterContent: React.FC = () => {
                         </div>
 
                         <form
-                            className="mb-4 flex gap-2"
+                            className="mb-4 grid grid-cols-[1fr_auto_auto] gap-2"
                             onSubmit={(event) => {
                                 event.preventDefault();
                                 if (!draftTask.trim()) return;
-                                createTask.mutate({ text: draftTask.trim(), priority: 'medium' });
+                                createTask.mutate({ text: draftTask.trim(), priority: draftPriority });
                                 setDraftTask('');
                             }}
                         >
@@ -60,6 +78,30 @@ export const CenterContent: React.FC = () => {
                                 className="bg-black/30"
                                 placeholder="Add the next thing to finish"
                             />
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        className={`h-10 gap-1 border px-3 ${getPriorityOption(draftPriority)?.className}`}
+                                        aria-label={`New task priority: ${getPriorityOption(draftPriority)?.label}`}
+                                    >
+                                        <Flag className="h-3.5 w-3.5" />
+                                        <span className="text-xs">{getPriorityOption(draftPriority)?.label}</span>
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="bg-black/90 backdrop-blur-md">
+                                    {priorityOptions.map((option) => (
+                                        <DropdownMenuItem
+                                            key={option.value}
+                                            onClick={() => setDraftPriority(option.value)}
+                                            className={draftPriority === option.value ? 'bg-white/10' : ''}
+                                        >
+                                            {option.label}
+                                        </DropdownMenuItem>
+                                    ))}
+                                </DropdownMenuContent>
+                            </DropdownMenu>
                             <Button type="submit" size="icon">
                                 <Plus className="h-4 w-4" />
                             </Button>
@@ -86,6 +128,30 @@ export const CenterContent: React.FC = () => {
                                         <Check className="h-3 w-3" />
                                     </button>
                                     <span className="flex-1">{task.text}</span>
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                            <button
+                                                className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-1 text-[11px] leading-none ${getPriorityOption(task.priority)?.className}`}
+                                                aria-label={`Task priority: ${getPriorityOption(task.priority)?.label}`}
+                                            >
+                                                <Flag className="h-3 w-3" />
+                                                {getPriorityOption(task.priority)?.label}
+                                            </button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end" className="bg-black/90 backdrop-blur-md">
+                                            {priorityOptions.map((option) => (
+                                                <DropdownMenuItem
+                                                    key={option.value}
+                                                    onClick={() =>
+                                                        updateTask.mutate({ id: task.id, priority: option.value })
+                                                    }
+                                                    className={task.priority === option.value ? 'bg-white/10' : ''}
+                                                >
+                                                    {option.label}
+                                                </DropdownMenuItem>
+                                            ))}
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
                                     <button onClick={() => deleteTask.mutate({ id: task.id })}>
                                         <Trash2 className="h-4 w-4 text-neutral-500 transition hover:text-white" />
                                     </button>
