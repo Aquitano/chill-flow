@@ -75,10 +75,12 @@ export const focusSessions = pgTable(
         userId: text('userId').notNull(),
         mode: text('mode').notNull(),
         status: text('status').notNull().default('active'),
-        durationSeconds: integer('durationSeconds').notNull(),
+        plannedDurationSeconds: integer('plannedDurationSeconds').notNull(),
+        elapsedSeconds: integer('elapsedSeconds').notNull().default(0),
         trackId: text('trackId'),
         startedAt: timestamp('startedAt').defaultNow().notNull(),
         completedAt: timestamp('completedAt'),
+        canceledAt: timestamp('canceledAt'),
     },
     (table) => [index('FocusSessions_userId_status_completedAt_idx').on(table.userId, table.status, table.completedAt)],
 );

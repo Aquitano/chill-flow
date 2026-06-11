@@ -91,7 +91,8 @@ export function useSessionStartMutation() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: (input: { mode: string; durationSeconds: number; trackId: string | null }) => api.sessions.start(input),
+        mutationFn: (input: { mode: string; plannedDurationSeconds: number; trackId: string | null }) =>
+            api.sessions.start(input),
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
         },
@@ -102,7 +103,18 @@ export function useSessionCompleteMutation() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: (input: { id: string; durationSeconds?: number }) => api.sessions.complete(input),
+        mutationFn: (input: { id: string; elapsedSeconds: number }) => api.sessions.complete(input),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
+        },
+    });
+}
+
+export function useSessionCancelMutation() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (input: { id: string }) => api.sessions.cancel(input),
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
         },

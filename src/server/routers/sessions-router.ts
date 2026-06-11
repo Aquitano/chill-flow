@@ -1,7 +1,7 @@
 import { j, protectedDataProcedure, protectedMutationProcedure } from '../jstack';
 import { appRepository } from '../repositories/app-repository';
 import { createRateLimitMiddleware } from '../security/rate-limit';
-import { completeSessionInputSchema, startSessionInputSchema } from '../validation/app';
+import { cancelSessionInputSchema, completeSessionInputSchema, startSessionInputSchema } from '../validation/app';
 
 export const sessionsRouter = j.router({
     list: protectedDataProcedure.query(async ({ c, ctx }) => {
@@ -22,6 +22,13 @@ export const sessionsRouter = j.router({
         .use(createRateLimitMiddleware({ key: 'sessions:complete', limit: 30, windowMs: 60_000 }))
         .input(completeSessionInputSchema)
         .mutation(async ({ c, ctx, input }) => {
-            return c.superjson(await appRepository.completeSession(ctx.db, ctx.userId, input.id, input.durationSeconds));
+            return c.superjson(await appRepository.completeSession(ctx.db, ctx.userId, input.id, input.elapsedSeconds));
+        }),
+
+    cancel: protectedMutationProcedure
+        .use(createRateLimitMiddleware({ key: 'sessions:cancel', limit: 30, windowMs: 60_000 }))
+        .input(cancelSessionInputSchema)
+        .mutation(async ({ c, ctx, input }) => {
+            return c.superjson(await appRepository.cancelSession(ctx.db, ctx.userId, input.id));
         }),
 });

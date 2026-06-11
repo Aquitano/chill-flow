@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+    cancelSessionInputSchema,
+    completeSessionInputSchema,
     startSessionInputSchema,
     trackLookupInputSchema,
     updatePreferencesInputSchema,
@@ -35,11 +37,31 @@ describe('backend validation', () => {
         expect(
             startSessionInputSchema.safeParse({
                 mode: 'DeepWork',
-                durationSeconds: 30,
+                plannedDurationSeconds: 30,
                 trackId: 'deep-focus-01',
             }).success,
         ).toBe(false);
 
         expect(trackLookupInputSchema.safeParse({ id: 'unknown-track' }).success).toBe(false);
+    });
+
+    it('requires explicit elapsed seconds when completing sessions', () => {
+        expect(
+            completeSessionInputSchema.safeParse({
+                id: crypto.randomUUID(),
+                elapsedSeconds: 25 * 60,
+            }).success,
+        ).toBe(true);
+
+        expect(
+            completeSessionInputSchema.safeParse({
+                id: crypto.randomUUID(),
+            }).success,
+        ).toBe(false);
+    });
+
+    it('validates session cancellation payloads', () => {
+        expect(cancelSessionInputSchema.safeParse({ id: crypto.randomUUID() }).success).toBe(true);
+        expect(cancelSessionInputSchema.safeParse({ id: 'not-a-uuid' }).success).toBe(false);
     });
 });

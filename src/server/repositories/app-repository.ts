@@ -80,7 +80,9 @@ function mapSession(row: typeof focusSessions.$inferSelect): FocusSession {
     return {
         id: row.id,
         mode: row.mode,
-        durationSeconds: row.durationSeconds,
+        status: row.status as FocusSession['status'],
+        plannedDurationSeconds: row.plannedDurationSeconds,
+        elapsedSeconds: row.elapsedSeconds,
         trackId: row.trackId,
         completedAt: asIsoString(row.completedAt ?? row.startedAt),
     };
@@ -276,8 +278,21 @@ export const appRepository = {
         return storedSessions.map(mapSession);
     },
 
-    async startSession(database: Database, userId: string, input: Pick<FocusSession, 'mode' | 'durationSeconds' | 'trackId'>) {
+    async startSession(
+        database: Database,
+        userId: string,
+        input: Pick<FocusSession, 'mode' | 'plannedDurationSeconds' | 'trackId'>,
+    ) {
         const now = new Date();
+
+        await database
+            .update(focusSessions)
+            .set({
+                status: 'canceled',
+                canceledAt: now,
+            })
+            .where(and(eq(focusSessions.userId, userId), eq(focusSessions.status, 'active')));
+
         const [createdSession] = await database
             .insert(focusSessions)
             .values({
@@ -285,10 +300,12 @@ export const appRepository = {
                 userId,
                 mode: input.mode,
                 status: 'active',
-                durationSeconds: input.durationSeconds,
+                plannedDurationSeconds: input.plannedDurationSeconds,
+                elapsedSeconds: 0,
                 trackId: input.trackId,
                 startedAt: now,
                 completedAt: null,
+                canceledAt: null,
             })
             .returning();
 
@@ -299,13 +316,13 @@ export const appRepository = {
         return mapSession(createdSession);
     },
 
-    async completeSession(database: Database, userId: string, sessionId: string, durationSeconds?: number) {
+    async completeSession(database: Database, userId: string, sessionId: string, elapsedSeconds: number) {
         const [completedSession] = await database
             .update(focusSessions)
             .set({
                 status: 'completed',
                 completedAt: new Date(),
-                durationSeconds: durationSeconds ?? undefined,
+                elapsedSeconds,
             })
             .where(and(eq(focusSessions.userId, userId), eq(focusSessions.id, sessionId), eq(focusSessions.status, 'active')))
             .returning();
@@ -313,17 +330,30 @@ export const appRepository = {
         return completedSession ? mapSession(completedSession) : null;
     },
 
+    async cancelSession(database: Database, userId: string, sessionId: string) {
+        const [canceledSession] = await database
+            .update(focusSessions)
+            .set({
+                status: 'canceled',
+                canceledAt: new Date(),
+            })
+            .where(and(eq(focusSessions.userId, userId), eq(focusSessions.id, sessionId), eq(focusSessions.status, 'active')))
+            .returning();
+
+        return canceledSession ? mapSession(canceledSession) : null;
+    },
+
     async getSessionSummary(database: Database, userId: string) {
         const storedSessions = await database
             .select({
-                durationSeconds: focusSessions.durationSeconds,
+                elapsedSeconds: focusSessions.elapsedSeconds,
                 completedAt: focusSessions.completedAt,
             })
             .from(focusSessions)
             .where(and(eq(focusSessions.userId, userId), eq(focusSessions.status, 'completed'), isNotNull(focusSessions.completedAt)));
 
         const totalSessions = storedSessions.length;
-        const totalMinutes = Math.round(storedSessions.reduce((sum, session) => sum + session.durationSeconds, 0) / 60);
+        const totalMinutes = Math.round(storedSessions.reduce((sum, session) => sum + session.elapsedSeconds, 0) / 60);
         const distinctDays = storedSessions.map((session) => asIsoString(session.completedAt).slice(0, 10));
 
         return {

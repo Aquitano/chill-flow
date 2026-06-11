@@ -8,7 +8,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
-import { useSessionCompleteMutation, useSessionStartMutation } from '@/hooks/use-app-data';
+import { useSessionCancelMutation, useSessionCompleteMutation, useSessionStartMutation } from '@/hooks/use-app-data';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TimerMode, useAppStore } from '@/store/app-store';
 import { motion } from 'framer-motion';
@@ -42,6 +42,8 @@ export const TimerPanel: React.FC = () => {
 
     const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const activeSessionIdRef = useRef<string | null>(null);
+    const activeSessionStartedAtRef = useRef<number | null>(null);
+    const activeSessionPlannedSecondsRef = useRef(0);
     const previousTimerActiveRef = useRef(false);
 
     const [customHours, setCustomHours] = useState('0');
@@ -50,6 +52,18 @@ export const TimerPanel: React.FC = () => {
 
     const startSession = useSessionStartMutation();
     const completeSession = useSessionCompleteMutation();
+    const cancelSession = useSessionCancelMutation();
+
+    const cancelActiveSession = () => {
+        if (!activeSessionIdRef.current) {
+            return;
+        }
+
+        cancelSession.mutate({ id: activeSessionIdRef.current });
+        activeSessionIdRef.current = null;
+        activeSessionStartedAtRef.current = null;
+        activeSessionPlannedSecondsRef.current = 0;
+    };
 
     useEffect(() => {
         if (timerIntervalRef.current) {
@@ -71,16 +85,25 @@ export const TimerPanel: React.FC = () => {
     }, [timerActive, decrementTimer]);
 
     useEffect(() => {
-        if (timerActive && !previousTimerActiveRef.current && timerMode === 'focus' && !activeSessionIdRef.current) {
+        if (
+            timerActive &&
+            !previousTimerActiveRef.current &&
+            timerMode === 'focus' &&
+            selectedPreset !== '∞' &&
+            timerSeconds >= 60 &&
+            !activeSessionIdRef.current
+        ) {
             startSession.mutate(
                 {
                     mode: currentMode,
-                    durationSeconds: timerSeconds,
+                    plannedDurationSeconds: timerSeconds,
                     trackId: currentTrack?.id ?? null,
                 },
                 {
                     onSuccess: (session) => {
                         activeSessionIdRef.current = session.id;
+                        activeSessionStartedAtRef.current = Date.now();
+                        activeSessionPlannedSecondsRef.current = timerSeconds;
                     },
                 },
             );
@@ -90,14 +113,12 @@ export const TimerPanel: React.FC = () => {
             if (activeSessionIdRef.current) {
                 completeSession.mutate({
                     id: activeSessionIdRef.current,
-                    durationSeconds: selectedPreset === '∞' ? 0 : timerSeconds,
+                    elapsedSeconds: activeSessionPlannedSecondsRef.current,
                 });
                 activeSessionIdRef.current = null;
+                activeSessionStartedAtRef.current = null;
+                activeSessionPlannedSecondsRef.current = 0;
             }
-        }
-
-        if (!timerActive && timerSeconds > 0 && !startSession.isPending) {
-            activeSessionIdRef.current = null;
         }
 
         previousTimerActiveRef.current = timerActive;
@@ -154,6 +175,10 @@ export const TimerPanel: React.FC = () => {
             pauseTimer();
         }
 
+        if (timerMode === 'focus') {
+            cancelActiveSession();
+        }
+
         setTimerMode(mode);
 
         if (dropdownOpen) {
@@ -202,7 +227,10 @@ export const TimerPanel: React.FC = () => {
                                 variant="outline"
                                 size="icon"
                                 className="h-9 w-9 rounded-full border-white/20 bg-black/40"
-                                onClick={resetTimer}
+                                onClick={() => {
+                                    cancelActiveSession();
+                                    resetTimer();
+                                }}
                             >
                                 <RefreshCcw size={16} />
                             </Button>
@@ -299,7 +327,10 @@ export const TimerPanel: React.FC = () => {
                                 variant="outline"
                                 size="icon"
                                 className="h-9 w-9 rounded-full border-white/20 bg-black/40"
-                                onClick={resetTimer}
+                                onClick={() => {
+                                    cancelActiveSession();
+                                    resetTimer();
+                                }}
                             >
                                 <RefreshCcw size={16} />
                             </Button>

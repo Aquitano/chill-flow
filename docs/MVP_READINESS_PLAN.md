@@ -72,6 +72,8 @@ Status: done.
 
 ## Phase 2: Fix Focus Session Lifecycle
 
+Status: in progress. Finite focus countdown sessions now use planned versus elapsed duration, pause/resume keeps one active session, reset cancels the active session, new starts cancel older active rows, and completed focus countdowns persist elapsed focus time. Pomodoro-specific lifecycle analytics remain open.
+
 ### Problems
 
 - Completed sessions can be recorded with `durationSeconds: 0` when the timer reaches zero.
@@ -81,19 +83,19 @@ Status: done.
 
 ### Work
 
-- Define session fields semantically:
+- [x] Define session fields semantically:
   - `plannedDurationSeconds`
   - `elapsedSeconds`
   - `status`: `active`, `completed`, `canceled`
-- Update schema and repository methods accordingly.
-- Track active session start time in the client.
-- Complete focus sessions with actual elapsed duration.
-- Cancel or expire abandoned active sessions.
+- [x] Update schema and repository methods accordingly.
+- [x] Track active session start time in the client.
+- [x] Complete focus sessions with actual elapsed duration.
+- [x] Cancel or expire abandoned active sessions.
 - Count Pomodoro analytics with two separate concepts:
   - focused minutes count focus blocks only
   - completed Pomodoro sessions count a full focus-plus-break cycle
 - Persist enough Pomodoro lifecycle state to know whether a focus-plus-break cycle was completed.
-- Add tests for start, pause, cancel, complete, and summary calculations.
+- [ ] Add tests for start, pause, cancel, complete, and summary calculations.
 
 ### Acceptance Criteria
 
@@ -459,8 +461,8 @@ Recommended implementation sequence for the next agent:
 - [x] No broken internal routes.
 - [x] Authenticated user can open `/app`.
 - [ ] User can play at least one production-ready track.
-- [ ] User can start, pause, complete, and reset a focus session.
-- [ ] Completed focus time is recorded accurately.
+- [x] User can start, pause, complete, and reset a focus session.
+- [x] Completed focus time is recorded accurately.
 - [ ] Pomodoro focused minutes and completed cycles are counted intentionally.
 - [x] User can create, complete, and delete tasks.
 - [x] User can set simple task priority.

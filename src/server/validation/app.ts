@@ -64,13 +64,17 @@ export const updatePreferencesInputSchema = z.object({
 
 export const startSessionInputSchema = z.object({
     mode: modeSchema,
-    durationSeconds: z.number().int().min(60).max(12 * 60 * 60),
+    plannedDurationSeconds: z.number().int().min(60).max(12 * 60 * 60),
     trackId: nullableTrackIdSchema,
 });
 
 export const completeSessionInputSchema = z.object({
     id: taskIdSchema,
-    durationSeconds: z.number().int().min(0).max(12 * 60 * 60).optional(),
+    elapsedSeconds: z.number().int().min(0).max(12 * 60 * 60),
+});
+
+export const cancelSessionInputSchema = z.object({
+    id: taskIdSchema,
 });
 
 export const trackLookupInputSchema = z.object({

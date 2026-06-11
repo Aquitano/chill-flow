@@ -49,9 +49,10 @@ export const api = {
     },
     sessions: {
         list: () => unwrap<SessionPayload>(client.sessions.list.$get()),
-        start: (input: { mode: string; durationSeconds: number; trackId: string | null }) =>
+        start: (input: { mode: string; plannedDurationSeconds: number; trackId: string | null }) =>
             unwrap<FocusSession>(client.sessions.start.$post(input)),
-        complete: (input: { id: string; durationSeconds?: number }) =>
+        complete: (input: { id: string; elapsedSeconds: number }) =>
             unwrap<FocusSession | null>(client.sessions.complete.$post(input)),
+        cancel: (input: { id: string }) => unwrap<FocusSession | null>(client.sessions.cancel.$post(input)),
     },
 };

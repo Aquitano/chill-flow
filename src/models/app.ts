@@ -66,7 +66,9 @@ export interface AppMode {
 export interface FocusSession {
     id: string;
     mode: string;
-    durationSeconds: number;
+    status: 'active' | 'completed' | 'canceled';
+    plannedDurationSeconds: number;
+    elapsedSeconds: number;
     trackId: string | null;
     completedAt: string;
 }
