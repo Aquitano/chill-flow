@@ -1,8 +1,12 @@
 'use client';
 
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { useCreateTaskMutation, useDeleteTaskMutation, useUpdateTaskMutation } from '@/hooks/use-app-data';
 import { useAppStore } from '@/store/app-store';
 import { AnimatePresence, motion } from 'framer-motion';
-import { useEffect } from 'react';
+import { Check, Plus, Trash2 } from 'lucide-react';
+import { useState } from 'react';
 import { TimerPanel } from './TimerPanel';
 
 export const CenterContent: React.FC = () => {
@@ -10,16 +14,17 @@ export const CenterContent: React.FC = () => {
     const modes = useAppStore((state) => state.modes);
     const currentQuote = useAppStore((state) => state.currentQuote);
     const tasks = useAppStore((state) => state.tasks);
+    const sessionSummary = useAppStore((state) => state.sessionSummary);
+
+    const createTask = useCreateTaskMutation();
+    const updateTask = useUpdateTaskMutation();
+    const deleteTask = useDeleteTaskMutation();
+
+    const [draftTask, setDraftTask] = useState('');
 
     const showQuote = modes[currentMode]?.showQuote || false;
     const showBackground = modes[currentMode]?.showBackground || false;
     const showTasks = modes[currentMode]?.showTasks || false;
-
-    useEffect(() => {
-        console.log('CenterContent - Mode:', currentMode);
-        console.log('CenterContent - Show tasks:', showTasks);
-        console.log('CenterContent - Tasks:', tasks);
-    }, [currentMode, showTasks, tasks]);
 
     return (
         <div className="relative z-10 flex h-full w-full flex-col items-center justify-center p-6">
@@ -27,15 +32,65 @@ export const CenterContent: React.FC = () => {
                 {showTasks && (
                     <motion.aside
                         key="tasks-panel"
-                        className="absolute top-24 left-6 z-20 w-64 rounded-md bg-black/70 p-4 shadow-lg"
+                        className="absolute top-24 left-6 z-20 w-80 rounded-2xl border border-white/10 bg-black/70 p-4 shadow-lg"
                         initial={{ x: -50, opacity: 0 }}
                         animate={{ x: 0, opacity: 1 }}
                         exit={{ x: -50, opacity: 0 }}
                         transition={{ duration: 0.3 }}
                     >
-                        <h3 className="mb-2 text-lg font-semibold">Tasks</h3>
-                        <ul className="space-y-1 text-sm text-stone-200">
-                            {tasks?.map((task) => <li key={task.id}>• {task.text}</li>)}
+                        <div className="mb-3 flex items-center justify-between">
+                            <h3 className="text-lg font-semibold">Tasks</h3>
+                            <span className="text-xs text-neutral-400">
+                                {tasks.filter((task) => !task.isCompleted).length} open
+                            </span>
+                        </div>
+
+                        <form
+                            className="mb-4 flex gap-2"
+                            onSubmit={(event) => {
+                                event.preventDefault();
+                                if (!draftTask.trim()) return;
+                                createTask.mutate({ text: draftTask.trim(), priority: 'medium' });
+                                setDraftTask('');
+                            }}
+                        >
+                            <Input
+                                value={draftTask}
+                                onChange={(event) => setDraftTask(event.target.value)}
+                                className="bg-black/30"
+                                placeholder="Add the next thing to finish"
+                            />
+                            <Button type="submit" size="icon">
+                                <Plus className="h-4 w-4" />
+                            </Button>
+                        </form>
+
+                        <ul className="space-y-2 text-sm text-stone-200">
+                            {tasks.map((task) => (
+                                <li
+                                    key={task.id}
+                                    className={`flex items-center gap-2 rounded-xl border border-white/5 px-3 py-2 ${
+                                        task.isCompleted ? 'bg-emerald-500/10 text-neutral-400' : 'bg-white/5'
+                                    }`}
+                                >
+                                    <button
+                                        className={`flex h-6 w-6 items-center justify-center rounded-full border ${
+                                            task.isCompleted
+                                                ? 'border-emerald-500 bg-emerald-500 text-black'
+                                                : 'border-white/20'
+                                        }`}
+                                        onClick={() =>
+                                            updateTask.mutate({ id: task.id, isCompleted: !task.isCompleted })
+                                        }
+                                    >
+                                        <Check className="h-3 w-3" />
+                                    </button>
+                                    <span className="flex-1">{task.text}</span>
+                                    <button onClick={() => deleteTask.mutate({ id: task.id })}>
+                                        <Trash2 className="h-4 w-4 text-neutral-500 transition hover:text-white" />
+                                    </button>
+                                </li>
+                            ))}
                         </ul>
                     </motion.aside>
                 )}
@@ -54,19 +109,35 @@ export const CenterContent: React.FC = () => {
                 transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
             >
                 <AnimatePresence mode="wait">
-                    {showQuote && currentQuote && (
+                    {showQuote && currentQuote ? (
                         <motion.div
                             key="quote-display"
-                            className="absolute inset-0 z-20 flex flex-col items-center justify-center px-4 text-center"
+                            className="absolute inset-0 z-20 flex flex-col items-center justify-center px-10 text-center"
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: -20 }}
                             transition={{ duration: 0.8 }}
                         >
-                            <h1 className="mb-4 bg-gradient-to-r from-white to-stone-300 bg-clip-text font-serif text-4xl font-bold text-transparent md:text-5xl">
+                            <h1 className="mb-4 bg-linear-to-r from-white to-stone-300 bg-clip-text font-serif text-4xl font-bold text-transparent md:text-5xl">
                                 {currentQuote.text}
                             </h1>
-                            <p className="text-xl text-stone-400 italic md:text-2xl">— {currentQuote.author} —</p>
+                            <p className="text-xl text-stone-400 italic md:text-2xl">{currentQuote.author}</p>
+                        </motion.div>
+                    ) : (
+                        <motion.div
+                            key="summary-display"
+                            className="flex max-w-md flex-col items-center text-center"
+                            initial={{ opacity: 0, y: 12 }}
+                            animate={{ opacity: 1, y: 0 }}
+                        >
+                            <p className="text-xs tracking-[0.3em] text-neutral-500 uppercase">Current pace</p>
+                            <h2 className="mt-4 text-4xl font-semibold">
+                                {sessionSummary.totalMinutes} minutes focused
+                            </h2>
+                            <p className="mt-3 text-sm text-neutral-400">
+                                {sessionSummary.totalSessions} sessions completed in this workspace. Keep the current
+                                loop running and stack another block.
+                            </p>
                         </motion.div>
                     )}
                 </AnimatePresence>

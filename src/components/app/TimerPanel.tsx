@@ -8,6 +8,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { useSessionCompleteMutation, useSessionStartMutation } from '@/hooks/use-app-data';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TimerMode, useAppStore } from '@/store/app-store';
 import { motion } from 'framer-motion';
@@ -23,6 +24,7 @@ export const TimerPanel: React.FC = () => {
     const timerActive = useAppStore((state) => state.timerActive);
     const selectedPreset = useAppStore((state) => state.selectedPreset);
     const pomodoroSettings = useAppStore((state) => state.pomodoroSettings);
+    const currentTrack = useAppStore((state) => state.currentTrack);
 
     const setTimerMode = useAppStore((state) => state.setTimerMode);
     const startTimer = useAppStore((state) => state.startTimer);
@@ -39,10 +41,15 @@ export const TimerPanel: React.FC = () => {
     const sessionsId = useId();
 
     const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+    const activeSessionIdRef = useRef<string | null>(null);
+    const previousTimerActiveRef = useRef(false);
 
     const [customHours, setCustomHours] = useState('0');
     const [customMins, setCustomMins] = useState('25');
     const [dropdownOpen, setDropdownOpen] = useState(false);
+
+    const startSession = useSessionStartMutation();
+    const completeSession = useSessionCompleteMutation();
 
     useEffect(() => {
         if (timerIntervalRef.current) {
@@ -62,6 +69,48 @@ export const TimerPanel: React.FC = () => {
             }
         };
     }, [timerActive, decrementTimer]);
+
+    useEffect(() => {
+        if (timerActive && !previousTimerActiveRef.current && timerMode === 'focus' && !activeSessionIdRef.current) {
+            startSession.mutate(
+                {
+                    mode: currentMode,
+                    durationSeconds: timerSeconds,
+                    trackId: currentTrack?.id ?? null,
+                },
+                {
+                    onSuccess: (session) => {
+                        activeSessionIdRef.current = session.id;
+                    },
+                },
+            );
+        }
+
+        if (!timerActive && previousTimerActiveRef.current && timerMode === 'focus' && timerSeconds === 0) {
+            if (activeSessionIdRef.current) {
+                completeSession.mutate({
+                    id: activeSessionIdRef.current,
+                    durationSeconds: selectedPreset === '∞' ? 0 : timerSeconds,
+                });
+                activeSessionIdRef.current = null;
+            }
+        }
+
+        if (!timerActive && timerSeconds > 0 && !startSession.isPending) {
+            activeSessionIdRef.current = null;
+        }
+
+        previousTimerActiveRef.current = timerActive;
+    }, [
+        completeSession,
+        currentMode,
+        currentTrack?.id,
+        selectedPreset,
+        startSession,
+        timerActive,
+        timerMode,
+        timerSeconds,
+    ]);
 
     const formatTime = (seconds: number): string => {
         const hours = Math.floor(seconds / 3600);
