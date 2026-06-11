@@ -1,35 +1,27 @@
-import { z } from 'zod';
-import { j, protectedProcedure } from '../jstack';
+import { j, protectedDataProcedure, protectedMutationProcedure } from '../jstack';
 import { appRepository } from '../repositories/app-repository';
+import { createRateLimitMiddleware } from '../security/rate-limit';
+import { completeSessionInputSchema, startSessionInputSchema } from '../validation/app';
 
 export const sessionsRouter = j.router({
-    list: protectedProcedure.query(({ c, ctx }) => {
+    list: protectedDataProcedure.query(async ({ c, ctx }) => {
         return c.superjson({
-            sessions: appRepository.listSessions(ctx.userId),
-            summary: appRepository.getSessionSummary(ctx.userId),
+            sessions: await appRepository.listSessions(ctx.db, ctx.userId),
+            summary: await appRepository.getSessionSummary(ctx.db, ctx.userId),
         });
     }),
 
-    start: protectedProcedure
-        .input(
-            z.object({
-                mode: z.string(),
-                durationSeconds: z.number().int().nonnegative(),
-                trackId: z.string().nullable(),
-            }),
-        )
-        .mutation(({ c, ctx, input }) => {
-            return c.superjson(appRepository.startSession(ctx.userId, input));
+    start: protectedMutationProcedure
+        .use(createRateLimitMiddleware({ key: 'sessions:start', limit: 15, windowMs: 60_000 }))
+        .input(startSessionInputSchema)
+        .mutation(async ({ c, ctx, input }) => {
+            return c.superjson(await appRepository.startSession(ctx.db, ctx.userId, input));
         }),
 
-    complete: protectedProcedure
-        .input(
-            z.object({
-                id: z.string(),
-                durationSeconds: z.number().int().nonnegative().optional(),
-            }),
-        )
-        .mutation(({ c, ctx, input }) => {
-            return c.superjson(appRepository.completeSession(ctx.userId, input.id, input.durationSeconds));
+    complete: protectedMutationProcedure
+        .use(createRateLimitMiddleware({ key: 'sessions:complete', limit: 30, windowMs: 60_000 }))
+        .input(completeSessionInputSchema)
+        .mutation(async ({ c, ctx, input }) => {
+            return c.superjson(await appRepository.completeSession(ctx.db, ctx.userId, input.id, input.durationSeconds));
         }),
 });

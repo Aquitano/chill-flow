@@ -1,59 +1,48 @@
-import { z } from 'zod';
-import { j, protectedProcedure } from '../jstack';
+import { j, protectedDataProcedure, protectedMutationProcedure } from '../jstack';
 import { appRepository } from '../repositories/app-repository';
+import { createRateLimitMiddleware } from '../security/rate-limit';
+import {
+    completeTaskInputSchema,
+    createTaskInputSchema,
+    deleteTaskInputSchema,
+    updateTaskInputSchema,
+} from '../validation/app';
 
 export const tasksRouter = j.router({
-    list: protectedProcedure.query(({ c, ctx }) => {
-        return c.superjson(appRepository.listTasks(ctx.userId));
+    list: protectedDataProcedure.query(async ({ c, ctx }) => {
+        return c.superjson(await appRepository.listTasks(ctx.db, ctx.userId));
     }),
 
-    create: protectedProcedure
-        .input(
-            z.object({
-                text: z.string().min(1).max(120),
-                priority: z.enum(['low', 'medium', 'high']).default('medium'),
-            }),
-        )
-        .mutation(({ c, ctx, input }) => {
-            return c.superjson(appRepository.createTask(ctx.userId, input));
+    create: protectedMutationProcedure
+        .use(createRateLimitMiddleware({ key: 'tasks:create', limit: 30, windowMs: 60_000 }))
+        .input(createTaskInputSchema)
+        .mutation(async ({ c, ctx, input }) => {
+            return c.superjson(await appRepository.createTask(ctx.db, ctx.userId, input));
         }),
 
-    update: protectedProcedure
-        .input(
-            z.object({
-                id: z.string(),
-                text: z.string().min(1).max(120).optional(),
-                priority: z.enum(['low', 'medium', 'high']).optional(),
-                isCompleted: z.boolean().optional(),
-            }),
-        )
-        .mutation(({ c, ctx, input }) => {
-            const task = appRepository.updateTask(ctx.userId, input.id, input);
+    update: protectedMutationProcedure
+        .use(createRateLimitMiddleware({ key: 'tasks:update', limit: 60, windowMs: 60_000 }))
+        .input(updateTaskInputSchema)
+        .mutation(async ({ c, ctx, input }) => {
+            const task = await appRepository.updateTask(ctx.db, ctx.userId, input.id, input);
             return c.superjson(task);
         }),
 
-    complete: protectedProcedure
-        .input(
-            z.object({
-                id: z.string(),
-                isCompleted: z.boolean(),
-            }),
-        )
-        .mutation(({ c, ctx, input }) => {
-            const task = appRepository.updateTask(ctx.userId, input.id, {
+    complete: protectedMutationProcedure
+        .use(createRateLimitMiddleware({ key: 'tasks:complete', limit: 60, windowMs: 60_000 }))
+        .input(completeTaskInputSchema)
+        .mutation(async ({ c, ctx, input }) => {
+            const task = await appRepository.updateTask(ctx.db, ctx.userId, input.id, {
                 isCompleted: input.isCompleted,
             });
 
             return c.superjson(task);
         }),
 
-    delete: protectedProcedure
-        .input(
-            z.object({
-                id: z.string(),
-            }),
-        )
-        .mutation(({ c, ctx, input }) => {
-            return c.superjson(appRepository.deleteTask(ctx.userId, input.id));
+    delete: protectedMutationProcedure
+        .use(createRateLimitMiddleware({ key: 'tasks:delete', limit: 30, windowMs: 60_000 }))
+        .input(deleteTaskInputSchema)
+        .mutation(async ({ c, ctx, input }) => {
+            return c.superjson(await appRepository.deleteTask(ctx.db, ctx.userId, input.id));
         }),
 });

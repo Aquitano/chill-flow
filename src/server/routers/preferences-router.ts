@@ -1,27 +1,17 @@
-import { z } from 'zod';
-import { j, protectedProcedure } from '../jstack';
+import { j, protectedDataProcedure, protectedMutationProcedure } from '../jstack';
 import { appRepository } from '../repositories/app-repository';
+import { createRateLimitMiddleware } from '../security/rate-limit';
+import { updatePreferencesInputSchema } from '../validation/app';
 
 export const preferencesRouter = j.router({
-    get: protectedProcedure.query(({ c, ctx }) => {
-        return c.superjson(appRepository.getPreferences(ctx.userId));
+    get: protectedDataProcedure.query(async ({ c, ctx }) => {
+        return c.superjson(await appRepository.getPreferences(ctx.db, ctx.userId));
     }),
 
-    update: protectedProcedure
-        .input(
-            z.object({
-                defaultMode: z.string().optional(),
-                autoPlay: z.boolean().optional(),
-                transitionSpeed: z.number().optional(),
-                volume: z.number().optional(),
-                showNotifications: z.boolean().optional(),
-                theme: z.enum(['light', 'dark', 'system']).optional(),
-                selectedTrackId: z.string().nullable().optional(),
-                selectedBackgroundId: z.string().nullable().optional(),
-                likedTrackIds: z.array(z.string()).optional(),
-            }),
-        )
-        .mutation(({ c, ctx, input }) => {
-            return c.superjson(appRepository.updatePreferences(ctx.userId, input));
+    update: protectedMutationProcedure
+        .use(createRateLimitMiddleware({ key: 'preferences:update', limit: 20, windowMs: 60_000 }))
+        .input(updatePreferencesInputSchema)
+        .mutation(async ({ c, ctx, input }) => {
+            return c.superjson(await appRepository.updatePreferences(ctx.db, ctx.userId, input));
         }),
 });
