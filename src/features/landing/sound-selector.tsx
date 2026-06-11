@@ -36,7 +36,7 @@ export const SoundSelector = () => (
         </div>
 
         <Link href="/soundscapes" className="block w-full">
-            <Button className="w-full bg-gradient-to-r from-indigo-600 to-violet-600 text-white">
+            <Button className="w-full bg-linear-to-r from-indigo-600 to-violet-600 text-white">
                 Browse All Soundscapes
             </Button>
         </Link>
@@ -48,9 +48,9 @@ const TrackItem = ({ title, description, isPlaying = false }: Track) => (
         <div className="flex items-center gap-4">
             <button className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-500/20">
                 {isPlaying ? (
-                    <Play size={16} className="text-amber-400" />
-                ) : (
                     <Pause size={16} className="text-amber-400" />
+                ) : (
+                    <Play size={16} className="text-amber-400" />
                 )}
             </button>
             <div>

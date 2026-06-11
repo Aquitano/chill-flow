@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import Image from 'next/image';
+import Link from 'next/link';
 
 interface BackgroundOption {
     id: string;
@@ -69,7 +70,7 @@ const BackgroundTile = ({ option, onClick }: BackgroundTileProps) => {
                     alt={name}
                 />
             ) : (
-                <div className="flex h-36 items-center justify-center bg-gradient-to-br from-slate-900 to-slate-800">
+                <div className="flex h-36 items-center justify-center bg-linear-to-br from-slate-900 to-slate-800">
                     <span className="text-sm text-white/70">{name}</span>
                 </div>
             )}
@@ -92,16 +93,16 @@ export const BackgroundSelector = () => {
 
             <div className="mb-6 grid grid-cols-2 gap-3">
                 {backgroundOptions.map((option) => (
-                    <BackgroundTile
-                        key={option.id}
-                        option={option}
-                        onClick={() => console.log(`Selected: ${option.name}`)}
-                    />
+                    <BackgroundTile key={option.id} option={option} />
                 ))}
             </div>
 
-            <Button variant="outline" className="w-full bg-gradient-to-r from-indigo-600 to-violet-600 text-white">
-                Browse All Visuals
+            <Button
+                asChild
+                variant="outline"
+                className="w-full bg-linear-to-r from-indigo-600 to-violet-600 text-white"
+            >
+                <Link href="/app">Open Visual Workspace</Link>
             </Button>
         </div>
     );

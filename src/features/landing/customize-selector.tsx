@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
 import { GaugeCircle, Settings, Volume2, Waves } from 'lucide-react';
+import Link from 'next/link';
 import { useState } from 'react';
 
 interface SliderControlProps {
@@ -111,12 +112,21 @@ export const CustomizerView = () => {
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-                <Button className="bg-gradient-to-r from-indigo-600 to-violet-600 text-white transition-transform hover:scale-[1.02]">
-                    Apply Changes
+                <Button
+                    asChild
+                    className="w-full bg-linear-to-r from-indigo-600 to-violet-600 text-white transition-transform hover:scale-[1.02]"
+                >
+                    <Link href="/app">Apply Changes</Link>
                 </Button>
-                <Button variant="outline" className="border-white/10 bg-white/5 text-white/80 hover:bg-white/10">
-                    <Settings size={15} className="mr-2 opacity-80" />
-                    Advanced
+                <Button
+                    asChild
+                    variant="outline"
+                    className="w-full border-white/10 bg-white/5 text-white/80 hover:bg-white/10"
+                >
+                    <Link href="/account">
+                        <Settings size={15} className="mr-2 opacity-80" />
+                        Advanced
+                    </Link>
                 </Button>
             </div>
         </div>

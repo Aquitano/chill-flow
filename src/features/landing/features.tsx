@@ -126,20 +126,20 @@ export function FeaturesSection() {
                 <motion.h2
                     custom={0.3}
                     variants={titleVariants}
-                    className="mb-2 bg-gradient-to-r from-white to-white/70 bg-clip-text text-3xl font-bold text-transparent md:text-4xl"
+                    className="mb-2 bg-linear-to-r from-white to-white/70 bg-clip-text text-3xl font-bold text-transparent md:text-4xl"
                 >
                     Let the beats guide your flow.
                 </motion.h2>
                 <motion.p
                     custom={0.5}
                     variants={titleVariants}
-                    className="bg-gradient-to-r from-stone-400 to-stone-300 bg-clip-text font-serif text-4xl text-transparent md:text-5xl"
+                    className="bg-linear-to-r from-stone-400 to-stone-300 bg-clip-text font-serif text-4xl text-transparent md:text-5xl"
                 >
                     Curated sounds for every mood.
                 </motion.p>
             </motion.section>
 
-            <section className="py-24 sm:py-32">
+            <section id="features" className="py-24 sm:py-32">
                 <div ref={ref} className="mx-auto max-w-7xl px-6 lg:px-8">
                     <motion.div
                         initial="hidden"

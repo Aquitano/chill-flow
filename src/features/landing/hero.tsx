@@ -20,7 +20,7 @@ export function Hero() {
                     >
                         <h1 className="mb-2 text-4xl font-medium md:text-5xl">
                             Flow into{' '}
-                            <span className="bg-gradient-to-r from-stone-400 to-stone-500 bg-clip-text p-1 font-serif text-5xl text-transparent italic md:text-6xl">
+                            <span className="bg-linear-to-r from-stone-400 to-stone-500 bg-clip-text p-1 font-serif text-5xl text-transparent italic md:text-6xl">
                                 productivity
                             </span>
                         </h1>

@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Play } from 'lucide-react';
+import Link from 'next/link';
 import { useState } from 'react';
 
 type PresetId = 'focus' | 'relax' | 'sleep' | 'create' | 'meditate';
@@ -126,7 +127,7 @@ export const PresetsView = () => {
                 ))}
             </div>
 
-            <div className="mb-6 rounded-lg border border-white/10 bg-gradient-to-b from-black/40 to-black/20 p-5 backdrop-blur-md transition-all duration-300">
+            <div className="mb-6 rounded-lg border border-white/10 bg-linear-to-b from-black/40 to-black/20 p-5 backdrop-blur-md transition-all duration-300">
                 <div className="mb-4 flex items-center justify-between">
                     <h4 className="text-lg font-medium text-white/90">{currentPreset.details.title}</h4>
                     <Button
@@ -153,9 +154,10 @@ export const PresetsView = () => {
                         Customize
                     </Button>
                     <Button
+                        asChild
                         size="sm"
                         className={cn(
-                            'bg-gradient-to-r text-white transition-transform duration-200 hover:scale-105',
+                            'bg-linear-to-r text-white transition-transform duration-200 hover:scale-105',
                             activePreset === 'focus'
                                 ? 'from-indigo-600 to-indigo-500'
                                 : activePreset === 'relax'
@@ -167,7 +169,7 @@ export const PresetsView = () => {
                                       : 'from-emerald-600 to-emerald-500',
                         )}
                     >
-                        Start Now
+                        <Link href="/app">Start Now</Link>
                     </Button>
                 </div>
             </div>

@@ -1,56 +1,56 @@
-import { Button } from '@/components/ui/button';
-import { IconBrandDiscord, IconBrandGithub, IconBrandTwitter } from '@tabler/icons-react';
+import Link from 'next/link';
 
 export function Footer() {
     const links = [
         {
             title: 'Product',
-            items: ['Features', 'Pricing', 'Changelog'],
+            items: [
+                { label: 'Workspace', href: '/app' },
+                { label: 'Soundscapes', href: '/soundscapes' },
+                { label: 'Account', href: '/account' },
+            ],
         },
         {
-            title: 'Resources',
-            items: ['Sound Library', 'Focus Guide', 'Blog'],
+            title: 'Explore',
+            items: [
+                { label: 'Features', href: '/#features' },
+                { label: 'How It Works', href: '/#how-it-works' },
+                { label: 'README', href: 'https://github.com/aquitano/chill-flow' },
+            ],
         },
         {
-            title: 'Support',
-            items: ['About', 'Legal', 'Contact'],
+            title: 'Status',
+            items: [
+                { label: 'Demo Mode Ready', href: '/app' },
+                { label: 'Task Persistence', href: '/app' },
+                { label: 'Track Catalog', href: '/soundscapes' },
+            ],
         },
     ];
 
     return (
         <footer className="relative z-10 mt-32">
-            <div className="absolute inset-x-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
+            <div className="absolute inset-x-0 h-px bg-linear-to-r from-transparent via-white/20 to-transparent" />
             <div className="mx-auto max-w-7xl px-8 py-12">
                 <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-4">
                     <div>
                         <div className="text-xl font-bold">ChillFlow</div>
                         <p className="mt-4 text-sm text-neutral-400">
-                            Your daily companion for focus and productivity through carefully curated sounds.
+                            A real focus workspace with music, timer blocks, task tracking, and persistent preferences.
                         </p>
-                        <div className="mt-6 flex gap-4">
-                            <Button variant="ghost" size="icon" className="hover:text-neutral-100">
-                                <IconBrandTwitter className="h-5 w-5" />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="hover:text-neutral-100">
-                                <IconBrandGithub className="h-5 w-5" />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="hover:text-neutral-100">
-                                <IconBrandDiscord className="h-5 w-5" />
-                            </Button>
-                        </div>
                     </div>
                     {links.map((section) => (
                         <div key={section.title}>
                             <h3 className="font-semibold">{section.title}</h3>
                             <ul className="mt-4 space-y-2">
                                 {section.items.map((item) => (
-                                    <li key={item}>
-                                        <a
-                                            href="#"
+                                    <li key={item.label}>
+                                        <Link
+                                            href={item.href}
                                             className="text-sm text-neutral-400 transition-colors hover:text-neutral-100"
                                         >
-                                            {item}
-                                        </a>
+                                            {item.label}
+                                        </Link>
                                     </li>
                                 ))}
                             </ul>
@@ -58,8 +58,8 @@ export function Footer() {
                     ))}
                 </div>
                 <div className="mt-3 pt-8 text-center text-sm text-neutral-400">
-                    <div className="inset-x-0 mb-4 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
-                    <p>© 2025 ChillFlow. All rights reserved.</p>
+                    <div className="inset-x-0 mb-4 h-px bg-linear-to-r from-transparent via-white/20 to-transparent" />
+                    <p>© 2026 ChillFlow. Built for focused work.</p>
                 </div>
             </div>
         </footer>

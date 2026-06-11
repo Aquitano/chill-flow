@@ -143,7 +143,7 @@ export const StepsSection = () => {
             <div className="relative py-15">
                 <div className="container mx-auto px-4">
                     <div className="mb-16 text-center">
-                        <h2 className="mb-4 bg-gradient-to-r from-white via-white/90 to-white/70 bg-clip-text text-4xl font-bold tracking-tight text-transparent">
+                        <h2 className="mb-4 bg-linear-to-r from-white via-white/90 to-white/70 bg-clip-text text-4xl font-bold tracking-tight text-transparent">
                             <span className="font-inter">Create Your Perfect Flow State</span>
                         </h2>
                         <p className="mx-auto max-w-2xl text-neutral-400">
@@ -153,7 +153,7 @@ export const StepsSection = () => {
                 </div>
             </div>
 
-            <section className="relative pl-6 lg:pl-0">
+            <section id="how-it-works" className="relative pl-6 lg:pl-0">
                 {steps.map((step, index) => (
                     <div key={step.id} className={cn('py-6', index === 2 || index === 3 ? 'lg:py-16' : 'lg:py-32')}>
                         <div className="mx-auto max-w-none px-6">
@@ -161,7 +161,7 @@ export const StepsSection = () => {
                                 className={cn(
                                     'relative h-fit lg:ml-[10%]',
                                     index === 3 &&
-                                        'lg:rounded-xl lg:border lg:border-white/[0.08] lg:bg-gradient-to-br lg:from-gray-900/50 lg:via-gray-900/30 lg:to-black/50 lg:p-12 lg:pt-16 lg:pb-16 lg:shadow-[0_0_1px_1px_rgba(0,0,0,0.3)] lg:backdrop-blur-xl lg:backdrop-saturate-150',
+                                        'lg:rounded-xl lg:border lg:border-white/8 lg:bg-linear-to-br lg:from-gray-900/50 lg:via-gray-900/30 lg:to-black/50 lg:p-12 lg:pt-16 lg:pb-16 lg:shadow-[0_0_1px_1px_rgba(0,0,0,0.3)] lg:backdrop-blur-xl lg:backdrop-saturate-150',
                                 )}
                             >
                                 {/* Timeline indicators */}
@@ -258,15 +258,15 @@ export const StepsSection = () => {
                                             <div
                                                 className={cn(
                                                     'mb-4 text-xl font-medium',
-                                                    `bg-gradient-to-r ${step.color} bg-clip-text text-transparent`,
+                                                    `bg-linear-to-r ${step.color} bg-clip-text text-transparent`,
                                                 )}
                                             >
                                                 {step.subtitle}
                                             </div>
                                             <h2
                                                 className={cn(
-                                                    index === 2 || index === 3 ? 'max-w-full' : 'max-w-[800px]',
-                                                    'mb-8 bg-gradient-to-b from-white to-white/50 bg-clip-text py-2 text-4xl font-bold tracking-tight text-transparent md:text-5xl lg:text-6xl',
+                                                    index === 2 || index === 3 ? 'max-w-full' : 'max-w-200',
+                                                    'mb-8 bg-linear-to-b from-white to-white/50 bg-clip-text py-2 text-4xl font-bold tracking-tight text-transparent md:text-5xl lg:text-6xl',
                                                     index === 1 ? 'lg:pr-12' : '',
                                                     index === 3 ? 'leading-[1.6]' : 'leading-[1.1]',
                                                 )}
@@ -283,13 +283,10 @@ export const StepsSection = () => {
                                             </p>
 
                                             {index === 0 && (
-                                                <Link
-                                                    href="/checkout"
-                                                    className="relative z-20 inline-block" // Added z-index and relative positioning
-                                                >
+                                                <Link href="/app" className="relative z-20 inline-block">
                                                     <Button
                                                         variant="default"
-                                                        className="w-full bg-gradient-to-r from-indigo-600 to-violet-600 px-6 py-2 text-white sm:w-auto"
+                                                        className="w-full bg-linear-to-r from-indigo-600 to-violet-600 px-6 py-2 text-white sm:w-auto"
                                                     >
                                                         <span className="flex items-center">
                                                             Start Your Flow Journey
