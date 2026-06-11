@@ -1,11 +1,16 @@
 import { appEnv } from '@/lib/env';
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
+import { NextResponse } from 'next/server';
 
-const isProtectedRoute = createRouteMatcher(['/app(.*)', '/account(.*)']);
+const isProtectedRoute = createRouteMatcher(['/app(.*)']);
 
 export default clerkMiddleware(async (auth, req) => {
     if (!appEnv.isClerkConfigured) {
         return;
+    }
+
+    if (isProtectedRoute(req) && !appEnv.isDatabaseConfigured) {
+        return NextResponse.redirect(new URL('/account', req.url));
     }
 
     if (isProtectedRoute(req)) {

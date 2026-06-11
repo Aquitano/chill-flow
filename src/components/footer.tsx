@@ -21,7 +21,7 @@ export function Footer() {
         {
             title: 'Status',
             items: [
-                { label: 'Demo Mode Ready', href: '/app' },
+                { label: 'Auth Required', href: '/account' },
                 { label: 'Task Persistence', href: '/app' },
                 { label: 'Track Catalog', href: '/soundscapes' },
             ],
