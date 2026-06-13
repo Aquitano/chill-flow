@@ -45,12 +45,12 @@ export const CenterContent: React.FC = () => {
     const showTasks = modes[currentMode]?.showTasks || false;
 
     return (
-        <div className="relative z-10 flex h-full w-full flex-col items-center justify-center p-6">
+        <div className="absolute inset-0 z-10 flex min-h-screen w-full flex-col items-center justify-center px-4 py-24 sm:px-6">
             <AnimatePresence mode="wait">
                 {showTasks && (
                     <motion.aside
                         key="tasks-panel"
-                        className="absolute top-24 left-6 z-20 w-80 rounded-2xl border border-white/10 bg-black/70 p-4 shadow-lg"
+                        className="absolute top-24 right-4 left-4 z-20 max-h-[calc(100vh-11rem)] overflow-y-auto rounded-2xl border border-white/10 bg-black/70 p-4 shadow-lg backdrop-blur-md sm:right-auto sm:left-6 sm:w-80"
                         initial={{ x: -50, opacity: 0 }}
                         animate={{ x: 0, opacity: 1 }}
                         exit={{ x: -50, opacity: 0 }}
@@ -167,7 +167,7 @@ export const CenterContent: React.FC = () => {
             </AnimatePresence>
 
             <motion.div
-                className={`relative z-10 flex h-[600px] w-[600px] flex-col items-center justify-center rounded-full ${
+                className={`relative z-10 flex aspect-square w-[min(600px,calc(100vw-2rem),calc(100vh-13rem))] flex-col items-center justify-center rounded-full ${
                     showBackground ? 'border-2 border-white/20 bg-black/60 shadow-lg' : 'border-none bg-black'
                 }`}
                 initial={{ scale: 0.9, opacity: 0 }}

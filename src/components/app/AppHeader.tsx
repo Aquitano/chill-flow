@@ -11,16 +11,19 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useAppStore } from '@/store/app-store';
 import { motion } from 'framer-motion';
-import { Activity, BarChart3, ChevronDown, Menu } from 'lucide-react';
+import { Activity, BarChart3, ChevronDown, ListTodo, Menu } from 'lucide-react';
 
 export const AppHeader: React.FC = () => {
     const modes = useAppStore((state) => state.modes);
     const currentMode = useAppStore((state) => state.currentMode);
+    const tasks = useAppStore((state) => state.tasks);
     const sessionSummary = useAppStore((state) => state.sessionSummary);
     const toggleMenu = useAppStore((state) => state.toggleMenu);
     const setMode = useAppStore((state) => state.setMode);
 
     const currentModeSettings = modes[currentMode];
+    const openTaskCount = tasks.filter((task) => !task.isCompleted).length;
+    const tasksVisible = currentModeSettings?.showTasks ?? false;
 
     return (
         <motion.header
@@ -62,6 +65,21 @@ export const AppHeader: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-3">
+                <Button
+                    variant={tasksVisible ? 'secondary' : 'ghost'}
+                    className="gap-2 rounded-full border border-white/10 bg-white/5 px-3 text-sm"
+                    onClick={() => {
+                        if (!tasksVisible) {
+                            setMode('TaskDrive');
+                        }
+                    }}
+                    aria-pressed={tasksVisible}
+                    aria-label={tasksVisible ? 'Tasks are visible' : 'Open tasks in TaskDrive mode'}
+                >
+                    <ListTodo size={16} />
+                    <span className="hidden sm:inline">Tasks</span>
+                    <span className="rounded-full bg-black/30 px-1.5 py-0.5 text-xs tabular-nums">{openTaskCount}</span>
+                </Button>
                 <div className="hidden items-center gap-2 rounded-full bg-emerald-500/10 px-4 py-1.5 text-sm text-emerald-200 md:flex">
                     <BarChart3 size={16} />
                     <span>{sessionSummary.totalSessions} sessions</span>
