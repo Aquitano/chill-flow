@@ -11,9 +11,16 @@ import { Input } from '@/components/ui/input';
 import { useSessionCancelMutation, useSessionCompleteMutation, useSessionStartMutation } from '@/hooks/use-app-data';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TimerMode, useAppStore } from '@/store/app-store';
+import {
+    FocusSessionEvent,
+    FocusSessionState,
+    MIN_RECORDED_SECONDS,
+    focusSessionReducer,
+    initialFocusSessionState,
+} from '@/lib/focus-session';
 import { motion } from 'framer-motion';
 import { ChevronDown, Clock, Pause, Play, RefreshCcw, Settings } from 'lucide-react';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 
 export const TimerPanel: React.FC = () => {
     const currentMode = useAppStore((state) => state.currentMode);
@@ -42,9 +49,8 @@ export const TimerPanel: React.FC = () => {
 
     const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const activeSessionIdRef = useRef<string | null>(null);
-    const activeSessionStartedAtRef = useRef<number | null>(null);
-    const activeSessionPlannedSecondsRef = useRef(0);
-    const previousTimerActiveRef = useRef(false);
+    const sessionStateRef = useRef<FocusSessionState>(initialFocusSessionState);
+    const prevFocusRunningRef = useRef(false);
 
     const [customHours, setCustomHours] = useState('0');
     const [customMins, setCustomMins] = useState('25');
@@ -54,16 +60,51 @@ export const TimerPanel: React.FC = () => {
     const completeSession = useSessionCompleteMutation();
     const cancelSession = useSessionCancelMutation();
 
-    const cancelActiveSession = () => {
-        if (!activeSessionIdRef.current) {
-            return;
-        }
+    // Mutations and contextual values change identity each render; mirror them through
+    // refs so the session dispatcher can stay stable and avoid stale closures.
+    const mutationsRef = useRef({ start: startSession, complete: completeSession, cancel: cancelSession });
+    mutationsRef.current = { start: startSession, complete: completeSession, cancel: cancelSession };
+    const contextRef = useRef({ mode: currentMode, trackId: currentTrack?.id ?? null });
+    contextRef.current = { mode: currentMode, trackId: currentTrack?.id ?? null };
 
-        cancelSession.mutate({ id: activeSessionIdRef.current });
-        activeSessionIdRef.current = null;
-        activeSessionStartedAtRef.current = null;
-        activeSessionPlannedSecondsRef.current = 0;
-    };
+    // Single entry point for the focus-session lifecycle: feed an event to the pure
+    // reducer, persist the next state, and execute the resulting API command.
+    const dispatchSession = useCallback((event: FocusSessionEvent) => {
+        const { state, command } = focusSessionReducer(sessionStateRef.current, event);
+        sessionStateRef.current = state;
+
+        const { start, complete, cancel } = mutationsRef.current;
+        switch (command.type) {
+            case 'START_SESSION':
+                start.mutate(
+                    {
+                        mode: contextRef.current.mode,
+                        plannedDurationSeconds: command.plannedSeconds,
+                        trackId: contextRef.current.trackId,
+                    },
+                    {
+                        onSuccess: (session) => {
+                            activeSessionIdRef.current = session.id;
+                        },
+                    },
+                );
+                break;
+            case 'COMPLETE_SESSION':
+                if (activeSessionIdRef.current) {
+                    complete.mutate({ id: activeSessionIdRef.current, elapsedSeconds: command.elapsedSeconds });
+                    activeSessionIdRef.current = null;
+                }
+                break;
+            case 'CANCEL_SESSION':
+                if (activeSessionIdRef.current) {
+                    cancel.mutate({ id: activeSessionIdRef.current });
+                    activeSessionIdRef.current = null;
+                }
+                break;
+            default:
+                break;
+        }
+    }, []);
 
     useEffect(() => {
         if (timerIntervalRef.current) {
@@ -84,54 +125,54 @@ export const TimerPanel: React.FC = () => {
         };
     }, [timerActive, decrementTimer]);
 
+    // Translate timer-state transitions into focus-session lifecycle events. A "focus
+    // phase" is any running focus countdown — finite or infinite focus mode, or a
+    // Pomodoro focus block (not a break). This records Pomodoro and ∞ focus time, which
+    // previously went completely untracked.
     useEffect(() => {
-        if (
-            timerActive &&
-            !previousTimerActiveRef.current &&
-            timerMode === 'focus' &&
-            selectedPreset !== '∞' &&
-            timerSeconds >= 60 &&
-            !activeSessionIdRef.current
-        ) {
-            startSession.mutate(
-                {
-                    mode: currentMode,
-                    plannedDurationSeconds: timerSeconds,
-                    trackId: currentTrack?.id ?? null,
-                },
-                {
-                    onSuccess: (session) => {
-                        activeSessionIdRef.current = session.id;
-                        activeSessionStartedAtRef.current = Date.now();
-                        activeSessionPlannedSecondsRef.current = timerSeconds;
-                    },
-                },
-            );
-        }
+        const isFocusPhase = timerMode === 'focus' || (timerMode === 'pomodoro' && !pomodoroSettings.isBreak);
+        const focusRunning = timerActive && isFocusPhase;
+        const wasRunning = prevFocusRunningRef.current;
+        const now = Date.now();
 
-        if (!timerActive && previousTimerActiveRef.current && timerMode === 'focus' && timerSeconds === 0) {
-            if (activeSessionIdRef.current) {
-                completeSession.mutate({
-                    id: activeSessionIdRef.current,
-                    elapsedSeconds: activeSessionPlannedSecondsRef.current,
-                });
-                activeSessionIdRef.current = null;
-                activeSessionStartedAtRef.current = null;
-                activeSessionPlannedSecondsRef.current = 0;
+        if (!wasRunning && focusRunning) {
+            if (sessionStateRef.current.status === 'paused') {
+                dispatchSession({ type: 'RESUME', atMs: now });
+            } else {
+                const isInfinite = selectedPreset === '∞';
+                if (isInfinite || timerSeconds >= MIN_RECORDED_SECONDS) {
+                    dispatchSession({ type: 'START', plannedSeconds: isInfinite ? 0 : timerSeconds, atMs: now });
+                }
+            }
+        } else if (wasRunning && !focusRunning) {
+            if (timerActive) {
+                // Still active but no longer a focus phase → Pomodoro focus rolled into a
+                // break: the focus block finished.
+                dispatchSession({ type: 'COMPLETE', atMs: now });
+            } else if (timerMode === 'focus' && timerSeconds === 0) {
+                // Finite focus countdown reached zero.
+                dispatchSession({ type: 'COMPLETE', atMs: now });
+            } else {
+                // Timer paused by the user; keep the session resumable.
+                dispatchSession({ type: 'PAUSE', atMs: now });
             }
         }
 
-        previousTimerActiveRef.current = timerActive;
-    }, [
-        completeSession,
-        currentMode,
-        currentTrack?.id,
-        selectedPreset,
-        startSession,
-        timerActive,
-        timerMode,
-        timerSeconds,
-    ]);
+        prevFocusRunningRef.current = focusRunning;
+    }, [timerActive, timerMode, pomodoroSettings.isBreak, timerSeconds, selectedPreset, dispatchSession]);
+
+    // Best-effort flush when the tab is being closed/navigated away mid-session so the
+    // focus time isn't silently lost. (Hard closes may not always deliver the request.)
+    useEffect(() => {
+        const handlePageHide = () => {
+            if (sessionStateRef.current.status === 'idle' || !activeSessionIdRef.current) {
+                return;
+            }
+            dispatchSession({ type: 'COMPLETE', atMs: Date.now() });
+        };
+        window.addEventListener('pagehide', handlePageHide);
+        return () => window.removeEventListener('pagehide', handlePageHide);
+    }, [dispatchSession]);
 
     const formatTime = (seconds: number): string => {
         const hours = Math.floor(seconds / 3600);
@@ -175,9 +216,8 @@ export const TimerPanel: React.FC = () => {
             pauseTimer();
         }
 
-        if (timerMode === 'focus') {
-            cancelActiveSession();
-        }
+        // Switching timer modes abandons any in-flight focus block (focus or Pomodoro).
+        dispatchSession({ type: 'CANCEL' });
 
         setTimerMode(mode);
 
@@ -228,7 +268,7 @@ export const TimerPanel: React.FC = () => {
                                 size="icon"
                                 className="h-9 w-9 rounded-full border-white/20 bg-black/40"
                                 onClick={() => {
-                                    cancelActiveSession();
+                                    dispatchSession({ type: 'CANCEL' });
                                     resetTimer();
                                 }}
                             >
@@ -328,7 +368,7 @@ export const TimerPanel: React.FC = () => {
                                 size="icon"
                                 className="h-9 w-9 rounded-full border-white/20 bg-black/40"
                                 onClick={() => {
-                                    cancelActiveSession();
+                                    dispatchSession({ type: 'CANCEL' });
                                     resetTimer();
                                 }}
                             >

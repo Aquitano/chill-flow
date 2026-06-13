@@ -27,6 +27,7 @@ class AudioEngineImpl {
     private isPlaying = false;
     private volumeNormalized = 0.5; // 0..1 persisted
     private muted = false;
+    private loopEnabled = false;
     private loadToken = 0;
 
     // Debug (dev-only no-op in production)
@@ -112,7 +113,7 @@ class AudioEngineImpl {
         const el = new Audio();
         el.crossOrigin = 'anonymous';
         el.preload = 'auto';
-        el.loop = false;
+        el.loop = this.loopEnabled;
         // @ts-expect-error playsInline may be missing in lib dom types
         el.playsInline = true;
 
@@ -465,6 +466,22 @@ class AudioEngineImpl {
 
     getMasterVolume(): number {
         return this.volumeNormalized;
+    }
+
+    /**
+     * Enable/disable seamless looping of the current track. When enabled the media
+     * element repeats itself and does not emit an `ended` event.
+     */
+    setLoop(value: boolean): void {
+        this.loopEnabled = value;
+        if (this.mediaElement) {
+            this.mediaElement.loop = value;
+        }
+        this.debugLogger.debug('Playback', 'Loop set', { loop: value });
+    }
+
+    getLoop(): boolean {
+        return this.loopEnabled;
     }
 
     mute(): void {

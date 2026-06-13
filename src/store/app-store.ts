@@ -59,6 +59,7 @@ interface AppState {
     pomodoroTimerSeconds: number;
 
     togglePlay: () => void;
+    setIsPlaying: (playing: boolean) => void;
     setVolume: (volume: number[]) => void;
     toggleMenu: () => void;
     setMenuOpen: (open: boolean) => void;
@@ -167,6 +168,7 @@ export const useAppStore = create<AppState>()(
         },
 
         togglePlay: () => set((state) => ({ isPlaying: !state.isPlaying }), false, 'togglePlay'),
+        setIsPlaying: (playing) => set({ isPlaying: playing }, false, 'setIsPlaying'),
         setVolume: (volume) => set({ volume }, false, 'setVolume'),
         toggleMenu: () => set((state) => ({ isMenuOpen: !state.isMenuOpen }), false, 'toggleMenu'),
         setMenuOpen: (open) => set({ isMenuOpen: open }, false, 'setMenuOpen'),

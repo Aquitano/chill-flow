@@ -7,7 +7,7 @@ import { useAudioEngineState } from '@/lib/audio/useAudioEngine';
 import { useAppStore } from '@/store/app-store';
 import { motion } from 'framer-motion';
 import { Heart, Music, Pause, Play, Repeat, SkipBack, SkipForward, ThumbsDown, Volume2 } from 'lucide-react';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 export const PlayerControls: React.FC = () => {
     const { engine, state: audio } = useAudioEngineState();
@@ -16,6 +16,7 @@ export const PlayerControls: React.FC = () => {
     const isPlayingStore = useAppStore((state) => state.isPlaying);
     const volume = useAppStore((state) => state.volume);
     const togglePlay = useAppStore((state) => state.togglePlay);
+    const setIsPlaying = useAppStore((state) => state.setIsPlaying);
     const setVolume = useAppStore((state) => state.setVolume);
     const currentTrack = useAppStore((state) => state.currentTrack);
     const likedTrackIds = useAppStore((state) => state.likedTrackIds);
@@ -46,36 +47,65 @@ export const PlayerControls: React.FC = () => {
         }
     }, [engine, volume]);
 
+    // The Zustand store's `isPlaying` is the single source of truth for playback
+    // intent. The engine is driven FROM the store (below), so any path that flips
+    // `isPlaying` — the player button, the focus timer's startTimer, etc. — actually
+    // starts audio. A ref mirrors the latest intent for use inside async callbacks.
+    const isPlayingRef = useRef(isPlayingStore);
     useEffect(() => {
-        if (isPlayingStore !== audio.isPlaying) {
-            togglePlay();
-        }
-    }, [audio.isPlaying, isPlayingStore, togglePlay]);
+        isPlayingRef.current = isPlayingStore;
+    }, [isPlayingStore]);
 
+    // Keep the engine's loop flag in sync with the Repeat toggle.
+    useEffect(() => {
+        engine.setLoop(repeatEnabled);
+    }, [engine, repeatEnabled]);
+
+    // Load the selected track whenever it changes, and resume playback if the user
+    // was already playing (so Skip/Next/track selection don't silently stop audio).
     useEffect(() => {
         const url = currentTrack?.audioUrl;
         if (!url) return;
 
-        engine.loadMainTrack(url).catch(() => {
-            // Playback error is surfaced by the engine debug logger.
-        });
-    }, [currentTrack?.audioUrl, engine]);
+        let cancelled = false;
+        engine
+            .loadMainTrack(url)
+            .then(() => {
+                if (cancelled || !isPlayingRef.current) return;
+                return engine.play();
+            })
+            .catch(() => {
+                // Loading/playback failed (network, CORS, codec). Reflect reality in
+                // the store so the UI shows a paused state instead of a false "playing".
+                if (!cancelled && isPlayingRef.current) setIsPlaying(false);
+            });
 
-    const handleTogglePlay = async () => {
-        try {
-            if (audio.isPlaying) {
-                engine.pause();
-                return;
-            }
+        return () => {
+            cancelled = true;
+        };
+    }, [currentTrack?.audioUrl, engine, setIsPlaying]);
 
-            if (!engine.hasMainTrack() && currentTrack?.audioUrl) {
-                await engine.loadMainTrack(currentTrack.audioUrl);
-            }
-
-            await engine.play();
-        } catch {
-            // The UI stays interactive while the debug tooling captures the failure.
+    // Drive the engine from playback intent. play() must run inside the user gesture
+    // that flipped `isPlaying` (button click / timer start), which this effect does.
+    useEffect(() => {
+        if (isPlayingStore) {
+            if (!engine.hasMainTrack()) return; // the load effect resumes once ready
+            engine.play().catch(() => setIsPlaying(false));
+        } else {
+            engine.pause();
         }
+    }, [isPlayingStore, engine, setIsPlaying]);
+
+    // When a track ends naturally (loop disabled), advance to the next one. With
+    // Repeat enabled the engine loops the element, so no `ended` event fires.
+    useEffect(() => {
+        const handleEnded = () => nextTrack();
+        engine.addEventListener('ended', handleEnded);
+        return () => engine.removeEventListener('ended', handleEnded);
+    }, [engine, nextTrack]);
+
+    const handleTogglePlay = () => {
+        togglePlay();
     };
 
     const handleLikeToggle = () => {
@@ -117,15 +147,31 @@ export const PlayerControls: React.FC = () => {
             </div>
 
             <div className="flex items-center space-x-3">
-                <Button variant="ghost" size="icon" className="rounded-full hover:bg-white/10" onClick={previousTrack}>
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    className="rounded-full hover:bg-white/10"
+                    onClick={previousTrack}
+                    aria-label="Previous track"
+                >
                     <SkipBack size={18} />
                 </Button>
 
-                <Button onClick={handleTogglePlay} className="h-10 w-10 rounded-full bg-white/20 hover:bg-white/30">
-                    {audio.isPlaying ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}
+                <Button
+                    onClick={handleTogglePlay}
+                    className="h-10 w-10 rounded-full bg-white/20 hover:bg-white/30"
+                    aria-label={isPlayingStore ? 'Pause' : 'Play'}
+                >
+                    {isPlayingStore ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}
                 </Button>
 
-                <Button variant="ghost" size="icon" className="rounded-full hover:bg-white/10" onClick={nextTrack}>
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    className="rounded-full hover:bg-white/10"
+                    onClick={nextTrack}
+                    aria-label="Next track"
+                >
                     <SkipForward size={18} />
                 </Button>
 
@@ -134,6 +180,8 @@ export const PlayerControls: React.FC = () => {
                     size="icon"
                     className={`rounded-full hover:bg-white/10 ${repeatEnabled ? 'text-emerald-400' : ''}`}
                     onClick={toggleRepeat}
+                    aria-label="Repeat track"
+                    aria-pressed={repeatEnabled}
                 >
                     <Repeat size={16} />
                 </Button>
