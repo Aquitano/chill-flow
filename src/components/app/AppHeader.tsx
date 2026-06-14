@@ -19,11 +19,13 @@ export const AppHeader: React.FC = () => {
     const tasks = useAppStore((state) => state.tasks);
     const sessionSummary = useAppStore((state) => state.sessionSummary);
     const toggleMenu = useAppStore((state) => state.toggleMenu);
+    const isMenuOpen = useAppStore((state) => state.isMenuOpen);
     const setMode = useAppStore((state) => state.setMode);
+    const isTasksOpen = useAppStore((state) => state.isTasksOpen);
+    const toggleTasks = useAppStore((state) => state.toggleTasks);
 
     const currentModeSettings = modes[currentMode];
     const openTaskCount = tasks.filter((task) => !task.isCompleted).length;
-    const tasksVisible = currentModeSettings?.showTasks ?? false;
 
     return (
         <motion.header
@@ -66,15 +68,11 @@ export const AppHeader: React.FC = () => {
 
             <div className="flex items-center gap-3">
                 <Button
-                    variant={tasksVisible ? 'secondary' : 'ghost'}
+                    variant={isTasksOpen ? 'secondary' : 'ghost'}
                     className="gap-2 rounded-full border border-white/10 bg-white/5 px-3 text-sm"
-                    onClick={() => {
-                        if (!tasksVisible) {
-                            setMode('TaskDrive');
-                        }
-                    }}
-                    aria-pressed={tasksVisible}
-                    aria-label={tasksVisible ? 'Tasks are visible' : 'Open tasks in TaskDrive mode'}
+                    onClick={toggleTasks}
+                    aria-pressed={isTasksOpen}
+                    aria-label={isTasksOpen ? 'Hide tasks' : 'Show tasks'}
                 >
                     <ListTodo size={16} />
                     <span className="hidden sm:inline">Tasks</span>
@@ -86,7 +84,13 @@ export const AppHeader: React.FC = () => {
                     <span className="text-emerald-400">·</span>
                     <span>{sessionSummary.currentStreak} day streak</span>
                 </div>
-                <Button variant="ghost" size="icon" onClick={toggleMenu}>
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={toggleMenu}
+                    aria-expanded={isMenuOpen}
+                    aria-label={isMenuOpen ? 'Close menu' : 'Open menu'}
+                >
                     <Menu size={18} />
                 </Button>
             </div>

@@ -14,6 +14,32 @@ export type ModeSettings = {
 
 export type TimerMode = 'focus' | 'pomodoro';
 
+/** Cadence portion of Pomodoro settings that round-trips to the account (no runtime fields). */
+export type PomodoroCadence = Pick<
+    PomodoroSettings,
+    'focusMinutes' | 'breakMinutes' | 'longBreakMinutes' | 'sessionsBeforeLongBreak'
+>;
+
+/** Workspace timer/volume defaults restored from persisted preferences. */
+export type HydratablePreferences = {
+    volume: number;
+    timerMode: TimerMode;
+    timerPreset: string;
+    customMinutes: string;
+    pomodoroSettings: PomodoroCadence;
+};
+
+/** Resolve a preset label (and custom-minute fallback) to whole minutes; null means infinite. */
+function presetToMinutes(preset: string, customMinutes: string): number | null {
+    if (preset === '∞') return null;
+    const minutesMatch = /^(\d+)m$/.exec(preset);
+    if (minutesMatch) return parseInt(minutesMatch[1]!, 10);
+    const hoursMatch = /^(\d+)h$/.exec(preset);
+    if (hoursMatch) return parseInt(hoursMatch[1]!, 10) * 60;
+    const custom = parseInt(customMinutes, 10);
+    return Number.isFinite(custom) && custom > 0 ? custom : 25;
+}
+
 export type PomodoroSettings = {
     focusMinutes: number;
     breakMinutes: number;
@@ -34,6 +60,7 @@ interface AppState {
     repeatEnabled: boolean;
 
     isMenuOpen: boolean;
+    isTasksOpen: boolean;
 
     currentMode: string;
     modes: Record<string, ModeSettings>;
@@ -63,6 +90,8 @@ interface AppState {
     setVolume: (volume: number[]) => void;
     toggleMenu: () => void;
     setMenuOpen: (open: boolean) => void;
+    toggleTasks: () => void;
+    setTasksOpen: (open: boolean) => void;
     setMode: (mode: string) => void;
     setTracks: (tracks: Track[]) => void;
     setTasks: (tasks: Task[]) => void;
@@ -78,6 +107,7 @@ interface AppState {
     toggleRepeat: () => void;
 
     setTimerMode: (mode: TimerMode) => void;
+    hydratePreferences: (prefs: HydratablePreferences) => void;
     startTimer: () => void;
     pauseTimer: () => void;
     resetTimer: () => void;
@@ -139,6 +169,7 @@ export const useAppStore = create<AppState>()(
         volume: [50],
         repeatEnabled: false,
         isMenuOpen: false,
+        isTasksOpen: false,
         currentMode: 'DeepWork',
         modes: defaultModes,
         currentQuote: null,
@@ -172,7 +203,20 @@ export const useAppStore = create<AppState>()(
         setVolume: (volume) => set({ volume }, false, 'setVolume'),
         toggleMenu: () => set((state) => ({ isMenuOpen: !state.isMenuOpen }), false, 'toggleMenu'),
         setMenuOpen: (open) => set({ isMenuOpen: open }, false, 'setMenuOpen'),
-        setMode: (mode) => set({ currentMode: mode }, false, 'setMode'),
+        toggleTasks: () => set((state) => ({ isTasksOpen: !state.isTasksOpen }), false, 'toggleTasks'),
+        setTasksOpen: (open) => set({ isTasksOpen: open }, false, 'setTasksOpen'),
+        setMode: (mode) =>
+            set(
+                (state) => ({
+                    currentMode: mode,
+                    // Re-seed the tasks panel to the new mode's default; the Tasks button
+                    // can still toggle it afterwards within the mode. Unknown modes leave
+                    // the current panel state untouched.
+                    isTasksOpen: state.modes[mode]?.showTasks ?? state.isTasksOpen,
+                }),
+                false,
+                'setMode',
+            ),
         setTracks: (tracks) =>
             set(
                 (state) => ({
@@ -296,6 +340,35 @@ export const useAppStore = create<AppState>()(
                 'switchToPomodoroMode',
             );
         },
+
+        hydratePreferences: (prefs) =>
+            set(
+                (state) => {
+                    const focusMinutes = presetToMinutes(prefs.timerPreset, prefs.customMinutes);
+                    const focusSeconds = focusMinutes === null ? 0 : focusMinutes * 60;
+                    const pomodoroSeconds = prefs.pomodoroSettings.focusMinutes * 60;
+                    const activeSeconds = prefs.timerMode === 'focus' ? focusSeconds : pomodoroSeconds;
+
+                    return {
+                        volume: [prefs.volume],
+                        timerMode: prefs.timerMode,
+                        selectedPreset: prefs.timerPreset,
+                        customMinutes: prefs.customMinutes,
+                        focusTimerSeconds: focusSeconds,
+                        pomodoroTimerSeconds: pomodoroSeconds,
+                        timerSeconds: activeSeconds,
+                        timerActive: false,
+                        pomodoroSettings: {
+                            ...state.pomodoroSettings,
+                            ...prefs.pomodoroSettings,
+                            currentSession: 1,
+                            isBreak: false,
+                        },
+                    };
+                },
+                false,
+                'hydratePreferences',
+            ),
 
         startTimer: () => {
             const state = get();

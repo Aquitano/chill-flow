@@ -6,8 +6,21 @@ import { useUpdatePreferencesMutation } from '@/hooks/use-app-data';
 import { useAudioEngineState } from '@/lib/audio/useAudioEngine';
 import { useAppStore } from '@/store/app-store';
 import { motion } from 'framer-motion';
-import { Heart, Music, Pause, Play, Repeat, SkipBack, SkipForward, ThumbsDown, Volume2 } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { Heart, Music, Pause, Play, Repeat, SkipBack, SkipForward, ThumbsDown, Volume2, VolumeX } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+
+/** Format a number of seconds as m:ss (or h:mm:ss past an hour). */
+function formatClock(totalSeconds: number): string {
+    if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return '0:00';
+    const seconds = Math.floor(totalSeconds);
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    if (hours > 0) {
+        return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${minutes}:${secs.toString().padStart(2, '0')}`;
+}
 
 export const PlayerControls: React.FC = () => {
     const { engine, state: audio } = useAudioEngineState();
@@ -32,13 +45,18 @@ export const PlayerControls: React.FC = () => {
     const showStreak = modes[currentMode]?.showStreak ?? false;
     const isLiked = currentTrack ? likedTrackIds.includes(currentTrack.id) : false;
 
-    useEffect(() => {
-        const persisted = Math.round((engine.getMasterVolume?.() ?? 0.5) * 100);
-        if ((volume?.[0] ?? 50) !== persisted) {
-            setVolume([persisted]);
-        }
-    }, [engine, setVolume, volume]);
+    // Playback progress / scrubber state. While the user drags, `scrubValue` overrides
+    // the live currentTime so the thumb doesn't fight per-second time updates; the seek
+    // is committed (and scrubbing released) on pointer-up.
+    const duration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0;
+    const canScrub = audio.hasTrack && duration > 0;
+    const [scrubValue, setScrubValue] = useState<number | null>(null);
+    const sliderPosition = Math.min(scrubValue ?? audio.currentTime, duration || 0);
 
+    // The store's `volume` is the single source of truth — it is hydrated from the
+    // account preferences (see AppShell) and pushed down to the engine here. We do NOT
+    // read the engine's localStorage volume back into the store, so the per-account
+    // value wins across devices instead of being clobbered by a stale local value.
     useEffect(() => {
         try {
             engine.setMasterVolume((volume?.[0] ?? 50) / 100);
@@ -120,12 +138,36 @@ export const PlayerControls: React.FC = () => {
 
     return (
         <motion.div
-            className="absolute right-0 bottom-0 left-0 z-30 flex items-center justify-between gap-4 bg-black/60 p-4 backdrop-blur-md"
+            data-player-bar
+            className="absolute right-0 bottom-0 left-0 z-30 flex flex-col gap-3 bg-black/60 p-4 backdrop-blur-md"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3, duration: 0.8 }}
         >
-            <div className="flex min-w-0 items-center space-x-4">
+            <div className="flex items-center gap-3">
+                <span className="w-10 shrink-0 text-right text-[11px] tabular-nums text-stone-400">
+                    {formatClock(sliderPosition)}
+                </span>
+                <Slider
+                    value={[sliderPosition]}
+                    max={duration || 100}
+                    step={1}
+                    disabled={!canScrub}
+                    onValueChange={(next) => setScrubValue(next[0] ?? 0)}
+                    onValueCommit={(next) => {
+                        engine.seek(next[0] ?? 0);
+                        setScrubValue(null);
+                    }}
+                    aria-label="Seek"
+                    className="flex-1 cursor-pointer disabled:opacity-40"
+                />
+                <span className="w-10 shrink-0 text-[11px] tabular-nums text-stone-400">
+                    {canScrub ? formatClock(duration) : '--:--'}
+                </span>
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+                <div className="flex min-w-0 items-center space-x-4">
                 <div className="h-12 w-12 rounded-md bg-linear-to-br from-stone-400 to-stone-600 shadow-md" />
                 <div className="min-w-0 text-left">
                     <h2 className="truncate text-base font-semibold">{currentTrack?.title ?? 'Select a track'}</h2>
@@ -137,10 +179,19 @@ export const PlayerControls: React.FC = () => {
                         size="icon"
                         className={`rounded-full hover:bg-white/10 ${isLiked ? 'text-rose-400' : ''}`}
                         onClick={handleLikeToggle}
+                        disabled={!currentTrack}
+                        aria-pressed={isLiked}
+                        aria-label={isLiked ? 'Unlike track' : 'Like track'}
                     >
                         <Heart size={16} />
                     </Button>
-                    <Button variant="ghost" size="icon" className="rounded-full hover:bg-white/10" onClick={nextTrack}>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="rounded-full hover:bg-white/10"
+                        onClick={nextTrack}
+                        aria-label="Skip track"
+                    >
                         <ThumbsDown size={16} />
                     </Button>
                 </div>
@@ -189,7 +240,7 @@ export const PlayerControls: React.FC = () => {
 
             <div className="flex items-center space-x-3">
                 <div className="hidden items-center space-x-2 md:flex">
-                    <Button variant="ghost" size="icon" className="rounded-full hover:bg-white/10">
+                    <Button variant="ghost" size="icon" className="rounded-full hover:bg-white/10" aria-label="Tracks">
                         <Music size={16} />
                     </Button>
                 </div>
@@ -198,8 +249,14 @@ export const PlayerControls: React.FC = () => {
                     <button
                         onClick={() => (audio.muted ? engine.unmute() : engine.mute())}
                         title={audio.muted ? 'Unmute' : 'Mute'}
+                        aria-label={audio.muted ? 'Unmute' : 'Mute'}
+                        aria-pressed={audio.muted}
                     >
-                        <Volume2 size={16} className="text-stone-400" />
+                        {audio.muted ? (
+                            <VolumeX size={16} className="text-stone-400" />
+                        ) : (
+                            <Volume2 size={16} className="text-stone-400" />
+                        )}
                     </button>
                     <div className="w-24">
                         <Slider
@@ -207,6 +264,7 @@ export const PlayerControls: React.FC = () => {
                             onValueChange={setVolume}
                             max={100}
                             step={1}
+                            aria-label="Volume"
                             className="cursor-pointer"
                         />
                     </div>
@@ -222,6 +280,7 @@ export const PlayerControls: React.FC = () => {
                         </span>
                     </div>
                 )}
+                </div>
             </div>
         </motion.div>
     );
