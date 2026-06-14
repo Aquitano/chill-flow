@@ -8,8 +8,14 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
-import { useSessionCancelMutation, useSessionCompleteMutation, useSessionStartMutation } from '@/hooks/use-app-data';
+import {
+    usePreferencesQuery,
+    useSessionCancelMutation,
+    useSessionCompleteMutation,
+    useSessionStartMutation,
+} from '@/hooks/use-app-data';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { getNotificationPermission, requestNotificationPermission, showTimerNotification } from '@/lib/notifications';
 import { TimerMode, useAppStore } from '@/store/app-store';
 import {
     FocusSessionEvent,
@@ -32,6 +38,7 @@ export const TimerPanel: React.FC = () => {
     const selectedPreset = useAppStore((state) => state.selectedPreset);
     const pomodoroSettings = useAppStore((state) => state.pomodoroSettings);
     const currentTrack = useAppStore((state) => state.currentTrack);
+    const isTasksOpen = useAppStore((state) => state.isTasksOpen);
 
     const setTimerMode = useAppStore((state) => state.setTimerMode);
     const startTimer = useAppStore((state) => state.startTimer);
@@ -47,10 +54,17 @@ export const TimerPanel: React.FC = () => {
     const longBreakMinutesId = useId();
     const sessionsId = useId();
 
+    const preferencesQuery = usePreferencesQuery();
+    // Default to false until the real preference is loaded, so we never prompt for
+    // notification permission (or fire one) for a user who has them turned off.
+    const showNotificationsPref = preferencesQuery.data?.preferences.showNotifications ?? false;
+
     const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const activeSessionIdRef = useRef<string | null>(null);
     const sessionStateRef = useRef<FocusSessionState>(initialFocusSessionState);
     const prevFocusRunningRef = useRef(false);
+    const prevTimerSecondsRef = useRef(timerSeconds);
+    const prevIsBreakRef = useRef(pomodoroSettings.isBreak);
 
     const [customHours, setCustomHours] = useState('0');
     const [customMins, setCustomMins] = useState('25');
@@ -174,6 +188,48 @@ export const TimerPanel: React.FC = () => {
         return () => window.removeEventListener('pagehide', handlePageHide);
     }, [dispatchSession]);
 
+    // Notify on focus-countdown completion (finite focus reaching 0:00). Infinite focus
+    // (selectedPreset '∞', which also sets timerSeconds to 0) is excluded so selecting it
+    // doesn't read as a completion. Gated by the showNotifications preference + permission.
+    useEffect(() => {
+        const prevSeconds = prevTimerSecondsRef.current;
+        prevTimerSecondsRef.current = timerSeconds;
+
+        if (!showNotificationsPref) return;
+        if (timerMode === 'focus' && selectedPreset !== '∞' && prevSeconds > 0 && timerSeconds === 0) {
+            showTimerNotification('Focus session complete', 'Nice work — time to step away for a bit.');
+        }
+    }, [timerSeconds, timerMode, selectedPreset, showNotificationsPref]);
+
+    // Notify on Pomodoro phase changes. `isBreak` only flips via advancePomodoroPhase
+    // (a real phase boundary), so watching it covers focus→break and break→focus.
+    useEffect(() => {
+        const prevIsBreak = prevIsBreakRef.current;
+        prevIsBreakRef.current = pomodoroSettings.isBreak;
+
+        if (prevIsBreak === pomodoroSettings.isBreak) return;
+        if (!showNotificationsPref || timerMode !== 'pomodoro') return;
+
+        if (pomodoroSettings.isBreak) {
+            showTimerNotification('Break time', 'Focus block done — take your break.');
+        } else {
+            showTimerNotification('Back to focus', 'Break over — back into the flow.');
+        }
+    }, [pomodoroSettings.isBreak, showNotificationsPref, timerMode]);
+
+    // Start/pause the timer. On the first start with notifications enabled, ask for
+    // permission inside this gesture (browsers reject permission prompts otherwise).
+    const handleToggleTimer = useCallback(() => {
+        if (timerActive) {
+            pauseTimer();
+            return;
+        }
+        if (showNotificationsPref && getNotificationPermission() === 'default') {
+            void requestNotificationPermission();
+        }
+        startTimer();
+    }, [timerActive, pauseTimer, startTimer, showNotificationsPref]);
+
     const formatTime = (seconds: number): string => {
         const hours = Math.floor(seconds / 3600);
         const mins = Math.floor((seconds % 3600) / 60);
@@ -232,7 +288,12 @@ export const TimerPanel: React.FC = () => {
     return (
         <motion.aside
             key="timer-panel"
-            className="absolute top-24 right-6 z-20 w-72 rounded-md bg-black/70 p-4 shadow-lg"
+            // Desktop: pinned top-right (tasks sit top-left, no overlap). Narrow viewports:
+            // full-width; when the tasks panel is also visible it stacks *below* the
+            // (height-capped) tasks panel instead of colliding with it at top-24.
+            className={`absolute right-4 left-4 z-20 max-h-[46vh] w-auto overflow-y-auto rounded-md bg-black/70 p-4 shadow-lg sm:left-auto sm:right-6 sm:top-24 sm:max-h-none sm:w-72 sm:overflow-visible ${
+                isTasksOpen ? 'top-[calc(32vh+7rem)]' : 'top-24'
+            }`}
             initial={{ x: 50, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: 50, opacity: 0 }}
@@ -271,19 +332,15 @@ export const TimerPanel: React.FC = () => {
                                     dispatchSession({ type: 'CANCEL' });
                                     resetTimer();
                                 }}
+                                aria-label="Reset timer"
                             >
                                 <RefreshCcw size={16} />
                             </Button>
 
                             <Button
-                                onClick={() => {
-                                    if (timerActive) {
-                                        pauseTimer();
-                                    } else {
-                                        startTimer();
-                                    }
-                                }}
+                                onClick={handleToggleTimer}
                                 className="h-12 w-12 rounded-full bg-white/20 hover:bg-white/30"
+                                aria-label={timerActive ? 'Pause timer' : 'Start timer'}
                             >
                                 {timerActive ? <Pause size={20} /> : <Play size={20} className="ml-0.5" />}
                             </Button>
@@ -371,26 +428,27 @@ export const TimerPanel: React.FC = () => {
                                     dispatchSession({ type: 'CANCEL' });
                                     resetTimer();
                                 }}
+                                aria-label="Reset timer"
                             >
                                 <RefreshCcw size={16} />
                             </Button>
 
                             <Button
-                                onClick={() => {
-                                    if (timerActive) {
-                                        pauseTimer();
-                                    } else {
-                                        startTimer();
-                                    }
-                                }}
+                                onClick={handleToggleTimer}
                                 className="h-12 w-12 rounded-full bg-white/20 hover:bg-white/30"
+                                aria-label={timerActive ? 'Pause timer' : 'Start timer'}
                             >
                                 {timerActive ? <Pause size={20} /> : <Play size={20} className="ml-0.5" />}
                             </Button>
 
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                    <Button variant="outline" className="border-white/20 bg-black/40" size="icon">
+                                    <Button
+                                        variant="outline"
+                                        className="border-white/20 bg-black/40"
+                                        size="icon"
+                                        aria-label="Pomodoro settings"
+                                    >
                                         <Settings size={16} />
                                     </Button>
                                 </DropdownMenuTrigger>
