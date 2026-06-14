@@ -77,8 +77,6 @@ export const api = {
         create: (input: { text: string; priority: Task['priority'] }) => unwrap<Task>(client.tasks.create.$post(input)),
         update: (input: { id: string; text?: string; priority?: Task['priority']; isCompleted?: boolean }) =>
             unwrap<Task | null>(client.tasks.update.$post(input)),
-        complete: (input: { id: string; isCompleted: boolean }) =>
-            unwrap<Task | null>(client.tasks.complete.$post(input)),
         delete: (input: { id: string }) => unwrap<{ success: boolean }>(client.tasks.delete.$post(input)),
     },
     tracks: {

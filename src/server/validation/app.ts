@@ -37,11 +37,6 @@ export const updateTaskInputSchema = z
         message: 'Provide at least one task field to update.',
     });
 
-export const completeTaskInputSchema = z.object({
-    id: taskIdSchema,
-    isCompleted: z.boolean(),
-});
-
 export const deleteTaskInputSchema = z.object({
     id: taskIdSchema,
 });

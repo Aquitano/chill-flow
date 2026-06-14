@@ -125,10 +125,7 @@ export function useUpdatePreferencesMutation() {
     return useMutation({
         mutationFn: (input: Partial<UserPreferences>) => api.preferences.update(input),
         onSuccess: async () => {
-            await Promise.all([
-                queryClient.invalidateQueries({ queryKey: queryKeys.preferences }),
-                queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
-            ]);
+            await queryClient.invalidateQueries({ queryKey: queryKeys.preferences });
         },
     });
 }

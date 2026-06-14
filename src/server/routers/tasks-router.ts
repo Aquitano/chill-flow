@@ -1,12 +1,7 @@
 import { j, protectedDataProcedure, protectedMutationProcedure } from '../jstack';
 import { appRepository } from '../repositories/app-repository';
 import { createRateLimitMiddleware } from '../security/rate-limit';
-import {
-    completeTaskInputSchema,
-    createTaskInputSchema,
-    deleteTaskInputSchema,
-    updateTaskInputSchema,
-} from '../validation/app';
+import { createTaskInputSchema, deleteTaskInputSchema, updateTaskInputSchema } from '../validation/app';
 
 export const tasksRouter = j.router({
     list: protectedDataProcedure.query(async ({ c, ctx }) => {
@@ -25,17 +20,6 @@ export const tasksRouter = j.router({
         .input(updateTaskInputSchema)
         .mutation(async ({ c, ctx, input }) => {
             const task = await appRepository.updateTask(ctx.db, ctx.userId, input.id, input);
-            return c.superjson(task);
-        }),
-
-    complete: protectedMutationProcedure
-        .use(createRateLimitMiddleware({ key: 'tasks:complete', limit: 60, windowMs: 60_000 }))
-        .input(completeTaskInputSchema)
-        .mutation(async ({ c, ctx, input }) => {
-            const task = await appRepository.updateTask(ctx.db, ctx.userId, input.id, {
-                isCompleted: input.isCompleted,
-            });
-
             return c.superjson(task);
         }),
 
