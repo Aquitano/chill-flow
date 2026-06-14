@@ -58,8 +58,8 @@ export function useAudioEngineState() {
             setState((s) => ({ ...s, volume: e.detail.volume, muted: e.detail.muted }));
         };
         const handleError = (e: CustomEvent<{ message: string }>) => {
+            // PlayerControls owns the user-facing toast + retry; here we only log for diagnostics.
             debugLogger.warn('Hook', 'Audio error received in state hook', e.detail);
-            // keep state but could surface error via toast elsewhere
         };
 
         engine.addEventListener('time', handleTime);

@@ -7,7 +7,13 @@ import { useAudioEngineState } from '@/lib/audio/useAudioEngine';
 import { useAppStore } from '@/store/app-store';
 import { motion } from 'framer-motion';
 import { Heart, Music, Pause, Play, Repeat, SkipBack, SkipForward, ThumbsDown, Volume2, VolumeX } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
+
+// Single toast id so the concurrent signals for one failure (the rejected load/play
+// promise and the element's 'error' event) collapse into one notification, and a later
+// failure replaces the old toast instead of stacking.
+const AUDIO_ERROR_TOAST_ID = 'audio-error';
 
 /** Format a number of seconds as m:ss (or h:mm:ss past an hour). */
 function formatClock(totalSeconds: number): string {
@@ -20,6 +26,10 @@ function formatClock(totalSeconds: number): string {
         return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
     return `${minutes}:${secs.toString().padStart(2, '0')}`;
+}
+
+function toAudioErrorMessage(err: unknown): string {
+    return err instanceof Error && err.message ? err.message : 'Unknown audio error';
 }
 
 export const PlayerControls: React.FC = () => {
@@ -74,6 +84,55 @@ export const PlayerControls: React.FC = () => {
         isPlayingRef.current = isPlayingStore;
     }, [isPlayingStore]);
 
+    // Retry reads the track from a ref so the toast's action always targets the
+    // currently-selected track, even if it changed after the toast was raised.
+    const currentTrackRef = useRef(currentTrack);
+    useEffect(() => {
+        currentTrackRef.current = currentTrack;
+    }, [currentTrack]);
+
+    // Indirection ref breaks the reportAudioFailure <-> retryAudio cycle so the toast's
+    // Retry button always invokes the latest callback without re-rendering the toast.
+    const retryAudioRef = useRef<() => void>(() => {});
+
+    const reportAudioFailure = useCallback(
+        (message: string) => {
+            // Reflect the stopped state so the UI doesn't show a false "playing".
+            setIsPlaying(false);
+            toast.error("Couldn't play audio", {
+                id: AUDIO_ERROR_TOAST_ID,
+                description: message,
+                action: { label: 'Retry', onClick: () => retryAudioRef.current() },
+            });
+        },
+        [setIsPlaying],
+    );
+
+    const retryAudio = useCallback(() => {
+        const url = currentTrackRef.current?.audioUrl;
+        if (!url) return;
+        engine
+            .loadMainTrack(url)
+            .then(() => engine.play())
+            .then(() => setIsPlaying(true))
+            .catch((err) => reportAudioFailure(toAudioErrorMessage(err)));
+    }, [engine, setIsPlaying, reportAudioFailure]);
+
+    useEffect(() => {
+        retryAudioRef.current = retryAudio;
+    }, [retryAudio]);
+
+    // Surface runtime media errors (e.g. the stream drops mid-playback) that arrive as
+    // engine 'error' events rather than a rejected promise. Gate on play intent so a
+    // failed silent preload while idle doesn't toast.
+    useEffect(() => {
+        const handleError = (e: CustomEvent<{ message: string }>) => {
+            if (isPlayingRef.current) reportAudioFailure(e.detail.message);
+        };
+        engine.addEventListener('error', handleError);
+        return () => engine.removeEventListener('error', handleError);
+    }, [engine, reportAudioFailure]);
+
     // Keep the engine's loop flag in sync with the Repeat toggle.
     useEffect(() => {
         engine.setLoop(repeatEnabled);
@@ -92,27 +151,27 @@ export const PlayerControls: React.FC = () => {
                 if (cancelled || !isPlayingRef.current) return;
                 return engine.play();
             })
-            .catch(() => {
-                // Loading/playback failed (network, CORS, codec). Reflect reality in
-                // the store so the UI shows a paused state instead of a false "playing".
-                if (!cancelled && isPlayingRef.current) setIsPlaying(false);
+            .catch((err) => {
+                // Loading/playback failed (network, CORS, codec). Only surface it when the
+                // user actually wanted playback, so a failed idle preload stays quiet.
+                if (!cancelled && isPlayingRef.current) reportAudioFailure(toAudioErrorMessage(err));
             });
 
         return () => {
             cancelled = true;
         };
-    }, [currentTrack?.audioUrl, engine, setIsPlaying]);
+    }, [currentTrack?.audioUrl, engine, reportAudioFailure]);
 
     // Drive the engine from playback intent. play() must run inside the user gesture
     // that flipped `isPlaying` (button click / timer start), which this effect does.
     useEffect(() => {
         if (isPlayingStore) {
             if (!engine.hasMainTrack()) return; // the load effect resumes once ready
-            engine.play().catch(() => setIsPlaying(false));
+            engine.play().catch((err) => reportAudioFailure(toAudioErrorMessage(err)));
         } else {
             engine.pause();
         }
-    }, [isPlayingStore, engine, setIsPlaying]);
+    }, [isPlayingStore, engine, reportAudioFailure]);
 
     // When a track ends naturally (loop disabled), advance to the next one. With
     // Repeat enabled the engine loops the element, so no `ended` event fires.
