@@ -33,10 +33,6 @@ type RateLimitEntry = {
 const MAX_BUCKETS = 5000;
 const rateLimitBuckets = new Map<string, RateLimitEntry>();
 
-function getClientAddress(forwardedFor: string | undefined) {
-    return forwardedFor?.split(',')[0]?.trim() ?? 'anonymous';
-}
-
 export function consumeRateLimit(identifier: string, options: RateLimitOptions, now = Date.now()) {
     const key = `${options.key}:${identifier}`;
     const existingEntry = rateLimitBuckets.get(key);
@@ -71,9 +67,13 @@ export function consumeRateLimit(identifier: string, options: RateLimitOptions, 
 
 
 export function createRateLimitMiddleware(options: RateLimitOptions) {
-    return j.middleware(async ({ c, next }) => {
-        const identifier = getClientAddress(c.req.header('x-forwarded-for'));
-        const result = consumeRateLimit(identifier, options);
+    // Key on the authenticated userId (set by authMiddleware, see jstack.ts), never a
+    // client-supplied header. x-forwarded-for is spoofable, so keying on it lets a caller
+    // bypass the limit by rotating the header — and it collapses every user behind a shared
+    // proxy/NAT into one bucket. Requiring `ctx.userId` also pins this to authenticated
+    // procedures at the type level.
+    return j.middleware<{ userId: string }>(async ({ ctx, c, next }) => {
+        const result = consumeRateLimit(ctx.userId, options);
 
         c.header('X-RateLimit-Limit', String(options.limit));
         c.header('X-RateLimit-Remaining', String(Math.max(0, options.limit - result.count)));
