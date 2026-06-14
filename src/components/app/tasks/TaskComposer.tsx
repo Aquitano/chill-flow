@@ -164,7 +164,7 @@ export function TaskComposer() {
                             {PRIORITY_OPTIONS.map((option) => (
                                 <DropdownMenuItem
                                     key={option.value}
-                                    onClick={() => selectPriority(option.value)}
+                                    onSelect={() => selectPriority(option.value)}
                                     className={!tokenActive && manualPriority === option.value ? 'bg-white/10' : ''}
                                 >
                                     <Flag className={cn('h-3.5 w-3.5', PRIORITY_META[option.value].accent)} />

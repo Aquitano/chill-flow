@@ -48,7 +48,7 @@ function TaskRow({ task }: { task: Task }) {
                 {task.text}
             </span>
 
-            <div className="flex items-center gap-1 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
+            <div className="flex items-center gap-1 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <button
@@ -63,7 +63,7 @@ function TaskRow({ task }: { task: Task }) {
                         {PRIORITY_OPTIONS.map((option) => (
                             <DropdownMenuItem
                                 key={option.value}
-                                onClick={() => updateTask.mutate({ id: task.id, priority: option.value as TaskPriority })}
+                                onSelect={() => updateTask.mutate({ id: task.id, priority: option.value as TaskPriority })}
                                 className={task.priority === option.value ? 'bg-white/10' : ''}
                             >
                                 <Flag className={cn('h-3.5 w-3.5', option.accent)} />

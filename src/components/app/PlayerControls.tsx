@@ -146,7 +146,7 @@ export const PlayerControls: React.FC = () => {
         >
             <div className="flex items-center gap-3">
                 <span className="w-10 shrink-0 text-right text-[11px] tabular-nums text-stone-400">
-                    {formatClock(audio.currentTime)}
+                    {formatClock(sliderPosition)}
                 </span>
                 <Slider
                     value={[sliderPosition]}
