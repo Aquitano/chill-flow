@@ -1,7 +1,7 @@
 import { backgroundCatalog } from '@/lib/backgrounds';
 import { quotes } from '@/lib/quotes';
 import { Background, FocusSession, Task, Track, UserPreferences } from '@/models/app';
-import { and, desc, eq, isNotNull } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, ne } from 'drizzle-orm';
 import { Database } from '../db/client';
 import { DEFAULT_POMODORO_SETTINGS, focusSessions, tasks, userPreferences } from '../db/schema';
 
@@ -297,6 +297,9 @@ export const appRepository = {
     ) {
         const now = new Date();
 
+        // Supersede any prior active row so a single user has one active session. Across
+        // tabs this also cancels another tab's active row, but that tab can still record
+        // its real focus time later — completeSession matches by id regardless of status.
         await database
             .update(focusSessions)
             .set({
@@ -329,14 +332,19 @@ export const appRepository = {
     },
 
     async completeSession(database: Database, userId: string, sessionId: string, elapsedSeconds: number) {
+        // Match by id even when the row is no longer 'active' — a concurrent startSession
+        // in another tab may have flipped it to 'canceled'. That focus time is real and
+        // must still be recorded. The `status != 'completed'` guard keeps this idempotent
+        // (a re-complete, e.g. from the pagehide flush, matches no row and returns null).
         const [completedSession] = await database
             .update(focusSessions)
             .set({
                 status: 'completed',
                 completedAt: new Date(),
+                canceledAt: null,
                 elapsedSeconds,
             })
-            .where(and(eq(focusSessions.userId, userId), eq(focusSessions.id, sessionId), eq(focusSessions.status, 'active')))
+            .where(and(eq(focusSessions.userId, userId), eq(focusSessions.id, sessionId), ne(focusSessions.status, 'completed')))
             .returning();
 
         return completedSession ? mapSession(completedSession) : null;

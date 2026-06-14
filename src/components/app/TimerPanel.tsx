@@ -27,6 +27,7 @@ import {
 import { motion } from 'framer-motion';
 import { ChevronDown, Clock, Pause, Play, RefreshCcw, Settings } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { toast } from 'sonner';
 
 export const TimerPanel: React.FC = () => {
     const currentMode = useAppStore((state) => state.currentMode);
@@ -105,7 +106,20 @@ export const TimerPanel: React.FC = () => {
                 break;
             case 'COMPLETE_SESSION':
                 if (activeSessionIdRef.current) {
-                    complete.mutate({ id: activeSessionIdRef.current, elapsedSeconds: command.elapsedSeconds });
+                    complete.mutate(
+                        { id: activeSessionIdRef.current, elapsedSeconds: command.elapsedSeconds },
+                        {
+                            // A null result means no row was recorded (already completed, or
+                            // truly gone) — surface it instead of silently dropping the time.
+                            onSuccess: (session) => {
+                                if (!session) {
+                                    toast.warning("Couldn't save your focus time", {
+                                        description: 'This session may have been replaced in another tab.',
+                                    });
+                                }
+                            },
+                        },
+                    );
                     activeSessionIdRef.current = null;
                 }
                 break;
