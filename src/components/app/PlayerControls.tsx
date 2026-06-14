@@ -6,7 +6,7 @@ import { useUpdatePreferencesMutation } from '@/hooks/use-app-data';
 import { useAudioEngineState } from '@/lib/audio/useAudioEngine';
 import { useAppStore } from '@/store/app-store';
 import { motion } from 'framer-motion';
-import { Heart, Music, Pause, Play, Repeat, SkipBack, SkipForward, ThumbsDown, Volume2, VolumeX } from 'lucide-react';
+import { Heart, Pause, Play, Repeat, SkipBack, SkipForward, Volume2, VolumeX } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -244,15 +244,6 @@ export const PlayerControls: React.FC = () => {
                     >
                         <Heart size={16} />
                     </Button>
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="rounded-full hover:bg-white/10"
-                        onClick={nextTrack}
-                        aria-label="Skip track"
-                    >
-                        <ThumbsDown size={16} />
-                    </Button>
                 </div>
             </div>
 
@@ -298,12 +289,6 @@ export const PlayerControls: React.FC = () => {
             </div>
 
             <div className="flex items-center space-x-3">
-                <div className="hidden items-center space-x-2 md:flex">
-                    <Button variant="ghost" size="icon" className="rounded-full hover:bg-white/10" aria-label="Tracks">
-                        <Music size={16} />
-                    </Button>
-                </div>
-
                 <div className="flex items-center space-x-2">
                     <button
                         onClick={() => (audio.muted ? engine.unmute() : engine.mute())}
