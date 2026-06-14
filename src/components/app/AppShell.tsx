@@ -11,9 +11,25 @@ import {
     useUpdatePreferencesMutation,
     useTasksQuery,
 } from '@/hooks/use-app-data';
-import { useAppStore } from '@/store/app-store';
+import { selectQuoteForMode } from '@/lib/quotes';
+import { PomodoroCadence, TimerMode, useAppStore } from '@/store/app-store';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, useRef } from 'react';
+
+/** How long workspace-preference changes settle before a single persist fires. */
+const PREFERENCES_PERSIST_DEBOUNCE_MS = 800;
+
+type WorkspacePersistPayload = {
+    defaultMode: string;
+    selectedBackgroundId: string | null;
+    selectedTrackId: string;
+    likedTrackIds: string[];
+    volume: number;
+    timerMode: TimerMode;
+    timerPreset: string;
+    customMinutes: string;
+    pomodoroSettings: PomodoroCadence;
+};
 
 export function AppShell() {
     const currentMode = useAppStore((state) => state.currentMode);
@@ -22,6 +38,11 @@ export function AppShell() {
     const likedTrackIds = useAppStore((state) => state.likedTrackIds);
     const selectedBackgroundId = useAppStore((state) => state.selectedBackgroundId);
     const backgrounds = useAppStore((state) => state.backgrounds);
+    const volume = useAppStore((state) => state.volume);
+    const timerMode = useAppStore((state) => state.timerMode);
+    const selectedPreset = useAppStore((state) => state.selectedPreset);
+    const customMinutes = useAppStore((state) => state.customMinutes);
+    const pomodoroSettings = useAppStore((state) => state.pomodoroSettings);
 
     const setTracks = useAppStore((state) => state.setTracks);
     const setTasks = useAppStore((state) => state.setTasks);
@@ -32,6 +53,7 @@ export function AppShell() {
     const setSessions = useAppStore((state) => state.setSessions);
     const setMode = useAppStore((state) => state.setMode);
     const setCurrentQuote = useAppStore((state) => state.setCurrentQuote);
+    const hydratePreferences = useAppStore((state) => state.hydratePreferences);
 
     const tracksQuery = useTracksQuery();
     const tasksQuery = useTasksQuery();
@@ -41,6 +63,7 @@ export function AppShell() {
 
     const didHydratePreferences = useRef(false);
     const lastPersistedPreferencesRef = useRef('');
+    const savingPreferencesRef = useRef<string | null>(null);
     const availableQuotes = preferencesQuery.data?.quotes ?? [];
 
     useEffect(() => {
@@ -62,31 +85,62 @@ export function AppShell() {
     }, [sessionsQuery.data, setSessions]);
 
     useEffect(() => {
-        if (!preferencesQuery.data) {
+        // Hydrate workspace state from saved preferences exactly once. Re-running would
+        // clobber live state (e.g. reset an in-progress timer) every time a preference
+        // save invalidates and refetches this query.
+        if (didHydratePreferences.current) {
+            return;
+        }
+        if (!preferencesQuery.data || !tracksQuery.data) {
             return;
         }
 
         const { preferences, backgrounds: availableBackgrounds } = preferencesQuery.data;
-        lastPersistedPreferencesRef.current = JSON.stringify({
+        const cadence: PomodoroCadence = {
+            focusMinutes: preferences.pomodoroSettings.focusMinutes,
+            breakMinutes: preferences.pomodoroSettings.breakMinutes,
+            longBreakMinutes: preferences.pomodoroSettings.longBreakMinutes,
+            sessionsBeforeLongBreak: preferences.pomodoroSettings.sessionsBeforeLongBreak,
+        };
+
+        const selectedTrack = tracksQuery.data?.length
+            ? (tracksQuery.data.find((track) => track.id === preferences.selectedTrackId) ?? tracksQuery.data[0] ?? null)
+            : null;
+
+        // Seed the persist baseline with the exact shape we later write, so hydration
+        // itself never triggers a redundant save. Uses the *resolved* track id.
+        const seedPayload: WorkspacePersistPayload = {
             defaultMode: preferences.defaultMode,
             selectedBackgroundId: preferences.selectedBackgroundId,
-            selectedTrackId: preferences.selectedTrackId,
+            selectedTrackId: selectedTrack?.id ?? preferences.selectedTrackId ?? '',
             likedTrackIds: preferences.likedTrackIds,
-        });
+            volume: preferences.volume,
+            timerMode: preferences.timerMode,
+            timerPreset: preferences.timerPreset,
+            customMinutes: preferences.customMinutes,
+            pomodoroSettings: cadence,
+        };
+        lastPersistedPreferencesRef.current = JSON.stringify(seedPayload);
 
         setBackgrounds(availableBackgrounds);
         setLikedTrackIds(preferences.likedTrackIds);
         setMode(preferences.defaultMode);
         setSelectedBackgroundId(preferences.selectedBackgroundId);
+        hydratePreferences({
+            volume: preferences.volume,
+            timerMode: preferences.timerMode,
+            timerPreset: preferences.timerPreset,
+            customMinutes: preferences.customMinutes,
+            pomodoroSettings: cadence,
+        });
 
-        if (tracksQuery.data?.length) {
-            const selectedTrack =
-                tracksQuery.data.find((track) => track.id === preferences.selectedTrackId) ?? tracksQuery.data[0] ?? null;
+        if (selectedTrack) {
             setCurrentTrack(selectedTrack);
         }
         didHydratePreferences.current = true;
     }, [
         preferencesQuery.data,
+        hydratePreferences,
         setBackgrounds,
         setCurrentTrack,
         setLikedTrackIds,
@@ -100,8 +154,7 @@ export function AppShell() {
             return;
         }
 
-        const nextQuote = availableQuotes.find((quote) => quote.tags.includes(currentMode.toLowerCase())) ?? availableQuotes[0] ?? null;
-        setCurrentQuote(nextQuote);
+        setCurrentQuote(selectQuoteForMode(availableQuotes, currentMode));
     }, [availableQuotes, currentMode, setCurrentQuote]);
 
     useEffect(() => {
@@ -109,21 +162,65 @@ export function AppShell() {
             return;
         }
 
-        const nextPayload = {
+        const nextPayload: WorkspacePersistPayload = {
             defaultMode: currentMode,
             selectedBackgroundId,
             selectedTrackId: currentTrack.id,
             likedTrackIds,
+            volume: volume[0] ?? 50,
+            timerMode,
+            timerPreset: selectedPreset,
+            customMinutes,
+            pomodoroSettings: {
+                focusMinutes: pomodoroSettings.focusMinutes,
+                breakMinutes: pomodoroSettings.breakMinutes,
+                longBreakMinutes: pomodoroSettings.longBreakMinutes,
+                sessionsBeforeLongBreak: pomodoroSettings.sessionsBeforeLongBreak,
+            },
         };
         const serializedPayload = JSON.stringify(nextPayload);
 
-        if (serializedPayload === lastPersistedPreferencesRef.current) {
+        // Skip if this exact payload is already persisted or currently being saved.
+        if (
+            serializedPayload === lastPersistedPreferencesRef.current ||
+            serializedPayload === savingPreferencesRef.current
+        ) {
             return;
         }
 
-        lastPersistedPreferencesRef.current = serializedPayload;
-        updatePreferences.mutate(nextPayload);
-    }, [currentMode, currentTrack, likedTrackIds, selectedBackgroundId, updatePreferences]);
+        // Debounce: workspace prefs (volume slider, timer tweaks) can change rapidly.
+        // Coalesce into one write after activity settles so we don't flood the API /
+        // trip the per-user rate limit. The baseline only advances on a *successful*
+        // save, so a failed save is retried on the next preference change rather than
+        // silently dropped. `updatePreferences` is intentionally omitted from the deps
+        // (mutate is stable) so a failed mutation doesn't re-run this effect and spiral
+        // retries into the rate limit — retries are driven by real preference changes.
+        const timeout = setTimeout(() => {
+            savingPreferencesRef.current = serializedPayload;
+            updatePreferences.mutate(nextPayload, {
+                onSuccess: () => {
+                    lastPersistedPreferencesRef.current = serializedPayload;
+                },
+                onSettled: () => {
+                    if (savingPreferencesRef.current === serializedPayload) {
+                        savingPreferencesRef.current = null;
+                    }
+                },
+            });
+        }, PREFERENCES_PERSIST_DEBOUNCE_MS);
+
+        return () => clearTimeout(timeout);
+    }, [
+        currentMode,
+        currentTrack,
+        likedTrackIds,
+        selectedBackgroundId,
+        volume,
+        timerMode,
+        selectedPreset,
+        customMinutes,
+        pomodoroSettings,
+    ]);
 
     const showBackground = modes[currentMode]?.showBackground || false;
     const activeBackground = backgrounds.find((background) => background.id === selectedBackgroundId);

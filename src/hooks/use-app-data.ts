@@ -39,12 +39,32 @@ export function useSessionsQuery() {
     });
 }
 
+type TaskListContext = { previous?: Task[] };
+
 export function useCreateTaskMutation() {
     const queryClient = useQueryClient();
 
     return useMutation({
         mutationFn: (input: { text: string; priority: Task['priority'] }) => api.tasks.create(input),
-        onSuccess: async () => {
+        onMutate: async (input): Promise<TaskListContext> => {
+            await queryClient.cancelQueries({ queryKey: queryKeys.tasks });
+            const previous = queryClient.getQueryData<Task[]>(queryKeys.tasks);
+            // Newest task renders first (server orders by createdAt desc), so prepend.
+            const optimisticTask: Task = {
+                id: `optimistic-${crypto.randomUUID()}`,
+                text: input.text,
+                priority: input.priority,
+                isCompleted: false,
+            };
+            queryClient.setQueryData<Task[]>(queryKeys.tasks, (old = []) => [optimisticTask, ...old]);
+            return { previous };
+        },
+        onError: (_error, _input, context) => {
+            if (context?.previous) {
+                queryClient.setQueryData(queryKeys.tasks, context.previous);
+            }
+        },
+        onSettled: async () => {
             await queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
         },
     });
@@ -56,7 +76,20 @@ export function useUpdateTaskMutation() {
     return useMutation({
         mutationFn: (input: { id: string; text?: string; priority?: Task['priority']; isCompleted?: boolean }) =>
             api.tasks.update(input),
-        onSuccess: async () => {
+        onMutate: async (input): Promise<TaskListContext> => {
+            await queryClient.cancelQueries({ queryKey: queryKeys.tasks });
+            const previous = queryClient.getQueryData<Task[]>(queryKeys.tasks);
+            queryClient.setQueryData<Task[]>(queryKeys.tasks, (old = []) =>
+                old.map((task) => (task.id === input.id ? { ...task, ...input } : task)),
+            );
+            return { previous };
+        },
+        onError: (_error, _input, context) => {
+            if (context?.previous) {
+                queryClient.setQueryData(queryKeys.tasks, context.previous);
+            }
+        },
+        onSettled: async () => {
             await queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
         },
     });
@@ -67,7 +100,20 @@ export function useDeleteTaskMutation() {
 
     return useMutation({
         mutationFn: (input: { id: string }) => api.tasks.delete(input),
-        onSuccess: async () => {
+        onMutate: async (input): Promise<TaskListContext> => {
+            await queryClient.cancelQueries({ queryKey: queryKeys.tasks });
+            const previous = queryClient.getQueryData<Task[]>(queryKeys.tasks);
+            queryClient.setQueryData<Task[]>(queryKeys.tasks, (old = []) =>
+                old.filter((task) => task.id !== input.id),
+            );
+            return { previous };
+        },
+        onError: (_error, _input, context) => {
+            if (context?.previous) {
+                queryClient.setQueryData(queryKeys.tasks, context.previous);
+            }
+        },
+        onSettled: async () => {
             await queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
         },
     });

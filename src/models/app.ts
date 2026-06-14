@@ -36,6 +36,13 @@ export interface Background {
     tags: string[];
 }
 
+export interface PomodoroSettings {
+    focusMinutes: number;
+    breakMinutes: number;
+    longBreakMinutes: number;
+    sessionsBeforeLongBreak: number;
+}
+
 export interface UserPreferences {
     defaultMode: string;
     autoPlay: boolean;
@@ -43,6 +50,10 @@ export interface UserPreferences {
     volume: number;
     showNotifications: boolean;
     theme: 'light' | 'dark' | 'system';
+    timerMode: 'focus' | 'pomodoro';
+    timerPreset: string;
+    customMinutes: string;
+    pomodoroSettings: PomodoroSettings;
     customModes: AppMode[];
     selectedTrackId: string | null;
     selectedBackgroundId: string | null;

@@ -34,8 +34,8 @@ const backgroundOptions: BackgroundOption[] = [
         image: 'https://images.unsplash.com/photo-1499346030926-9a72daac6c63?ixlib=rb-4.0.3&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=2940&q=80',
     },
     {
-        id: 'custom',
-        name: '+ Custom Background',
+        id: 'more',
+        name: 'More in workspace',
         image: '',
     },
 ];
@@ -61,11 +61,7 @@ const BackgroundTile = ({ option, onClick }: BackgroundTileProps) => {
                     src={image}
                     width={640}
                     height={144}
-                    className={cn(
-                        'h-36 w-full object-cover transition-transform',
-                        'group-hover:scale-105',
-                        option.objectPosition && `object-position-${option.objectPosition}`,
-                    )}
+                    className={cn('h-36 w-full object-cover transition-transform', 'group-hover:scale-105')}
                     style={option.objectPosition ? { objectPosition: option.objectPosition } : undefined}
                     alt={name}
                 />

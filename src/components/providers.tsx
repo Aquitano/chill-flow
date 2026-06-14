@@ -1,9 +1,11 @@
 'use client';
 
-import { QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { describeApiError } from '@/lib/api';
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { HTTPException } from 'hono/http-exception';
 import dynamic from 'next/dynamic';
 import { PropsWithChildren, useState } from 'react';
+import { Toaster, toast } from 'sonner';
 const AudioDebugTrigger =
     process.env.NODE_ENV === 'development'
         ? dynamic(() => import('./dev/AudioDebugPanel').then((m) => m.AudioDebugTrigger), { ssr: false })
@@ -16,8 +18,18 @@ export const Providers = ({ children }: PropsWithChildren) => {
                 queryCache: new QueryCache({
                     onError: (err) => {
                         if (err instanceof HTTPException) {
-                            // global error handling, e.g. toast notification ...
+                            // Initial workspace queries surface their own full-screen error
+                            // state in AppShell, so query errors are intentionally not toasted.
                         }
+                    },
+                }),
+                mutationCache: new MutationCache({
+                    // Every failed mutation (task/preference/session) surfaces a toast so
+                    // failures are never silent. The message id dedupes identical errors
+                    // (e.g. a flapping background preference save).
+                    onError: (error) => {
+                        const message = describeApiError(error);
+                        toast.error(message, { id: message });
                     },
                 }),
             }),
@@ -26,6 +38,7 @@ export const Providers = ({ children }: PropsWithChildren) => {
     return (
         <QueryClientProvider client={queryClient}>
             {children}
+            <Toaster theme="dark" position="bottom-center" richColors closeButton />
             {process.env.NODE_ENV === 'development' ? <AudioDebugTrigger /> : null}
         </QueryClientProvider>
     );

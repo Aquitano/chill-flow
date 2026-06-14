@@ -3,7 +3,7 @@ import { quotes } from '@/lib/quotes';
 import { Background, FocusSession, Task, Track, UserPreferences } from '@/models/app';
 import { and, desc, eq, isNotNull } from 'drizzle-orm';
 import { Database } from '../db/client';
-import { focusSessions, tasks, userPreferences } from '../db/schema';
+import { DEFAULT_POMODORO_SETTINGS, focusSessions, tasks, userPreferences } from '../db/schema';
 
 export const trackCatalog: Track[] = [
     {
@@ -48,6 +48,10 @@ const defaultPreferences: UserPreferences = {
     volume: 50,
     showNotifications: true,
     theme: 'dark',
+    timerMode: 'focus',
+    timerPreset: '25m',
+    customMinutes: '25',
+    pomodoroSettings: { ...DEFAULT_POMODORO_SETTINGS },
     customModes: [],
     selectedTrackId: trackCatalog[0]?.id ?? null,
     selectedBackgroundId: backgroundCatalog[0]?.id ?? null,
@@ -96,6 +100,10 @@ function mapPreferences(row: typeof userPreferences.$inferSelect): UserPreferenc
         volume: row.volume,
         showNotifications: row.showNotifications,
         theme: row.theme as UserPreferences['theme'],
+        timerMode: row.timerMode as UserPreferences['timerMode'],
+        timerPreset: row.timerPreset,
+        customMinutes: row.customMinutes,
+        pomodoroSettings: row.pomodoroSettings,
         customModes: [],
         selectedTrackId: row.selectedTrackId,
         selectedBackgroundId: row.selectedBackgroundId,
@@ -124,6 +132,10 @@ async function ensureUserPreferences(database: Database, userId: string) {
             volume: defaultPreferences.volume,
             showNotifications: defaultPreferences.showNotifications,
             theme: defaultPreferences.theme,
+            timerMode: defaultPreferences.timerMode,
+            timerPreset: defaultPreferences.timerPreset,
+            customMinutes: defaultPreferences.customMinutes,
+            pomodoroSettings: defaultPreferences.pomodoroSettings,
             selectedTrackId: defaultPreferences.selectedTrackId,
             selectedBackgroundId: defaultPreferences.selectedBackgroundId,
             likedTrackIds: defaultPreferences.likedTrackIds,

@@ -46,6 +46,13 @@ export const deleteTaskInputSchema = z.object({
     id: taskIdSchema,
 });
 
+const pomodoroSettingsSchema = z.object({
+    focusMinutes: z.number().int().min(1).max(240),
+    breakMinutes: z.number().int().min(1).max(120),
+    longBreakMinutes: z.number().int().min(1).max(240),
+    sessionsBeforeLongBreak: z.number().int().min(1).max(12),
+});
+
 export const updatePreferencesInputSchema = z.object({
     defaultMode: modeSchema.optional(),
     autoPlay: z.boolean().optional(),
@@ -53,6 +60,14 @@ export const updatePreferencesInputSchema = z.object({
     volume: z.number().int().min(0).max(100).optional(),
     showNotifications: z.boolean().optional(),
     theme: z.enum(['light', 'dark', 'system']).optional(),
+    timerMode: z.enum(['focus', 'pomodoro']).optional(),
+    timerPreset: z.string().trim().min(1).max(16).optional(),
+    customMinutes: z
+        .string()
+        .trim()
+        .regex(/^\d{1,4}$/, { message: 'customMinutes must be a whole number of minutes.' })
+        .optional(),
+    pomodoroSettings: pomodoroSettingsSchema.optional(),
     selectedTrackId: nullableTrackIdSchema.optional(),
     selectedBackgroundId: nullableBackgroundIdSchema.optional(),
     likedTrackIds: z

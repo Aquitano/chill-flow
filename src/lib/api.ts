@@ -3,11 +3,54 @@
 import { client } from '@/lib/client';
 import { Background, FocusSession, Quote, Task, Track, UserPreferences } from '@/models/app';
 
+export class ApiError extends Error {
+    readonly status: number;
+
+    constructor(status: number, message: string) {
+        super(message);
+        this.name = 'ApiError';
+        this.status = status;
+    }
+}
+
+/** Maps an API/network failure to a short, user-facing message for toasts. */
+export function describeApiError(error: unknown): string {
+    if (error instanceof ApiError) {
+        switch (error.status) {
+            case 401:
+                return 'Your session expired — please sign in again.';
+            case 403:
+                return 'That request was blocked. Try reloading the page.';
+            case 422:
+                return "That didn't look valid. Please check and retry.";
+            case 429:
+                return 'Slow down a moment — too many requests. Please retry shortly.';
+            case 503:
+                return 'The workspace backend is unavailable right now.';
+            default:
+                return error.status >= 500
+                    ? 'Something went wrong on our end. Please retry.'
+                    : error.message || 'Request failed. Please retry.';
+        }
+    }
+
+    return error instanceof Error && error.message ? error.message : 'Something went wrong. Please retry.';
+}
+
 async function unwrap<T>(request: Promise<Response>): Promise<T> {
     const response = await request;
 
     if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
+        let message = `Request failed with status ${response.status}`;
+        try {
+            const body = (await response.clone().json()) as unknown;
+            if (body && typeof body === 'object' && 'message' in body && typeof body.message === 'string') {
+                message = body.message;
+            }
+        } catch {
+            // Non-JSON error body; fall back to the status-based message above.
+        }
+        throw new ApiError(response.status, message);
     }
 
     return response.json() as Promise<T>;

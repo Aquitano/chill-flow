@@ -54,7 +54,10 @@ export const CustomizerView = () => {
         <div className="overflow-hidden rounded-xl border border-white/10 bg-black/20 p-6 backdrop-blur-lg">
             <div className="mb-6 flex items-center justify-between">
                 <h3 className="text-xl font-medium text-white/90">Fine-Tune Your Experience</h3>
-                <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500"></div>
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium tracking-wider text-white/60 uppercase">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+                    Preview
+                </span>
             </div>
 
             <div className="mb-6 space-y-6">
@@ -116,7 +119,7 @@ export const CustomizerView = () => {
                     asChild
                     className="w-full bg-linear-to-r from-indigo-600 to-violet-600 text-white transition-transform hover:scale-[1.02]"
                 >
-                    <Link href="/app">Apply Changes</Link>
+                    <Link href="/app">Open Workspace</Link>
                 </Button>
                 <Button
                     asChild
@@ -125,10 +128,13 @@ export const CustomizerView = () => {
                 >
                     <Link href="/account">
                         <Settings size={15} className="mr-2 opacity-80" />
-                        Advanced
+                        Settings
                     </Link>
                 </Button>
             </div>
+            <p className="mt-3 text-center text-xs text-white/40">
+                A preview — set and save your real defaults inside the workspace.
+            </p>
         </div>
     );
 };

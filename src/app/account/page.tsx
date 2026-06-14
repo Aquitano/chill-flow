@@ -1,5 +1,8 @@
+import { AccountSettings } from '@/components/account/AccountSettings';
 import { Button } from '@/components/ui/button';
+import { getServerAuthState } from '@/lib/auth';
 import { appEnv } from '@/lib/env';
+import { SignInButton } from '@clerk/nextjs';
 import { CheckCircle2, Database, ExternalLink, KeyRound, ShieldAlert, UserRound } from 'lucide-react';
 import Link from 'next/link';
 
@@ -22,24 +25,77 @@ const setupItems = [
     },
 ];
 
-export default function AccountPage() {
-    const isWorkspaceReady = appEnv.isClerkConfigured && appEnv.isDatabaseConfigured;
+function PageHeader({ isWorkspaceReady }: { isWorkspaceReady: boolean }) {
+    return (
+        <div className="mb-10 flex items-center justify-between gap-4">
+            <Link href="/" className="text-lg font-semibold tracking-wide">
+                ChillFlow
+            </Link>
+            <Button asChild variant="outline" className="border-white/15 bg-white/5 text-white hover:bg-white/10">
+                <Link href={isWorkspaceReady ? '/app' : '/'}>Open workspace</Link>
+            </Button>
+        </div>
+    );
+}
 
+export default async function AccountPage() {
+    const isWorkspaceReady = appEnv.isClerkConfigured && appEnv.isDatabaseConfigured;
+    const authState = await getServerAuthState();
+
+    // Configured + signed in → the real settings page.
+    if (isWorkspaceReady && authState.isAuthenticated) {
+        return (
+            <main className="min-h-screen bg-[#070807] px-6 py-10 text-white">
+                <div className="mx-auto w-full max-w-3xl">
+                    <PageHeader isWorkspaceReady />
+                    <div className="mb-6 inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium uppercase tracking-[0.2em] text-neutral-300">
+                        <UserRound className="h-3.5 w-3.5" />
+                        Account & settings
+                    </div>
+                    <h1 className="mb-8 text-4xl font-semibold leading-tight md:text-5xl">Settings</h1>
+                    <AccountSettings />
+                </div>
+            </main>
+        );
+    }
+
+    // Configured but signed out → prompt sign-in.
+    if (isWorkspaceReady && !authState.isAuthenticated) {
+        return (
+            <main className="min-h-screen bg-[#070807] px-6 py-10 text-white">
+                <div className="mx-auto flex min-h-[calc(100vh-5rem)] w-full max-w-3xl flex-col">
+                    <PageHeader isWorkspaceReady />
+                    <div className="flex flex-1 items-center justify-center">
+                        <div className="max-w-md rounded-lg border border-white/10 bg-white/[0.04] p-8 text-center shadow-2xl shadow-black/40">
+                            <UserRound className="mx-auto h-8 w-8 text-neutral-300" />
+                            <h1 className="mt-4 text-2xl font-semibold">Sign in to manage your account</h1>
+                            <p className="mt-3 text-sm leading-6 text-neutral-400">
+                                Your focus preferences, tasks, and progress are saved to your account.
+                            </p>
+                            <div className="mt-6 flex justify-center gap-3">
+                                <SignInButton mode="modal">
+                                    <Button className="bg-white text-black hover:bg-neutral-200">Sign in</Button>
+                                </SignInButton>
+                                <Button
+                                    asChild
+                                    variant="outline"
+                                    className="border-white/15 bg-transparent text-white hover:bg-white/10"
+                                >
+                                    <Link href="/">Back to home</Link>
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        );
+    }
+
+    // Not configured → setup status (deployable-MVP requirement).
     return (
         <main className="min-h-screen bg-[#070807] px-6 py-10 text-white">
             <div className="mx-auto flex min-h-[calc(100vh-5rem)] w-full max-w-5xl flex-col justify-center">
-                <div className="mb-10 flex items-center justify-between gap-4">
-                    <Link href="/" className="text-lg font-semibold tracking-wide">
-                        ChillFlow
-                    </Link>
-                    <Button
-                        asChild
-                        variant="outline"
-                        className="border-white/15 bg-white/5 text-white hover:bg-white/10"
-                    >
-                        <Link href={isWorkspaceReady ? '/app' : '/'}>Open workspace</Link>
-                    </Button>
-                </div>
+                <PageHeader isWorkspaceReady={isWorkspaceReady} />
 
                 <section className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr] lg:items-start">
                     <div>
@@ -48,7 +104,7 @@ export default function AccountPage() {
                             Account setup
                         </div>
                         <h1 className="max-w-3xl text-4xl font-semibold leading-tight text-white md:text-6xl">
-                            {isWorkspaceReady ? 'Your workspace is ready.' : 'Finish setup to use ChillFlow.'}
+                            Finish setup to use ChillFlow.
                         </h1>
                         <p className="mt-5 max-w-2xl text-base leading-7 text-neutral-300 md:text-lg">
                             ChillFlow MVP requires Clerk and Postgres. Demo mode is not supported for the deployable
@@ -57,7 +113,7 @@ export default function AccountPage() {
 
                         <div className="mt-8 flex flex-wrap gap-3">
                             <Button asChild className="bg-white text-black hover:bg-neutral-200">
-                                <Link href={isWorkspaceReady ? '/app' : '/'}>Continue</Link>
+                                <Link href="/">Continue</Link>
                             </Button>
                             <Button
                                 asChild

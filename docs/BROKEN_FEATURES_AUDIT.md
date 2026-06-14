@@ -4,8 +4,33 @@
 > 40 findings confirmed, 2 refuted. Build, lint, and the unit tests all pass — every
 > issue below is a **runtime / feature-completeness** problem, not a compile error.
 
-> **Progress (this session):** Tier 0.1, 0.2, and 0.4 are **DONE** (see "Implemented" below).
-> Remaining: Tier 0.3 (real audio), Tier 1 (persistence/feedback/notifications), Tier 2 (polish).
+> **Progress:** Tier 0.1, 0.2, 0.4 **DONE**. Tier 1 (1.1, 1.2, 1.3) **DONE**. Tier 2
+> 2.1, 2.2, 2.4, 2.5, 2.7, 2.8, 2.10, 2.11 **DONE** (see "Implemented — session 2" below).
+> Remaining: Tier 0.3 (real audio), Tier 2 2.3 (rate limiter), 2.6 (signed-out TaskInput),
+> 2.9 (background fallback), 2.12 (ThumbsDown semantics).
+> NOTE: 1.1 added preference columns — run `bun run db:push` (or `db:migrate`,
+> `drizzle/0002_mysterious_rachel_grey.sql`) before the new persistence works at runtime.
+
+## Implemented — session 2
+
+- **1.1 — Preferences round-trip.** Added `timerMode` / `timerPreset` / `customMinutes` /
+  `pomodoroSettings` columns (+ migration `0002`), wired the model/validation/repository, and
+  made the store the single source of truth for volume (engine no longer clobbers the per-account
+  value). AppShell hydrates these **once** and auto-persists with an 800ms debounce; the baseline
+  only advances on a successful save, so a failed save retries on the next change.
+- **1.2 — Feedback.** Added `sonner`; a global `MutationCache` toasts every failed mutation
+  (deduped). Task create/update/delete are optimistic with rollback; add-task input clears only
+  `onSuccess` and the submit is disabled while pending.
+- **1.3 — Notifications.** `src/lib/notifications.ts` (gesture-only permission, quiet degrade);
+  fires on focus-countdown completion and Pomodoro phase changes, gated by `showNotifications` +
+  granted permission.
+- **2.1** per-mode quote selection; **2.2** `Origin: null` → clean 403 (with tests); **2.4**
+  honest landing-preview copy; **2.5** real `/account` settings (Clerk sign-out + working prefs);
+  **2.7** player scrubber/seek/time; **2.8** tasks empty state; **2.10** timer/tasks no longer
+  overlap on narrow viewports; **2.11** aria-labels across icon-only controls.
+- Verified: `bun run lint`, `bun run test` (35 passing), `bun run build` all green. A 6-dimension
+  adversarial review ran over the diff; its 4 confirmed findings (persist-baseline-before-success,
+  notify-before-prefs-loaded, a missing landing aria-label, a dead Tailwind class) were fixed.
 
 ## Implemented in this session
 

@@ -25,6 +25,38 @@ describe('backend validation', () => {
         expect(result.success).toBe(false);
     });
 
+    it('accepts persisted timer and Pomodoro preferences', () => {
+        const result = updatePreferencesInputSchema.safeParse({
+            timerMode: 'pomodoro',
+            timerPreset: '45m',
+            customMinutes: '90',
+            pomodoroSettings: {
+                focusMinutes: 50,
+                breakMinutes: 10,
+                longBreakMinutes: 20,
+                sessionsBeforeLongBreak: 3,
+            },
+        });
+
+        expect(result.success).toBe(true);
+    });
+
+    it('rejects out-of-range Pomodoro settings and non-numeric custom minutes', () => {
+        expect(
+            updatePreferencesInputSchema.safeParse({
+                pomodoroSettings: {
+                    focusMinutes: 0,
+                    breakMinutes: 5,
+                    longBreakMinutes: 15,
+                    sessionsBeforeLongBreak: 4,
+                },
+            }).success,
+        ).toBe(false);
+
+        expect(updatePreferencesInputSchema.safeParse({ customMinutes: 'abc' }).success).toBe(false);
+        expect(updatePreferencesInputSchema.safeParse({ timerMode: 'sleep' }).success).toBe(false);
+    });
+
     it('deduplicates liked track ids while preserving valid payloads', () => {
         const result = updatePreferencesInputSchema.parse({
             likedTrackIds: ['deep-focus-01', 'deep-focus-01', 'ambient-rain-02'],

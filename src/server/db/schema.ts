@@ -49,6 +49,20 @@ export const tasks = pgTable(
     (table) => [index('Tasks_userId_createdAt_idx').on(table.userId, table.createdAt)],
 );
 
+export type PomodoroSettingsValue = {
+    focusMinutes: number;
+    breakMinutes: number;
+    longBreakMinutes: number;
+    sessionsBeforeLongBreak: number;
+};
+
+export const DEFAULT_POMODORO_SETTINGS: PomodoroSettingsValue = {
+    focusMinutes: 25,
+    breakMinutes: 5,
+    longBreakMinutes: 15,
+    sessionsBeforeLongBreak: 4,
+};
+
 export const userPreferences = pgTable(
     'user_preferences',
     {
@@ -59,6 +73,13 @@ export const userPreferences = pgTable(
         volume: integer('volume').notNull().default(50),
         showNotifications: boolean('showNotifications').notNull().default(true),
         theme: text('theme').notNull().default('dark'),
+        timerMode: text('timerMode').notNull().default('focus'),
+        timerPreset: text('timerPreset').notNull().default('25m'),
+        customMinutes: text('customMinutes').notNull().default('25'),
+        pomodoroSettings: jsonb('pomodoroSettings')
+            .$type<PomodoroSettingsValue>()
+            .notNull()
+            .default(DEFAULT_POMODORO_SETTINGS),
         selectedTrackId: text('selectedTrackId'),
         selectedBackgroundId: text('selectedBackgroundId'),
         likedTrackIds: jsonb('likedTrackIds').$type<string[]>().notNull().default([]),

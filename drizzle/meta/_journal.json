@@ -15,6 +15,13 @@
       "when": 1781206000000,
       "tag": "0001_focus_session_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781381351276,
+      "tag": "0002_mysterious_rachel_grey",
+      "breakpoints": true
     }
   ]
 }

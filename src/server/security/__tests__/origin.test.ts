@@ -14,4 +14,22 @@ describe('origin security', () => {
             isTrustedOrigin('https://evil.example', 'https://chill-flow.app/api/tasks/list', new Set(['https://test.example'])),
         ).toBe(false);
     });
+
+    it('treats an opaque `null` origin as untrusted instead of throwing', () => {
+        expect(() =>
+            isTrustedOrigin('null', 'https://chill-flow.app/api/tasks/create', new Set()),
+        ).not.toThrow();
+        expect(isTrustedOrigin('null', 'https://chill-flow.app/api/tasks/create', new Set())).toBe(false);
+    });
+
+    it('rejects other unparseable origins without throwing', () => {
+        expect(isTrustedOrigin('not a url', 'https://chill-flow.app/api/tasks/create', new Set())).toBe(false);
+    });
+
+    it('skips unparseable allowlist entries instead of throwing', () => {
+        const allowedOrigins = parseAllowedOrigins('null, , https://example.com, garbage');
+
+        expect(allowedOrigins.has('https://example.com')).toBe(true);
+        expect(allowedOrigins.has('null')).toBe(false);
+    });
 });

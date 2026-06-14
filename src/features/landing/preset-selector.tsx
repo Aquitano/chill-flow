@@ -134,6 +134,7 @@ export const PresetsView = () => {
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 rounded-full text-white/90 transition-colors hover:bg-white/10"
+                        aria-label="Preview preset"
                     >
                         <Play size={14} className="ml-0.5" />
                     </Button>
@@ -169,7 +170,7 @@ export const PresetsView = () => {
                                       : 'from-emerald-600 to-emerald-500',
                         )}
                     >
-                        <Link href="/app">Start Now</Link>
+                        <Link href="/app">Open Workspace</Link>
                     </Button>
                 </div>
             </div>
