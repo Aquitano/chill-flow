@@ -14,10 +14,10 @@ manifest is the only checked-in record; the binaries live in R2.
 ## Prerequisites
 
 - `ffmpeg` and `ffprobe` on PATH.
-- `wrangler` (installed locally) authenticated: `bunx wrangler login`.
-- An R2 bucket with public access enabled, and these env vars (see `.env.example`):
-  - `R2_BUCKET` — bucket name (e.g. `chillflow-audio`).
-  - `R2_PUBLIC_BASE` — public bucket base URL (e.g. `https://pub-xxxx.r2.dev`).
+- An R2 bucket with public access enabled and an S3 API token. Upload and CORS use the S3
+  API (no `wrangler login` needed). Set these in `.env` (see `.env.example`):
+  - `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` — S3 credentials.
+  - `R2_PUBLIC_BASE` — public bucket base URL (e.g. `https://pub-xxxx.r2.dev`), used by `audio:pull`.
   - `DATABASE_URL` — to seed the catalog.
 
 ## Publish a catalog (first time / when tracks change)
@@ -73,10 +73,10 @@ Then `bun run dev` with `AUDIO_BASE_URL=/audio` serves them same-origin.
 - **Public access**: enable the bucket's public `r2.dev` URL (or attach a custom domain) and
   use it as `R2_PUBLIC_BASE` / production `AUDIO_BASE_URL`.
 - **CORS is mandatory**: the audio engine uses `crossOrigin="anonymous"` and Web Audio, so a
-  cross-origin host must return CORS headers or playback fails silently. Apply `cors.json`
-  (edit the origins first) via the R2 dashboard, or wrangler:
+  cross-origin host must return CORS headers or playback fails silently. Edit the origins in
+  `cors.json`, then apply it via the S3 API:
   ```bash
-  bunx wrangler r2 bucket cors put $R2_BUCKET --file scripts/audio/cors.json
+  bun run audio:cors
   ```
 - **Range requests** work on R2 natively — no configuration needed.
 - Verify in DevTools: the audio request returns `206 Partial Content` with an

@@ -20,7 +20,7 @@ live deployment.
 - A Neon project (free tier is fine).
 - A Cloudflare account with R2 enabled.
 - A Clerk application (production instance).
-- Local tools for the one-time catalog publish: `bun`, `ffmpeg`/`ffprobe`, `wrangler` (`bunx wrangler login`).
+- Local tools for the one-time catalog publish: `bun`, `ffmpeg`/`ffprobe`. (Upload and CORS use the R2 S3 token — no `wrangler login` needed.)
 
 ---
 
@@ -43,15 +43,16 @@ live deployment.
 2. **Enable public access** — either the managed `r2.dev` URL (quick start) or a custom
    domain (recommended for production). The resulting base URL is both `AUDIO_BASE_URL` and
    `R2_PUBLIC_BASE`.
-3. **Set the CORS policy** (mandatory — the audio engine uses `crossOrigin="anonymous"` +
-   Web Audio, which fails silently without it). Edit the origins in `scripts/audio/cors.json`
-   to your production domain, then:
-   ```bash
-   bunx wrangler r2 bucket cors put chillflow-audio --file scripts/audio/cors.json
-   ```
-4. **Create an S3 API token** (R2 → Manage R2 API Tokens → Object Read & Write). This gives
+3. **Create an S3 API token** (R2 → Manage R2 API Tokens → Object Read & Write). This gives
    `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`; `R2_ACCOUNT_ID` is in the R2 endpoint
-   (`https://<account_id>.r2.cloudflarestorage.com`). These power runtime admin uploads.
+   (`https://<account_id>.r2.cloudflarestorage.com`). Put these (and `R2_BUCKET`) in `.env` —
+   they power both the catalog publish and runtime admin uploads.
+4. **Set the CORS policy** (mandatory — the audio engine uses `crossOrigin="anonymous"` +
+   Web Audio, which fails silently without it). Edit the origins in `scripts/audio/cors.json`
+   to your production domain, then apply via the S3 API:
+   ```bash
+   bun run audio:cors
+   ```
 
 ## 3. Auth (Clerk)
 
@@ -67,7 +68,7 @@ From your machine, with masters in `scripts/audio/originals/` and entries in
 ```bash
 bun run audio:normalize          # loudnorm -> public/audio/
 bun run audio:build              # ffprobe durations into the manifest
-R2_BUCKET=chillflow-audio bun run audio:upload   # push to R2 (wrangler)
+bun run audio:upload             # push to R2 (S3 API; reads R2_* from .env)
 DATABASE_URL='<prod>' bun run db:seed:tracks     # seed the prod tracks table
 ```
 

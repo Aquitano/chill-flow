@@ -1,22 +1,27 @@
-import process from 'node:process';
-import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import 'dotenv/config';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { PUBLIC_AUDIO_DIR, ROOT, readManifest, requireEnv } from './_shared';
+import process from 'node:process';
+import { appEnv } from '../../src/lib/env';
+import { getAudioStorage } from '../../src/server/storage/audio-storage';
+import { PUBLIC_AUDIO_DIR, readManifest } from './_shared';
 
-// Upload each normalized MP3 to the R2 bucket under its storage key, with an immutable
-// long-cache header and the correct content type. Re-encoding a track means bumping its
-// storage key (e.g. -v2) so the immutable cache is never stale.
+// Upload each normalized track to R2 via the S3 API (same credentials as the runtime
+// upload backend — no wrangler login needed). Re-encoding a track means bumping its
+// storage key so the immutable cache is never stale.
 
-const bucket = requireEnv('R2_BUCKET');
+if (!appEnv.isR2Configured) {
+    console.error('R2 is not configured. Set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET in .env.');
+    process.exit(1);
+}
+
 const manifest = readManifest();
 if (manifest.length === 0) {
     console.error('manifest.json is empty. Nothing to upload.');
     process.exit(1);
 }
 
-const wrangler = path.join(ROOT, 'node_modules', '.bin', process.platform === 'win32' ? 'wrangler.exe' : 'wrangler');
-const CACHE_CONTROL = 'public, max-age=31536000, immutable';
+const storage = getAudioStorage();
 
 let uploaded = 0;
 for (const entry of manifest) {
@@ -25,18 +30,9 @@ for (const entry of manifest) {
         console.warn(`! ${entry.storageKey} missing in public/audio/ — run audio:normalize first. Skipping.`);
         continue;
     }
-    console.log(`Uploading ${entry.storageKey} -> r2://${bucket}/${entry.storageKey}`);
-    execFileSync(
-        wrangler,
-        [
-            'r2', 'object', 'put', `${bucket}/${entry.storageKey}`,
-            '--file', file,
-            '--content-type', 'audio/mpeg',
-            '--cache-control', CACHE_CONTROL,
-        ],
-        { stdio: 'inherit' },
-    );
+    await storage.put(entry.storageKey, new Uint8Array(readFileSync(file)));
+    console.log(`Uploaded ${entry.storageKey}`);
     uploaded += 1;
 }
 
-console.log(`Uploaded ${uploaded}/${manifest.length} track(s). Ensure the bucket is public and CORS is set (see README).`);
+console.log(`Uploaded ${uploaded}/${manifest.length} track(s) to R2.`);
