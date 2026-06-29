@@ -1,0 +1,130 @@
+# Deployment runbook
+
+ChillFlow deploys as a Next.js app on **Vercel**, backed by **managed Postgres (Neon)**,
+**Cloudflare R2** for audio, and **Clerk** for auth. This runbook takes a fresh clone to a
+live deployment.
+
+## Architecture
+
+| Concern | Service | Notes |
+| --- | --- | --- |
+| App hosting | Vercel | Next.js App Router, Node serverless functions |
+| Database | Neon (managed Postgres) | Works with the bundled `@neondatabase/serverless` HTTP driver |
+| Audio + cover files | Cloudflare R2 | Public bucket; runtime admin uploads use the R2 S3 API |
+| Auth | Clerk | Production instance keys |
+| Errors (optional) | Sentry | Enabled only when a DSN is set |
+
+## Prerequisites
+
+- A Vercel account with this repo connected.
+- A Neon project (free tier is fine).
+- A Cloudflare account with R2 enabled.
+- A Clerk application (production instance).
+- Local tools for the one-time catalog publish: `bun`, `ffmpeg`/`ffprobe`, `wrangler` (`bunx wrangler login`).
+
+---
+
+## 1. Database (Neon)
+
+1. Create a Neon project and copy its pooled connection string → this is `DATABASE_URL`.
+2. Apply migrations against it from your machine:
+   ```bash
+   # bash
+   DATABASE_URL='postgres://...neon.tech/...' bun run db:migrate
+   ```
+   ```powershell
+   # PowerShell
+   $env:DATABASE_URL='postgres://...neon.tech/...'; bun run db:migrate
+   ```
+
+## 2. Audio storage (Cloudflare R2)
+
+1. Create a bucket (e.g. `chillflow-audio`).
+2. **Enable public access** — either the managed `r2.dev` URL (quick start) or a custom
+   domain (recommended for production). The resulting base URL is both `AUDIO_BASE_URL` and
+   `R2_PUBLIC_BASE`.
+3. **Set the CORS policy** (mandatory — the audio engine uses `crossOrigin="anonymous"` +
+   Web Audio, which fails silently without it). Edit the origins in `scripts/audio/cors.json`
+   to your production domain, then:
+   ```bash
+   bunx wrangler r2 bucket cors put chillflow-audio --file scripts/audio/cors.json
+   ```
+4. **Create an S3 API token** (R2 → Manage R2 API Tokens → Object Read & Write). This gives
+   `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`; `R2_ACCOUNT_ID` is in the R2 endpoint
+   (`https://<account_id>.r2.cloudflarestorage.com`). These power runtime admin uploads.
+
+## 3. Auth (Clerk)
+
+1. In the Clerk dashboard, use the **production instance** publishable + secret keys.
+2. After your first sign-in (step 6), grant yourself admin: Clerk → Users → your user →
+   Metadata → Public → `{ "role": "admin" }`.
+
+## 4. Publish the initial catalog
+
+From your machine, with masters in `scripts/audio/originals/` and entries in
+`scripts/audio/manifest.json`:
+
+```bash
+bun run audio:normalize          # loudnorm -> public/audio/
+bun run audio:build              # ffprobe durations into the manifest
+R2_BUCKET=chillflow-audio bun run audio:upload   # push to R2 (wrangler)
+DATABASE_URL='<prod>' bun run db:seed:tracks     # seed the prod tracks table
+```
+
+(After deploy, admins can also import/replace tracks from `/admin`, which writes to R2
+directly when the `R2_*` runtime vars are set.)
+
+## 5. Deploy to Vercel
+
+Import the repo and set the environment variables below, then deploy.
+
+| Variable | Required | Value |
+| --- | --- | --- |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | yes | Clerk production publishable key |
+| `CLERK_SECRET_KEY` | yes | Clerk production secret key |
+| `DATABASE_URL` | yes | Neon connection string (server-only) |
+| `AUDIO_BASE_URL` | yes | R2 public base URL (e.g. `https://cdn.chillflow.app`) |
+| `ALLOWED_CORS_ORIGINS` | yes | Your production origin(s), comma-separated |
+| `NEXT_PUBLIC_APP_URL` | recommended | Production origin (else inferred from `VERCEL_URL`) |
+| `R2_ACCOUNT_ID` | for admin upload | R2 account id |
+| `R2_ACCESS_KEY_ID` | for admin upload | R2 S3 access key id |
+| `R2_SECRET_ACCESS_KEY` | for admin upload | R2 S3 secret (server-only) |
+| `R2_BUCKET` | for admin upload | Bucket name |
+| `NEXT_PUBLIC_SENTRY_DSN` | optional | Enables Sentry when set |
+
+`DATABASE_URL` and `R2_SECRET_ACCESS_KEY` must stay server-only — never expose them through
+`NEXT_PUBLIC_*`, client bundles, rendered output, or logs.
+
+## 6. Post-deploy smoke test
+
+- [ ] App loads at the production URL; landing page renders.
+- [ ] Sign up / sign in works (Clerk production instance).
+- [ ] `/app` loads; a seeded track plays — Network shows `206` for the audio URL with an
+      `access-control-allow-origin` header (R2 CORS working).
+- [ ] Create / complete / delete a task; start and complete a focus session (stats update).
+- [ ] `/admin` (as an admin) lists tracks; import a track and confirm it plays.
+- [ ] Reload after sign-out/in — preferences persist.
+
+## Backups
+
+Neon keeps automatic backups with point-in-time restore. For an additional manual snapshot:
+
+```bash
+pg_dump "$DATABASE_URL" > chillflow-backup.sql       # back up
+psql "$DATABASE_URL" < chillflow-backup.sql           # restore
+```
+
+Run a backup before each migration deploy and verify a restore at least once.
+
+## Observability
+
+Set `NEXT_PUBLIC_SENTRY_DSN` to enable Sentry; leave it unset to disable it (the app starts
+fine either way). Confirm a test error appears in Sentry after the first deploy.
+
+## Pre-deploy verification
+
+```bash
+bun run lint && bun run test && bun run build
+```
+
+All three must pass before promoting a deploy.
