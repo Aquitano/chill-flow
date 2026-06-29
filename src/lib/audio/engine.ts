@@ -2,9 +2,6 @@
 
 import { getAudioDebugLogger } from './debug';
 
-export type AudioVariant = { codec: 'webm' | 'm4a'; bitrateKbps: number; url: string };
-export type AudioTrack = { id: string; title: string; variants?: AudioVariant[]; url?: string };
-
 type AudioEventMap = {
     statechange: CustomEvent<{ isPlaying: boolean }>;
     time: CustomEvent<{ currentTime: number; duration: number; bufferedPercent: number }>;
@@ -231,87 +228,6 @@ class AudioEngineImpl {
 
     hasMainTrack(): boolean {
         return Boolean(this.mediaElement?.src);
-    }
-
-    private pickVariant(track: AudioTrack): string | null {
-        this.debugLogger.debug('TrackSelection', 'Selecting best variant for track', {
-            trackId: track.id,
-            title: track.title,
-            hasDirectUrl: !!track.url,
-            variantCount: track.variants?.length ?? 0,
-        });
-
-        if (track.url) {
-            this.debugLogger.debug('TrackSelection', 'Using direct URL', { url: track.url });
-            return track.url;
-        }
-
-        const variants = track.variants ?? [];
-        if (variants.length === 0) {
-            this.debugLogger.warn('TrackSelection', 'No variants available');
-            return null;
-        }
-
-        const probe = document.createElement('audio');
-        const webm = variants.find((v) => v.codec === 'webm');
-        const m4a = variants.find((v) => v.codec === 'm4a');
-
-        const webmSupport = webm ? probe.canPlayType('audio/webm') : '';
-        const mp4Support = m4a ? (probe.canPlayType('audio/mp4') || probe.canPlayType('audio/aac')) : '';
-
-        this.debugLogger.debug('TrackSelection', 'Codec support check', {
-            webmSupport,
-            mp4Support,
-            variants: variants.map(v => ({ codec: v.codec, bitrate: v.bitrateKbps })),
-        });
-
-        if (webm && webmSupport) {
-            this.debugLogger.info('TrackSelection', 'Selected WebM variant', {
-                codec: webm.codec,
-                bitrate: webm.bitrateKbps,
-                url: webm.url,
-            });
-            return webm.url;
-        }
-
-        if (m4a && mp4Support) {
-            this.debugLogger.info('TrackSelection', 'Selected M4A variant', {
-                codec: m4a.codec,
-                bitrate: m4a.bitrateKbps,
-                url: m4a.url,
-            });
-            return m4a.url;
-        }
-
-        // Fallback to first variant
-        const fallback = variants[0];
-        if (fallback) {
-            this.debugLogger.warn('TrackSelection', 'Using fallback variant (may not be supported)', {
-                codec: fallback.codec,
-                bitrate: fallback.bitrateKbps,
-                url: fallback.url,
-            });
-            return fallback.url;
-        }
-
-        this.debugLogger.error('TrackSelection', 'No playable variant found');
-        return null;
-    }
-
-    async loadMainTrackFromTrack(track: AudioTrack): Promise<void> {
-        this.debugLogger.info('TrackLoader', 'Loading track from AudioTrack object', {
-            trackId: track.id,
-            title: track.title,
-        });
-
-        const url = this.pickVariant(track);
-        if (!url) {
-            const error = new Error('No playable variant for track');
-            this.debugLogger.error('TrackLoader', 'Failed to find playable variant', { track });
-            throw error;
-        }
-
-        await this.loadMainTrack(url);
     }
 
     async loadMainTrack(url: string): Promise<void> {

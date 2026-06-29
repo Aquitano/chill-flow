@@ -1,8 +1,14 @@
+import { getDatabase } from '@/server/db/client';
 import { appRepository } from '@/server/repositories/app-repository';
 import Link from 'next/link';
 
-export default function SoundscapesPage() {
-    const tracks = appRepository.listTracks();
+// Catalog lives in the DB now, so this page reads at request time rather than being baked
+// into the static build (which would run a DB query against tracks during `next build`).
+export const dynamic = 'force-dynamic';
+
+export default async function SoundscapesPage() {
+    const database = getDatabase();
+    const tracks = database ? await appRepository.listTracks(database) : [];
 
     return (
         <main className="min-h-screen bg-black px-6 py-16 text-white">

@@ -1,39 +1,27 @@
+import { appEnv } from '@/lib/env';
 import { backgroundCatalog } from '@/lib/backgrounds';
 import { quotes } from '@/lib/quotes';
 import { Background, FocusSession, Task, Track, UserPreferences } from '@/models/app';
-import { and, desc, eq, isNotNull, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, ne } from 'drizzle-orm';
 import { Database } from '../db/client';
-import { DEFAULT_POMODORO_SETTINGS, focusSessions, tasks, userPreferences } from '../db/schema';
+import { DEFAULT_POMODORO_SETTINGS, focusSessions, tasks, tracks, userPreferences } from '../db/schema';
 
-export const trackCatalog: Track[] = [
-    {
-        id: 'deep-focus-01',
-        title: 'Deep Focus Loop',
-        artist: 'ChillFlow Radio',
-        audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-        duration: 356,
-        tags: ['focus', 'instrumental'],
-        category: 'focus',
-    },
-    {
-        id: 'ambient-rain-02',
-        title: 'Rain Study Session',
-        artist: 'ChillFlow Radio',
-        audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
-        duration: 402,
-        tags: ['rain', 'ambient'],
-        category: 'ambient',
-    },
-    {
-        id: 'night-drive-03',
-        title: 'Night Drive Notes',
-        artist: 'ChillFlow Radio',
-        audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
-        duration: 387,
-        tags: ['night', 'creative'],
-        category: 'creative',
-    },
-];
+/** Resolve a relative storage key to a playable URL against the configured audio base. */
+function resolveAudioUrl(storageKey: string): string {
+    return `${appEnv.audioBaseUrl}/${storageKey.replace(/^\/+/, '')}`;
+}
+
+function mapTrack(row: typeof tracks.$inferSelect): Track {
+    return {
+        id: row.id,
+        title: row.title,
+        artist: row.artist,
+        audioUrl: resolveAudioUrl(row.storageKey),
+        duration: row.durationSec,
+        tags: row.tags,
+        category: row.category,
+    };
+}
 
 export const defaultTasks: Task[] = [
     { id: crypto.randomUUID(), text: 'Review notes', isCompleted: false, priority: 'medium' },
@@ -53,7 +41,9 @@ const defaultPreferences: UserPreferences = {
     customMinutes: '25',
     pomodoroSettings: { ...DEFAULT_POMODORO_SETTINGS },
     customModes: [],
-    selectedTrackId: trackCatalog[0]?.id ?? null,
+    // Resolved on the client from the track list (first available) when null; the catalog
+    // now lives in the DB so there is no static default to point at here.
+    selectedTrackId: null,
     selectedBackgroundId: backgroundCatalog[0]?.id ?? null,
     likedTrackIds: [],
 };
@@ -184,12 +174,14 @@ function calculateCurrentStreak(sessionDates: string[]) {
 }
 
 export const appRepository = {
-    listTracks() {
-        return clone(trackCatalog);
+    async listTracks(database: Database) {
+        const storedTracks = await database.select().from(tracks).orderBy(asc(tracks.createdAt));
+        return storedTracks.map(mapTrack);
     },
 
-    getTrackById(trackId: string) {
-        return clone(trackCatalog.find((track) => track.id === trackId) ?? null);
+    async getTrackById(database: Database, trackId: string) {
+        const [track] = await database.select().from(tracks).where(eq(tracks.id, trackId)).limit(1);
+        return track ? mapTrack(track) : null;
     },
 
     listBackgrounds() {

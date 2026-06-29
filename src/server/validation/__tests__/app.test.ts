@@ -65,7 +65,7 @@ describe('backend validation', () => {
         expect(result.likedTrackIds).toEqual(['deep-focus-01', 'ambient-rain-02']);
     });
 
-    it('rejects short focus sessions and unknown track lookups', () => {
+    it('rejects short focus sessions and malformed track lookups', () => {
         expect(
             startSessionInputSchema.safeParse({
                 mode: 'DeepWork',
@@ -74,7 +74,10 @@ describe('backend validation', () => {
             }).success,
         ).toBe(false);
 
-        expect(trackLookupInputSchema.safeParse({ id: 'unknown-track' }).success).toBe(false);
+        // Track ids are shape-validated only (catalog membership lives in the DB now): a
+        // well-formed id is accepted, an empty one is rejected.
+        expect(trackLookupInputSchema.safeParse({ id: 'any-track-id' }).success).toBe(true);
+        expect(trackLookupInputSchema.safeParse({ id: '' }).success).toBe(false);
     });
 
     it('requires explicit elapsed seconds when completing sessions', () => {

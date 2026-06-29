@@ -14,7 +14,12 @@
         "start": "next start",
         "test": "vitest run",
         "test:ui": "vitest --ui",
-        "format": "prettier --write ."
+        "format": "prettier --write .",
+        "audio:normalize": "bun scripts/audio/normalize.ts",
+        "audio:build": "bun scripts/audio/build-manifest.ts",
+        "audio:upload": "bun scripts/audio/upload.ts",
+        "audio:pull": "bun scripts/audio/pull.ts",
+        "db:seed:tracks": "bun scripts/audio/seed.ts"
     },
     "dependencies": {
         "@clerk/nextjs": "^6.36.9",

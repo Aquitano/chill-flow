@@ -7,6 +7,7 @@ const envSchema = z.object({
     DATABASE_URL: z.url().optional(),
     NEXT_PUBLIC_SENTRY_DSN: z.url().optional(),
     ALLOWED_CORS_ORIGINS: z.string().optional(),
+    AUDIO_BASE_URL: z.string().optional(),
 });
 
 const parsedEnv = envSchema.safeParse({
@@ -15,9 +16,15 @@ const parsedEnv = envSchema.safeParse({
     DATABASE_URL: process.env.DATABASE_URL,
     NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN,
     ALLOWED_CORS_ORIGINS: process.env.ALLOWED_CORS_ORIGINS,
+    AUDIO_BASE_URL: process.env.AUDIO_BASE_URL,
 });
 
 const rawEnv = parsedEnv.success ? parsedEnv.data : {};
+
+// Base for resolving track storage keys to playable URLs. Server-only (not NEXT_PUBLIC):
+// the catalog router resolves keys before sending them to the client. Dev serves audio
+// same-origin from public/audio/ ('/audio'); prod points at the public R2 bucket.
+const audioBaseUrl = (rawEnv.AUDIO_BASE_URL ?? '/audio').replace(/\/+$/, '');
 
 export const appEnv = {
     clerkPublishableKey: rawEnv.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
@@ -25,6 +32,7 @@ export const appEnv = {
     databaseUrl: rawEnv.DATABASE_URL,
     sentryDsn: rawEnv.NEXT_PUBLIC_SENTRY_DSN,
     allowedCorsOrigins: parseAllowedOrigins(rawEnv.ALLOWED_CORS_ORIGINS),
+    audioBaseUrl,
     isClerkConfigured: Boolean(rawEnv.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && rawEnv.CLERK_SECRET_KEY),
     isDatabaseConfigured: Boolean(rawEnv.DATABASE_URL),
     isSentryConfigured: Boolean(rawEnv.NEXT_PUBLIC_SENTRY_DSN),

@@ -1,14 +1,12 @@
 import { backgroundCatalog } from '@/lib/backgrounds';
 import { z } from 'zod';
-import { trackCatalog } from '../repositories/app-repository';
 
 const backgroundIds = new Set(backgroundCatalog.map((background) => background.id));
-const trackIds = new Set(trackCatalog.map((track) => track.id));
 
 const modeSchema = z.string().trim().min(1).max(40).regex(/^[\p{L}\p{N}\s_-]+$/u);
-const trackIdSchema = z.string().min(1).max(64).refine((trackId) => trackIds.has(trackId), {
-    message: 'Unknown track id.',
-});
+// Shape-only: the track catalog now lives in the DB, so membership is not validated here.
+// An unknown id simply yields no playable track (handled gracefully in the player).
+const trackIdSchema = z.string().min(1).max(64);
 const nullableTrackIdSchema = trackIdSchema.nullable();
 const nullableBackgroundIdSchema = z
     .string()
