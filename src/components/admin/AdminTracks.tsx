@@ -4,9 +4,9 @@ import { Button } from '@/components/ui/button';
 import {
     useAdminTracksQuery,
     useDeleteTrackMutation,
+    useImportTrackMutation,
     useReplaceTrackAssetMutation,
     useUpdateTrackMutation,
-    useUploadTrackMutation,
 } from '@/hooks/use-admin-data';
 import { describeApiError } from '@/lib/api';
 import { AdminTrack } from '@/models/app';
@@ -33,7 +33,7 @@ function slugify(value: string): string {
 }
 
 function ImportForm() {
-    const upload = useUploadTrackMutation();
+    const importTrack = useImportTrackMutation();
     const [file, setFile] = useState<File | null>(null);
     const [id, setId] = useState('');
     const [idTouched, setIdTouched] = useState(false);
@@ -60,30 +60,32 @@ function ImportForm() {
             toast.error('Choose an audio file to import.');
             return;
         }
-        const form = new FormData();
-        form.set('file', file);
-        form.set('id', id);
-        form.set('title', title);
-        form.set('artist', artist);
-        form.set('category', category);
-        form.set('tags', tags);
-        if (cover) form.set('cover', cover);
-
-        upload.mutate(form, {
-            onSuccess: (track) => {
-                toast.success(`Imported "${track.title}"`);
-                reset();
+        importTrack.mutate(
+            {
+                id,
+                title,
+                artist,
+                category,
+                tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
+                file,
+                cover,
             },
-            onError: (error) => toast.error('Import failed', { description: describeApiError(error) }),
-        });
+            {
+                onSuccess: (track) => {
+                    toast.success(`Imported "${track.title}"`);
+                    reset();
+                },
+                onError: (error) => toast.error('Import failed', { description: describeApiError(error) }),
+            },
+        );
     };
 
     return (
         <form onSubmit={handleSubmit} className="rounded-lg border border-white/10 bg-white/[0.03] p-5">
             <h2 className="text-lg font-semibold">Import a track</h2>
             <p className="mt-1 text-sm text-neutral-400">
-                Upload an audio file; duration is detected automatically. Files are stored under{' '}
-                <code className="text-neutral-300">public/audio/</code> in development.
+                Upload an audio file; duration is detected automatically. Files upload straight to R2 when
+                configured, or to <code className="text-neutral-300">public/audio/</code> in local dev.
             </p>
 
             <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -147,8 +149,8 @@ function ImportForm() {
             </div>
 
             <div className="mt-4 flex justify-end">
-                <Button type="submit" disabled={upload.isPending} className="bg-white text-black hover:bg-neutral-200">
-                    {upload.isPending ? 'Importing…' : 'Import track'}
+                <Button type="submit" disabled={importTrack.isPending} className="bg-white text-black hover:bg-neutral-200">
+                    {importTrack.isPending ? 'Importing…' : 'Import track'}
                 </Button>
             </div>
         </form>
@@ -173,18 +175,17 @@ function TrackRow({ track }: { track: AdminTrack }) {
             toast.error('Choose a new audio file or cover to replace.');
             return;
         }
-        const form = new FormData();
-        form.set('id', track.id);
-        if (newAudio) form.set('file', newAudio);
-        if (newCover) form.set('cover', newCover);
-        replaceAsset.mutate(form, {
-            onSuccess: () => {
-                toast.success('Files replaced');
-                setNewAudio(null);
-                setNewCover(null);
+        replaceAsset.mutate(
+            { id: track.id, audio: newAudio, cover: newCover },
+            {
+                onSuccess: () => {
+                    toast.success('Files replaced');
+                    setNewAudio(null);
+                    setNewCover(null);
+                },
+                onError: (error) => toast.error('Replace failed', { description: describeApiError(error) }),
             },
-            onError: (error) => toast.error('Replace failed', { description: describeApiError(error) }),
-        });
+        );
     };
 
     const cancel = () => {

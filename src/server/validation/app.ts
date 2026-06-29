@@ -146,3 +146,27 @@ export const updateTrackInputSchema = z
 export const deleteTrackAdminInputSchema = z.object({
     id: trackAdminIdSchema,
 });
+
+/** Create a track row whose file(s) were already uploaded directly to R2 (presigned flow). */
+export const createTrackInputSchema = z.object({
+    id: trackAdminIdSchema,
+    storageKey: trackStorageKeySchema,
+    title: trackTitleSchema,
+    artist: trackArtistSchema,
+    category: trackCategorySchema,
+    tags: trackTagsSchema.default([]),
+    durationSec: trackDurationSchema,
+    thumbnailKey: trackStorageKeySchema.nullish(),
+});
+
+const trackAssetExtSchema = z.string().trim().regex(/^\.[a-z0-9]+$/, 'Extension must look like ".mp3".');
+
+export const presignTrackInputSchema = z
+    .object({
+        id: trackAdminIdSchema,
+        audioExt: trackAssetExtSchema.optional(),
+        coverExt: trackAssetExtSchema.optional(),
+    })
+    .refine((input) => input.audioExt !== undefined || input.coverExt !== undefined, {
+        message: 'Provide audioExt and/or coverExt.',
+    });

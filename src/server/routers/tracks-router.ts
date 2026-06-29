@@ -1,7 +1,16 @@
+import { appEnv } from '@/lib/env';
+import { HTTPException } from 'hono/http-exception';
 import { adminMutationProcedure, adminProcedure, j, publicProcedure } from '../jstack';
 import { appRepository } from '../repositories/app-repository';
-import { getAudioStorage } from '../storage/audio-storage';
-import { deleteTrackAdminInputSchema, trackLookupInputSchema, updateTrackInputSchema } from '../validation/app';
+import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS } from '../storage/asset-upload';
+import { getAudioStorage, presignUpload } from '../storage/audio-storage';
+import {
+    createTrackInputSchema,
+    deleteTrackAdminInputSchema,
+    presignTrackInputSchema,
+    trackLookupInputSchema,
+    updateTrackInputSchema,
+} from '../validation/app';
 
 export const tracksRouter = j.router({
     list: publicProcedure.query(async ({ c, ctx }) => {
@@ -43,5 +52,53 @@ export const tracksRouter = j.router({
             );
         }
         return c.superjson({ success: Boolean(removed) });
+    }),
+
+    create: adminMutationProcedure.input(createTrackInputSchema).mutation(async ({ c, ctx, input }) => {
+        if (await appRepository.getTrackById(ctx.db, input.id)) {
+            throw new HTTPException(409, { message: `A track with id "${input.id}" already exists.` });
+        }
+        return c.superjson(
+            await appRepository.createTrack(ctx.db, {
+                id: input.id,
+                storageKey: input.storageKey,
+                title: input.title,
+                artist: input.artist,
+                category: input.category,
+                tags: input.tags,
+                durationSec: input.durationSec,
+                thumbnailKey: input.thumbnailKey ?? null,
+            }),
+        );
+    }),
+
+    // Hand the browser presigned PUT URLs so it uploads files straight to R2, bypassing the
+    // serverless body-size limit. Falls back to 'local' (multipart route) when R2 is off.
+    presignUpload: adminMutationProcedure.input(presignTrackInputSchema).mutation(async ({ c, input }) => {
+        if (!appEnv.isR2Configured) {
+            return c.superjson({ mode: 'local' as const });
+        }
+
+        let audio: { key: string; url: string; headers: Record<string, string> } | null = null;
+        let cover: { key: string; url: string; headers: Record<string, string> } | null = null;
+
+        if (input.audioExt) {
+            if (!AUDIO_EXTENSIONS.has(input.audioExt)) {
+                throw new HTTPException(422, { message: `Unsupported audio type: ${input.audioExt}` });
+            }
+            const key = `${input.id}${input.audioExt}`;
+            const signed = await presignUpload(key);
+            if (signed) audio = { key, ...signed };
+        }
+        if (input.coverExt) {
+            if (!IMAGE_EXTENSIONS.has(input.coverExt)) {
+                throw new HTTPException(422, { message: `Unsupported image type: ${input.coverExt}` });
+            }
+            const key = `cover-${input.id}${input.coverExt}`;
+            const signed = await presignUpload(key);
+            if (signed) cover = { key, ...signed };
+        }
+
+        return c.superjson({ mode: 'r2' as const, audio, cover });
     }),
 });
