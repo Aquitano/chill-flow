@@ -176,10 +176,20 @@ export const PlayerControls: React.FC = () => {
     // When a track ends naturally (loop disabled), advance to the next one. With
     // Repeat enabled the engine loops the element, so no `ended` event fires.
     useEffect(() => {
-        const handleEnded = () => nextTrack();
+        const handleEnded = () => {
+            // With a single-track catalog, "next" resolves to the same track, so the
+            // URL-keyed load effect won't re-fire — restart it explicitly instead of
+            // dead-stopping at the end (which would also leave the UI showing "Pause").
+            if (useAppStore.getState().tracks.length <= 1) {
+                engine.seek(0);
+                engine.play().catch((err) => reportAudioFailure(toAudioErrorMessage(err)));
+                return;
+            }
+            nextTrack();
+        };
         engine.addEventListener('ended', handleEnded);
         return () => engine.removeEventListener('ended', handleEnded);
-    }, [engine, nextTrack]);
+    }, [engine, nextTrack, reportAudioFailure]);
 
     const handleTogglePlay = () => {
         togglePlay();

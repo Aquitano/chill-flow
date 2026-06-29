@@ -1,10 +1,11 @@
 [
     {
-        "id": "audio_1",
-        "storageKey": "UnioMystica_Relax_Recharge_Electronic_15_120bpm_LowNEL_Nrmlzd2_VBR5.mp3",
-        "title": "UnioMystica Relax Recharge Electronic 15 120bpm LowNEL Nrmlzd2 VBR5",
+        "id": "relax-recharge-01",
+        "storageKey": "relax-recharge.mp3",
+        "title": "Relax & Recharge",
         "artist": "UnioMystica",
         "category": "focus",
+        "tags": ["focus", "electronic"],
         "durationSec": 900
     }
 ]

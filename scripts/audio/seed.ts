@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import process from 'node:process';
+import { notInArray } from 'drizzle-orm';
 import { createDatabase } from '../../src/server/db/client';
 import { tracks } from '../../src/server/db/schema';
 import { readManifest, type ManifestEntry } from './_shared';
@@ -60,6 +61,15 @@ for (const entry of manifest) {
             },
         });
     console.log(`Seeded ${entry.id}`);
+}
+
+// Mirror the manifest: drop rows that are no longer listed so the table can't keep stale
+// tracks (e.g. after an id rename). trackId on sessions is a plain string, not an FK, so
+// removing a track does not corrupt existing focus-session history.
+const manifestIds = manifest.map((entry) => entry.id);
+const removed = await db.delete(tracks).where(notInArray(tracks.id, manifestIds)).returning({ id: tracks.id });
+if (removed.length > 0) {
+    console.log(`Removed ${removed.length} stale track(s) not in manifest: ${removed.map((row) => row.id).join(', ')}`);
 }
 
 console.log(`Seeded ${manifest.length} track(s) into the tracks table.`);
