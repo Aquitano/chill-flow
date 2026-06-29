@@ -42,7 +42,7 @@ export function getEnvWarnings() {
     const warnings: string[] = [];
 
     if (!appEnv.isClerkConfigured) {
-        warnings.push('Clerk keys are missing. Authenticated mode is disabled and the app runs in demo mode.');
+        warnings.push('Clerk keys are missing. Sign-in and the protected workspace are disabled until Clerk is configured.');
     }
 
     if (!appEnv.isDatabaseConfigured) {
