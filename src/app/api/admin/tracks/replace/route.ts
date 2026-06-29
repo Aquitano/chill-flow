@@ -8,8 +8,8 @@ import {
     MAX_AUDIO_BYTES,
     MAX_IMAGE_BYTES,
     fileExtension,
-    probeDurationSeconds,
-    storeFile,
+    probeDurationFromBytes,
+    readFileBytes,
 } from '@/server/storage/asset-upload';
 import { auth } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
@@ -49,6 +49,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ message: 'Provide a new audio file or cover image.' }, { status: 422 });
     }
 
+    const storage = getAudioStorage();
     const updates: TrackUpdate = {};
     const staleKeys: string[] = [];
 
@@ -61,9 +62,10 @@ export async function POST(request: Request) {
             return NextResponse.json({ message: `Unsupported audio type: ${ext}` }, { status: 422 });
         }
         const newKey = `${id}${ext}`;
-        await storeFile(newKey, audio);
+        const audioBytes = await readFileBytes(audio);
+        await storage.put(newKey, audioBytes);
         updates.storageKey = newKey;
-        updates.durationSec = await probeDurationSeconds(newKey);
+        updates.durationSec = await probeDurationFromBytes(audioBytes, ext);
         if (existing.storageKey !== newKey) staleKeys.push(existing.storageKey);
     }
 
@@ -76,7 +78,7 @@ export async function POST(request: Request) {
             return NextResponse.json({ message: `Unsupported image type: ${ext}` }, { status: 422 });
         }
         const newKey = `cover-${id}${ext}`;
-        await storeFile(newKey, cover);
+        await storage.put(newKey, await readFileBytes(cover));
         updates.thumbnailKey = newKey;
         if (existing.thumbnailKey && existing.thumbnailKey !== newKey) staleKeys.push(existing.thumbnailKey);
     }
@@ -84,13 +86,7 @@ export async function POST(request: Request) {
     const updated = await appRepository.updateTrack(database, id, updates);
 
     // Remove superseded files only after the row points at the new ones.
-    await Promise.all(
-        staleKeys.map((key) =>
-            getAudioStorage()
-                .remove(key)
-                .catch(() => {}),
-        ),
-    );
+    await Promise.all(staleKeys.map((key) => storage.remove(key).catch(() => {})));
 
     return NextResponse.json(updated);
 }

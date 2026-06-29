@@ -7,9 +7,10 @@ import {
     MAX_AUDIO_BYTES,
     MAX_IMAGE_BYTES,
     fileExtension,
-    probeDurationSeconds,
-    storeFile,
+    probeDurationFromBytes,
+    readFileBytes,
 } from '@/server/storage/asset-upload';
+import { getAudioStorage } from '@/server/storage/audio-storage';
 import { uploadTrackMetadataSchema } from '@/server/validation/app';
 import { auth } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
@@ -76,11 +77,13 @@ export async function POST(request: Request) {
         return NextResponse.json({ message: `A track with id "${metadata.id}" already exists.` }, { status: 409 });
     }
 
+    const storage = getAudioStorage();
     const storageKey = `${metadata.id}${audioExt}`;
-    await storeFile(storageKey, file);
-    const durationSec = await probeDurationSeconds(storageKey);
+    const audioBytes = await readFileBytes(file);
+    await storage.put(storageKey, audioBytes);
+    const durationSec = await probeDurationFromBytes(audioBytes, audioExt);
     if (thumbnailKey && cover instanceof File) {
-        await storeFile(thumbnailKey, cover);
+        await storage.put(thumbnailKey, await readFileBytes(cover));
     }
 
     const track = await appRepository.createTrack(database, {

@@ -22,6 +22,7 @@
         "db:seed:tracks": "bun scripts/audio/seed.ts"
     },
     "dependencies": {
+        "@aws-sdk/client-s3": "^3.1075.0",
         "@clerk/nextjs": "^6.36.9",
         "@million/lint": "^1.0.14",
         "@neondatabase/serverless": "^1.0.2",

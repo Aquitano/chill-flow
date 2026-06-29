@@ -8,6 +8,10 @@ const envSchema = z.object({
     NEXT_PUBLIC_SENTRY_DSN: z.url().optional(),
     ALLOWED_CORS_ORIGINS: z.string().optional(),
     AUDIO_BASE_URL: z.string().optional(),
+    R2_ACCOUNT_ID: z.string().optional(),
+    R2_ACCESS_KEY_ID: z.string().optional(),
+    R2_SECRET_ACCESS_KEY: z.string().optional(),
+    R2_BUCKET: z.string().optional(),
 });
 
 const parsedEnv = envSchema.safeParse({
@@ -17,9 +21,25 @@ const parsedEnv = envSchema.safeParse({
     NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN,
     ALLOWED_CORS_ORIGINS: process.env.ALLOWED_CORS_ORIGINS,
     AUDIO_BASE_URL: process.env.AUDIO_BASE_URL,
+    R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID,
+    R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
+    R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
+    R2_BUCKET: process.env.R2_BUCKET,
 });
 
 const rawEnv = parsedEnv.success ? parsedEnv.data : {};
+
+// R2 upload backend is active only when all four credentials are present; otherwise admin
+// uploads fall back to the local public/audio/ backend (dev only).
+const r2 =
+    rawEnv.R2_ACCOUNT_ID && rawEnv.R2_ACCESS_KEY_ID && rawEnv.R2_SECRET_ACCESS_KEY && rawEnv.R2_BUCKET
+        ? {
+              accountId: rawEnv.R2_ACCOUNT_ID,
+              accessKeyId: rawEnv.R2_ACCESS_KEY_ID,
+              secretAccessKey: rawEnv.R2_SECRET_ACCESS_KEY,
+              bucket: rawEnv.R2_BUCKET,
+          }
+        : null;
 
 // Base for resolving track storage keys to playable URLs. Server-only (not NEXT_PUBLIC):
 // the catalog router resolves keys before sending them to the client. Dev serves audio
@@ -33,6 +53,8 @@ export const appEnv = {
     sentryDsn: rawEnv.NEXT_PUBLIC_SENTRY_DSN,
     allowedCorsOrigins: parseAllowedOrigins(rawEnv.ALLOWED_CORS_ORIGINS),
     audioBaseUrl,
+    r2,
+    isR2Configured: Boolean(r2),
     isClerkConfigured: Boolean(rawEnv.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && rawEnv.CLERK_SECRET_KEY),
     isDatabaseConfigured: Boolean(rawEnv.DATABASE_URL),
     isSentryConfigured: Boolean(rawEnv.NEXT_PUBLIC_SENTRY_DSN),

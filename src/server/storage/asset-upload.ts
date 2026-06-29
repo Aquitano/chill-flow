@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { getAudioStorage, localAudioPath } from './audio-storage';
 
 const execFileAsync = promisify(execFile);
 
@@ -14,14 +15,20 @@ export function fileExtension(file: File, fallback: string): string {
     return path.extname(file.name).toLowerCase() || fallback;
 }
 
-export async function storeFile(key: string, file: File): Promise<void> {
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    await getAudioStorage().put(key, bytes);
+export async function readFileBytes(file: File): Promise<Uint8Array> {
+    return new Uint8Array(await file.arrayBuffer());
 }
 
-/** ffprobe the stored file for its duration; returns 0 if ffprobe is unavailable or fails. */
-export async function probeDurationSeconds(storageKey: string): Promise<number> {
+/**
+ * ffprobe a track's duration from its bytes (via a temp file), so it works no matter which
+ * storage backend the file lives in. Returns 0 if ffprobe is unavailable (e.g. on Vercel,
+ * where the admin can set the duration manually afterward).
+ */
+export async function probeDurationFromBytes(bytes: Uint8Array, ext: string): Promise<number> {
+    const dir = await mkdtemp(path.join(tmpdir(), 'chillflow-audio-'));
+    const tempFile = path.join(dir, `probe${ext}`);
     try {
+        await writeFile(tempFile, bytes);
         const { stdout } = await execFileAsync('ffprobe', [
             '-v',
             'error',
@@ -29,11 +36,13 @@ export async function probeDurationSeconds(storageKey: string): Promise<number> 
             'format=duration',
             '-of',
             'default=noprint_wrappers=1:nokey=1',
-            localAudioPath(storageKey),
+            tempFile,
         ]);
         const seconds = Math.round(Number(stdout.trim()));
         return Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
     } catch {
         return 0;
+    } finally {
+        await rm(dir, { recursive: true, force: true });
     }
 }
