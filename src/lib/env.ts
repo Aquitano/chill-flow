@@ -12,6 +12,7 @@ const envSchema = z.object({
     R2_ACCESS_KEY_ID: z.string().optional(),
     R2_SECRET_ACCESS_KEY: z.string().optional(),
     R2_BUCKET: z.string().optional(),
+    R2_JURISDICTION: z.string().optional(),
 });
 
 const parsedEnv = envSchema.safeParse({
@@ -25,12 +26,21 @@ const parsedEnv = envSchema.safeParse({
     R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
     R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
     R2_BUCKET: process.env.R2_BUCKET,
+    R2_JURISDICTION: process.env.R2_JURISDICTION,
 });
 
 const rawEnv = parsedEnv.success ? parsedEnv.data : {};
 
 // R2 upload backend is active only when all four credentials are present; otherwise admin
 // uploads fall back to the local public/audio/ backend (dev only).
+// R2 buckets in a jurisdiction (e.g. "eu") use a region-prefixed S3 endpoint; the default
+// jurisdiction uses the bare account endpoint.
+function r2Endpoint(accountId: string, jurisdiction?: string): string {
+    const region = jurisdiction?.trim().toLowerCase();
+    const infix = region && region !== 'default' ? `${region}.` : '';
+    return `https://${accountId}.${infix}r2.cloudflarestorage.com`;
+}
+
 const r2 =
     rawEnv.R2_ACCOUNT_ID && rawEnv.R2_ACCESS_KEY_ID && rawEnv.R2_SECRET_ACCESS_KEY && rawEnv.R2_BUCKET
         ? {
@@ -38,6 +48,7 @@ const r2 =
               accessKeyId: rawEnv.R2_ACCESS_KEY_ID,
               secretAccessKey: rawEnv.R2_SECRET_ACCESS_KEY,
               bucket: rawEnv.R2_BUCKET,
+              endpoint: r2Endpoint(rawEnv.R2_ACCOUNT_ID, rawEnv.R2_JURISDICTION),
           }
         : null;
 

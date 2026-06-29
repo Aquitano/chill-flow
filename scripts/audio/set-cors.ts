@@ -19,7 +19,7 @@ const rules = JSON.parse(readFileSync(corsPath, 'utf8'));
 
 const client = new S3Client({
     region: 'auto',
-    endpoint: `https://${r2.accountId}.r2.cloudflarestorage.com`,
+    endpoint: r2.endpoint,
     credentials: { accessKeyId: r2.accessKeyId, secretAccessKey: r2.secretAccessKey },
 });
 

@@ -62,7 +62,7 @@ class R2AudioStorage implements AudioStorage {
     constructor(config: NonNullable<typeof appEnv.r2>) {
         this.client = new S3Client({
             region: 'auto',
-            endpoint: `https://${config.accountId}.r2.cloudflarestorage.com`,
+            endpoint: config.endpoint,
             credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey },
         });
         this.bucket = config.bucket;
