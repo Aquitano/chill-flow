@@ -2,9 +2,8 @@ import type { AppRouter } from '@/server';
 import { createClient } from 'jstack';
 
 /**
- * Resolve the API base URL. In the browser, use the current origin. On the server (SSR),
- * prefer an explicit app URL, then Vercel's deployment URL, falling back to localhost for
- * local dev — never hardcode localhost in production.
+ * On the server, resolve from NEXT_PUBLIC_APP_URL / VERCEL_URL so production SSR never points
+ * at localhost; in the browser, use the current origin.
  */
 function getApiBaseUrl(): string {
     if (typeof window !== 'undefined') {

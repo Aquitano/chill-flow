@@ -89,8 +89,6 @@ export const trackLookupInputSchema = z.object({
     id: trackIdSchema,
 });
 
-// --- Admin track management ---
-
 const trackAdminIdSchema = z
     .string()
     .trim()

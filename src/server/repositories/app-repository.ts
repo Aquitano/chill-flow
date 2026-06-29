@@ -6,7 +6,6 @@ import { and, asc, desc, eq, isNotNull, ne } from 'drizzle-orm';
 import { Database } from '../db/client';
 import { DEFAULT_POMODORO_SETTINGS, focusSessions, tasks, tracks, userPreferences } from '../db/schema';
 
-/** Resolve a relative storage key to a playable URL against the configured audio base. */
 function resolveAudioUrl(storageKey: string): string {
     return `${appEnv.audioBaseUrl}/${storageKey.replace(/^\/+/, '')}`;
 }
