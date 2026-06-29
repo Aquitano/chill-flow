@@ -88,3 +88,61 @@ export const cancelSessionInputSchema = z.object({
 export const trackLookupInputSchema = z.object({
     id: trackIdSchema,
 });
+
+// --- Admin track management ---
+
+const trackAdminIdSchema = z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .regex(/^[A-Za-z0-9._-]+$/, 'Track id may only contain letters, numbers, dot, underscore, or hyphen.');
+const trackStorageKeySchema = z
+    .string()
+    .trim()
+    .min(1)
+    .max(128)
+    .regex(/^[A-Za-z0-9._-]+$/, 'Storage key must be a safe file name (no slashes).');
+const trackTitleSchema = z.string().trim().min(1).max(120);
+const trackArtistSchema = z.string().trim().min(1).max(120);
+const trackCategorySchema = z.string().trim().min(1).max(40);
+const trackTagsSchema = z.array(z.string().trim().min(1).max(40)).max(20);
+const trackDurationSchema = z
+    .number()
+    .int()
+    .min(0)
+    .max(24 * 60 * 60);
+
+/** Metadata fields for an upload (the file + storage key are handled by the route). */
+export const uploadTrackMetadataSchema = z.object({
+    id: trackAdminIdSchema,
+    title: trackTitleSchema,
+    artist: trackArtistSchema,
+    category: trackCategorySchema,
+    tags: trackTagsSchema.default([]),
+});
+
+export const updateTrackInputSchema = z
+    .object({
+        id: trackAdminIdSchema,
+        title: trackTitleSchema.optional(),
+        artist: trackArtistSchema.optional(),
+        category: trackCategorySchema.optional(),
+        tags: trackTagsSchema.optional(),
+        storageKey: trackStorageKeySchema.optional(),
+        durationSec: trackDurationSchema.optional(),
+    })
+    .refine(
+        (input) =>
+            input.title !== undefined ||
+            input.artist !== undefined ||
+            input.category !== undefined ||
+            input.tags !== undefined ||
+            input.storageKey !== undefined ||
+            input.durationSec !== undefined,
+        { message: 'Provide at least one track field to update.' },
+    );
+
+export const deleteTrackAdminInputSchema = z.object({
+    id: trackAdminIdSchema,
+});

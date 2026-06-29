@@ -1,7 +1,7 @@
 import { appEnv } from '@/lib/env';
 import { backgroundCatalog } from '@/lib/backgrounds';
 import { quotes } from '@/lib/quotes';
-import { Background, FocusSession, Task, Track, UserPreferences } from '@/models/app';
+import { AdminTrack, Background, FocusSession, Task, Track, UserPreferences } from '@/models/app';
 import { and, asc, desc, eq, isNotNull, ne } from 'drizzle-orm';
 import { Database } from '../db/client';
 import { DEFAULT_POMODORO_SETTINGS, focusSessions, tasks, tracks, userPreferences } from '../db/schema';
@@ -22,6 +22,20 @@ function mapTrack(row: typeof tracks.$inferSelect): Track {
         category: row.category,
     };
 }
+
+function mapAdminTrack(row: typeof tracks.$inferSelect): AdminTrack {
+    return { ...mapTrack(row), storageKey: row.storageKey };
+}
+
+type TrackWriteInput = {
+    id: string;
+    storageKey: string;
+    title: string;
+    artist: string;
+    category: string;
+    tags: string[];
+    durationSec: number;
+};
 
 export const defaultTasks: Task[] = [
     { id: crypto.randomUUID(), text: 'Review notes', isCompleted: false, priority: 'medium' },
@@ -182,6 +196,55 @@ export const appRepository = {
     async getTrackById(database: Database, trackId: string) {
         const [track] = await database.select().from(tracks).where(eq(tracks.id, trackId)).limit(1);
         return track ? mapTrack(track) : null;
+    },
+
+    async adminListTracks(database: Database): Promise<AdminTrack[]> {
+        const storedTracks = await database.select().from(tracks).orderBy(desc(tracks.createdAt));
+        return storedTracks.map(mapAdminTrack);
+    },
+
+    async createTrack(database: Database, input: TrackWriteInput): Promise<AdminTrack> {
+        const [created] = await database
+            .insert(tracks)
+            .values({
+                id: input.id,
+                title: input.title,
+                artist: input.artist,
+                category: input.category,
+                durationSec: input.durationSec,
+                tags: input.tags,
+                storageKey: input.storageKey,
+            })
+            .returning();
+
+        if (!created) {
+            throw new Error('Track could not be created.');
+        }
+
+        return mapAdminTrack(created);
+    },
+
+    async updateTrack(
+        database: Database,
+        trackId: string,
+        input: Partial<Omit<TrackWriteInput, 'id'>>,
+    ): Promise<AdminTrack | null> {
+        const [updated] = await database
+            .update(tracks)
+            .set({ ...input, updatedAt: new Date() })
+            .where(eq(tracks.id, trackId))
+            .returning();
+
+        return updated ? mapAdminTrack(updated) : null;
+    },
+
+    async deleteTrack(database: Database, trackId: string) {
+        const [deleted] = await database
+            .delete(tracks)
+            .where(eq(tracks.id, trackId))
+            .returning({ id: tracks.id, storageKey: tracks.storageKey });
+
+        return deleted ?? null;
     },
 
     listBackgrounds() {
