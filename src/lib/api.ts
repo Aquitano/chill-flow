@@ -97,6 +97,8 @@ export const api = {
         delete: (input: { id: string }) => unwrap<{ success: boolean }>(client.tracks.delete.$post(input)),
         upload: (formData: FormData) =>
             unwrap<AdminTrack>(fetch('/api/admin/tracks/upload', { method: 'POST', body: formData })),
+        replaceAsset: (formData: FormData) =>
+            unwrap<AdminTrack | null>(fetch('/api/admin/tracks/replace', { method: 'POST', body: formData })),
     },
     preferences: {
         get: () => unwrap<PreferencesPayload>(client.preferences.get.$get()),

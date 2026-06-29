@@ -33,11 +33,14 @@ export const tracksRouter = j.router({
 
     delete: adminMutationProcedure.input(deleteTrackAdminInputSchema).mutation(async ({ c, ctx, input }) => {
         const removed = await appRepository.deleteTrack(ctx.db, input.id);
-        if (removed?.storageKey) {
+        if (removed) {
             // Best-effort: a missing file shouldn't fail the row deletion.
-            await getAudioStorage()
-                .remove(removed.storageKey)
-                .catch(() => {});
+            const storage = getAudioStorage();
+            await Promise.all(
+                [removed.storageKey, removed.thumbnailKey]
+                    .filter((key): key is string => Boolean(key))
+                    .map((key) => storage.remove(key).catch(() => {})),
+            );
         }
         return c.superjson({ success: Boolean(removed) });
     }),

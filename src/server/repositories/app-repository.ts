@@ -17,6 +17,7 @@ function mapTrack(row: typeof tracks.$inferSelect): Track {
         title: row.title,
         artist: row.artist,
         audioUrl: resolveAudioUrl(row.storageKey),
+        thumbnailUrl: row.thumbnailKey ? resolveAudioUrl(row.thumbnailKey) : undefined,
         duration: row.durationSec,
         tags: row.tags,
         category: row.category,
@@ -24,7 +25,7 @@ function mapTrack(row: typeof tracks.$inferSelect): Track {
 }
 
 function mapAdminTrack(row: typeof tracks.$inferSelect): AdminTrack {
-    return { ...mapTrack(row), storageKey: row.storageKey };
+    return { ...mapTrack(row), storageKey: row.storageKey, thumbnailKey: row.thumbnailKey };
 }
 
 type TrackWriteInput = {
@@ -35,6 +36,7 @@ type TrackWriteInput = {
     category: string;
     tags: string[];
     durationSec: number;
+    thumbnailKey?: string | null;
 };
 
 export const defaultTasks: Task[] = [
@@ -203,6 +205,11 @@ export const appRepository = {
         return storedTracks.map(mapAdminTrack);
     },
 
+    async getAdminTrackById(database: Database, trackId: string): Promise<AdminTrack | null> {
+        const [track] = await database.select().from(tracks).where(eq(tracks.id, trackId)).limit(1);
+        return track ? mapAdminTrack(track) : null;
+    },
+
     async createTrack(database: Database, input: TrackWriteInput): Promise<AdminTrack> {
         const [created] = await database
             .insert(tracks)
@@ -214,6 +221,7 @@ export const appRepository = {
                 durationSec: input.durationSec,
                 tags: input.tags,
                 storageKey: input.storageKey,
+                thumbnailKey: input.thumbnailKey ?? null,
             })
             .returning();
 
@@ -242,7 +250,7 @@ export const appRepository = {
         const [deleted] = await database
             .delete(tracks)
             .where(eq(tracks.id, trackId))
-            .returning({ id: tracks.id, storageKey: tracks.storageKey });
+            .returning({ id: tracks.id, storageKey: tracks.storageKey, thumbnailKey: tracks.thumbnailKey });
 
         return deleted ?? null;
     },

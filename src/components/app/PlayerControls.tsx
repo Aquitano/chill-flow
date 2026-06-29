@@ -237,7 +237,15 @@ export const PlayerControls: React.FC = () => {
 
             <div className="flex items-center justify-between gap-4">
                 <div className="flex min-w-0 items-center space-x-4">
-                <div className="h-12 w-12 rounded-md bg-linear-to-br from-stone-400 to-stone-600 shadow-md" />
+                {currentTrack?.thumbnailUrl ? (
+                    <img
+                        src={currentTrack.thumbnailUrl}
+                        alt=""
+                        className="h-12 w-12 rounded-md object-cover shadow-md"
+                    />
+                ) : (
+                    <div className="h-12 w-12 rounded-md bg-linear-to-br from-stone-400 to-stone-600 shadow-md" />
+                )}
                 <div className="min-w-0 text-left">
                     <h2 className="truncate text-base font-semibold">{currentTrack?.title ?? 'Select a track'}</h2>
                     <p className="truncate text-sm text-stone-400">{currentTrack?.artist ?? 'Track catalog ready'}</p>

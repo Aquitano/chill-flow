@@ -23,6 +23,8 @@ export const tracks = pgTable(
         // Relative storage key (e.g. 'deep-focus-01.mp3'). Resolved to a full URL at read
         // time against AUDIO_BASE_URL, so the same row serves dev (public/) and prod (R2).
         storageKey: text('storageKey').notNull(),
+        // Optional cover-art key, resolved against the same base as the audio key.
+        thumbnailKey: text('thumbnailKey'),
         createdAt: timestamp('createdAt').defaultNow().notNull(),
         updatedAt: timestamp('updatedAt').defaultNow().notNull(),
     },

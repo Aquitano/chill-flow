@@ -46,3 +46,11 @@ export function useUploadTrackMutation() {
         onSuccess: () => invalidate(),
     });
 }
+
+export function useReplaceTrackAssetMutation() {
+    const invalidate = useInvalidateTracks();
+    return useMutation({
+        mutationFn: (formData: FormData) => api.tracks.replaceAsset(formData),
+        onSuccess: () => invalidate(),
+    });
+}

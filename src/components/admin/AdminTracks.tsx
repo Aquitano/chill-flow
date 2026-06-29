@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import {
     useAdminTracksQuery,
     useDeleteTrackMutation,
+    useReplaceTrackAssetMutation,
     useUpdateTrackMutation,
     useUploadTrackMutation,
 } from '@/hooks/use-admin-data';
@@ -40,6 +41,7 @@ function ImportForm() {
     const [artist, setArtist] = useState('');
     const [category, setCategory] = useState('focus');
     const [tags, setTags] = useState('');
+    const [cover, setCover] = useState<File | null>(null);
 
     const reset = () => {
         setFile(null);
@@ -49,6 +51,7 @@ function ImportForm() {
         setArtist('');
         setCategory('focus');
         setTags('');
+        setCover(null);
     };
 
     const handleSubmit = (event: React.FormEvent) => {
@@ -64,6 +67,7 @@ function ImportForm() {
         form.set('artist', artist);
         form.set('category', category);
         form.set('tags', tags);
+        if (cover) form.set('cover', cover);
 
         upload.mutate(form, {
             onSuccess: (track) => {
@@ -129,6 +133,17 @@ function ImportForm() {
                     </span>
                     <input className={inputClass} value={tags} onChange={(e) => setTags(e.target.value)} placeholder="focus, electronic" />
                 </label>
+                <label className="md:col-span-2">
+                    <span className="mb-1 block text-xs uppercase tracking-wide text-neutral-400">
+                        Cover art (optional)
+                    </span>
+                    <input
+                        type="file"
+                        accept="image/*"
+                        className={`${inputClass} file:mr-3 file:rounded file:border-0 file:bg-white/10 file:px-3 file:py-1 file:text-white`}
+                        onChange={(event) => setCover(event.target.files?.[0] ?? null)}
+                    />
+                </label>
             </div>
 
             <div className="mt-4 flex justify-end">
@@ -143,12 +158,34 @@ function ImportForm() {
 function TrackRow({ track }: { track: AdminTrack }) {
     const update = useUpdateTrackMutation();
     const remove = useDeleteTrackMutation();
+    const replaceAsset = useReplaceTrackAssetMutation();
     const [isEditing, setIsEditing] = useState(false);
     const [title, setTitle] = useState(track.title);
     const [artist, setArtist] = useState(track.artist);
     const [category, setCategory] = useState(track.category ?? '');
     const [tags, setTags] = useState(track.tags.join(', '));
     const [durationSec, setDurationSec] = useState(String(track.duration));
+    const [newAudio, setNewAudio] = useState<File | null>(null);
+    const [newCover, setNewCover] = useState<File | null>(null);
+
+    const replaceFiles = () => {
+        if (!newAudio && !newCover) {
+            toast.error('Choose a new audio file or cover to replace.');
+            return;
+        }
+        const form = new FormData();
+        form.set('id', track.id);
+        if (newAudio) form.set('file', newAudio);
+        if (newCover) form.set('cover', newCover);
+        replaceAsset.mutate(form, {
+            onSuccess: () => {
+                toast.success('Files replaced');
+                setNewAudio(null);
+                setNewCover(null);
+            },
+            onError: (error) => toast.error('Replace failed', { description: describeApiError(error) }),
+        });
+    };
 
     const cancel = () => {
         setTitle(track.title);
@@ -207,11 +244,45 @@ function TrackRow({ track }: { track: AdminTrack }) {
                             onChange={(e) => setDurationSec(e.target.value)}
                             aria-label="Duration in seconds"
                         />
-                        <p className="self-center text-xs text-neutral-500">
-                            key: <code className="text-neutral-400">{track.storageKey}</code>
-                        </p>
+                        <div className="self-center text-xs text-neutral-500">
+                            <div>
+                                key: <code className="text-neutral-400">{track.storageKey}</code>
+                            </div>
+                            {track.thumbnailUrl && (
+                                <img src={track.thumbnailUrl} alt="" className="mt-2 h-12 w-12 rounded object-cover" />
+                            )}
+                        </div>
                     </div>
-                    <div className="mt-3 flex gap-2">
+
+                    <div className="mt-4 border-t border-white/10 pt-3">
+                        <p className="mb-2 text-xs uppercase tracking-wide text-neutral-400">Replace files (optional)</p>
+                        <div className="grid gap-3 md:grid-cols-2">
+                            <input
+                                type="file"
+                                accept="audio/*"
+                                className={`${inputClass} file:mr-3 file:rounded file:border-0 file:bg-white/10 file:px-3 file:py-1 file:text-white`}
+                                onChange={(e) => setNewAudio(e.target.files?.[0] ?? null)}
+                                aria-label="Replace audio file"
+                            />
+                            <input
+                                type="file"
+                                accept="image/*"
+                                className={`${inputClass} file:mr-3 file:rounded file:border-0 file:bg-white/10 file:px-3 file:py-1 file:text-white`}
+                                onChange={(e) => setNewCover(e.target.files?.[0] ?? null)}
+                                aria-label="Replace cover art"
+                            />
+                        </div>
+                        <Button
+                            onClick={replaceFiles}
+                            disabled={replaceAsset.isPending}
+                            variant="outline"
+                            className="mt-2 border-white/15 bg-transparent text-white hover:bg-white/10"
+                        >
+                            {replaceAsset.isPending ? 'Replacing…' : 'Replace files'}
+                        </Button>
+                    </div>
+
+                    <div className="mt-4 flex gap-2">
                         <Button onClick={save} disabled={update.isPending} className="bg-white text-black hover:bg-neutral-200">
                             {update.isPending ? 'Saving…' : 'Save'}
                         </Button>
@@ -227,8 +298,17 @@ function TrackRow({ track }: { track: AdminTrack }) {
     return (
         <tr className="border-t border-white/10">
             <td className="p-3">
-                <div className="font-medium">{track.title}</div>
-                <div className="text-xs text-neutral-500">{track.id}</div>
+                <div className="flex items-center gap-3">
+                    {track.thumbnailUrl ? (
+                        <img src={track.thumbnailUrl} alt="" className="h-9 w-9 shrink-0 rounded object-cover" />
+                    ) : (
+                        <div className="h-9 w-9 shrink-0 rounded bg-gradient-to-br from-stone-500 to-stone-700" />
+                    )}
+                    <div className="min-w-0">
+                        <div className="font-medium">{track.title}</div>
+                        <div className="text-xs text-neutral-500">{track.id}</div>
+                    </div>
+                </div>
             </td>
             <td className="p-3 text-neutral-300">{track.artist}</td>
             <td className="p-3 text-neutral-300">{track.category ?? '—'}</td>
