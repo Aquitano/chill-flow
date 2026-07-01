@@ -2,7 +2,7 @@ import { appEnv } from '@/lib/env';
 import { HTTPException } from 'hono/http-exception';
 import { adminMutationProcedure, adminProcedure, j, publicProcedure } from '../jstack';
 import { appRepository } from '../repositories/app-repository';
-import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, MAX_AUDIO_BYTES, MAX_IMAGE_BYTES } from '../storage/asset-upload';
+import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, MAX_AUDIO_BYTES, MAX_IMAGE_BYTES, uniqueAssetKey } from '../storage/asset-upload';
 import { getAudioStorage, presignUpload } from '../storage/audio-storage';
 import {
     createTrackInputSchema,
@@ -11,15 +11,6 @@ import {
     trackLookupInputSchema,
     updateTrackInputSchema,
 } from '../validation/app';
-
-// A short random suffix so every uploaded object gets a unique, content-independent key.
-// R2 serves objects with a one-year immutable cache, so reusing an id-based key on replace
-// would keep serving the old bytes (and an id collision on import would overwrite another
-// track's audio); a fresh key per upload sidesteps both.
-function uniqueAssetKey(prefix: string, ext: string): string {
-    const token = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
-    return `${prefix}-${token}${ext}`;
-}
 
 async function removeStoredKeys(keys: (string | null | undefined)[]): Promise<void> {
     const storage = getAudioStorage();
@@ -80,24 +71,29 @@ export const tracksRouter = j.router({
     }),
 
     create: adminMutationProcedure.input(createTrackInputSchema).mutation(async ({ c, ctx, input }) => {
+        // The audio/cover were already PUT to R2 (unique keys, so no existing object was
+        // overwritten); drop the now-orphaned uploads whenever the row isn't created.
         if (await appRepository.getTrackById(ctx.db, input.id)) {
-            // The audio/cover were already PUT to R2 (unique keys, so no existing object was
-            // overwritten); clean up the now-orphaned uploads before rejecting.
             await removeStoredKeys([input.storageKey, input.thumbnailKey]);
             throw new HTTPException(409, { message: `A track with id "${input.id}" already exists.` });
         }
-        return c.superjson(
-            await appRepository.createTrack(ctx.db, {
-                id: input.id,
-                storageKey: input.storageKey,
-                title: input.title,
-                artist: input.artist,
-                category: input.category,
-                tags: input.tags,
-                durationSec: input.durationSec,
-                thumbnailKey: input.thumbnailKey ?? null,
-            }),
-        );
+        try {
+            return c.superjson(
+                await appRepository.createTrack(ctx.db, {
+                    id: input.id,
+                    storageKey: input.storageKey,
+                    title: input.title,
+                    artist: input.artist,
+                    category: input.category,
+                    tags: input.tags,
+                    durationSec: input.durationSec,
+                    thumbnailKey: input.thumbnailKey ?? null,
+                }),
+            );
+        } catch (error) {
+            await removeStoredKeys([input.storageKey, input.thumbnailKey]);
+            throw error;
+        }
     }),
 
     // Hand the browser presigned PUT URLs so it uploads files straight to R2, bypassing the

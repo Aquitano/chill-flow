@@ -22,8 +22,9 @@ function contentTypeForKey(key: string): string {
         case '.mp3':
             return 'audio/mpeg';
         case '.m4a':
-        case '.aac':
             return 'audio/mp4';
+        case '.aac':
+            return 'audio/aac';
         case '.ogg':
         case '.opus':
             return 'audio/ogg';

@@ -41,6 +41,22 @@ function r2Endpoint(accountId: string, jurisdiction?: string): string {
     return `https://${accountId}.${infix}r2.cloudflarestorage.com`;
 }
 
+const requiredR2Vars = {
+    R2_ACCOUNT_ID: rawEnv.R2_ACCOUNT_ID,
+    R2_ACCESS_KEY_ID: rawEnv.R2_ACCESS_KEY_ID,
+    R2_SECRET_ACCESS_KEY: rawEnv.R2_SECRET_ACCESS_KEY,
+    R2_BUCKET: rawEnv.R2_BUCKET,
+};
+const presentR2Vars = Object.entries(requiredR2Vars).filter(([, value]) => Boolean(value));
+
+// A partial R2 config would silently fall back to the dev-only local filesystem, so a prod
+// admin upload would look successful while writing to ephemeral storage. Fail fast instead.
+// (On the client none of these are set, so this never trips there.)
+if (presentR2Vars.length > 0 && presentR2Vars.length < Object.keys(requiredR2Vars).length) {
+    const missing = Object.keys(requiredR2Vars).filter((key) => !requiredR2Vars[key as keyof typeof requiredR2Vars]);
+    throw new Error(`Incomplete R2 configuration: set all R2_* vars or none. Missing: ${missing.join(', ')}.`);
+}
+
 const r2 =
     rawEnv.R2_ACCOUNT_ID && rawEnv.R2_ACCESS_KEY_ID && rawEnv.R2_SECRET_ACCESS_KEY && rawEnv.R2_BUCKET
         ? {

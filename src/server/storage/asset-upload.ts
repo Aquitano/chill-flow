@@ -14,6 +14,16 @@ export function fileExtension(file: File, fallback: string): string {
     return path.extname(file.name).toLowerCase() || fallback;
 }
 
+/**
+ * A storage key with a short random suffix so every uploaded object is unique and
+ * content-independent. R2 serves objects with a one-year immutable cache, so reusing an
+ * id-based key on replace would keep serving the old bytes; a fresh key per upload avoids it.
+ */
+export function uniqueAssetKey(prefix: string, ext: string): string {
+    const token = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
+    return `${prefix}-${token}${ext}`;
+}
+
 export async function readFileBytes(file: File): Promise<Uint8Array> {
     return new Uint8Array(await file.arrayBuffer());
 }

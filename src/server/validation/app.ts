@@ -173,4 +173,12 @@ export const presignTrackInputSchema = z
     })
     .refine((input) => input.audioExt !== undefined || input.coverExt !== undefined, {
         message: 'Provide audioExt and/or coverExt.',
+    })
+    // Require the declared size alongside each ext so the server size cap can't be skipped
+    // by simply omitting the byte count.
+    .refine((input) => input.audioExt === undefined || input.audioBytes !== undefined, {
+        message: 'audioBytes is required when audioExt is provided.',
+    })
+    .refine((input) => input.coverExt === undefined || input.coverBytes !== undefined, {
+        message: 'coverBytes is required when coverExt is provided.',
     });

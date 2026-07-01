@@ -1,5 +1,5 @@
 import { appRepository } from '@/server/repositories/app-repository';
-import { probeDurationFromBytes, readFileBytes } from '@/server/storage/asset-upload';
+import { probeDurationFromBytes, readFileBytes, uniqueAssetKey } from '@/server/storage/asset-upload';
 import { getAudioStorage } from '@/server/storage/audio-storage';
 import { NextResponse } from 'next/server';
 import { requireAdminRequest, validateAsset } from '../_lib';
@@ -33,28 +33,45 @@ export async function POST(request: Request) {
     const storage = getAudioStorage();
     const updates: TrackUpdate = {};
     const staleKeys: string[] = [];
+    const newKeys: string[] = [];
 
     if (audio instanceof File && audio.size > 0) {
         const validation = validateAsset(audio, 'audio');
         if ('response' in validation) return validation.response;
-        const newKey = `${id}${validation.ext}`;
+        const newKey = uniqueAssetKey(id, validation.ext);
         const audioBytes = await readFileBytes(audio);
         await storage.put(newKey, audioBytes);
+        newKeys.push(newKey);
         updates.storageKey = newKey;
-        updates.durationSec = await probeDurationFromBytes(audioBytes, validation.ext);
-        if (existing.storageKey !== newKey) staleKeys.push(existing.storageKey);
+        // ffprobe returns 0 when unavailable (e.g. on Vercel); don't overwrite a good duration
+        // with 0 — the admin can still adjust it manually.
+        const durationSec = await probeDurationFromBytes(audioBytes, validation.ext);
+        if (durationSec > 0) updates.durationSec = durationSec;
+        staleKeys.push(existing.storageKey);
     }
 
     if (cover instanceof File && cover.size > 0) {
         const validation = validateAsset(cover, 'image');
         if ('response' in validation) return validation.response;
-        const newKey = `cover-${id}${validation.ext}`;
+        const newKey = uniqueAssetKey(`cover-${id}`, validation.ext);
         await storage.put(newKey, await readFileBytes(cover));
+        newKeys.push(newKey);
         updates.thumbnailKey = newKey;
-        if (existing.thumbnailKey && existing.thumbnailKey !== newKey) staleKeys.push(existing.thumbnailKey);
+        if (existing.thumbnailKey) staleKeys.push(existing.thumbnailKey);
     }
 
-    const updated = await appRepository.updateTrack(database, id, updates);
+    let updated;
+    try {
+        updated = await appRepository.updateTrack(database, id, updates);
+    } catch (error) {
+        await Promise.all(newKeys.map((key) => storage.remove(key).catch(() => {})));
+        throw error;
+    }
+    if (!updated) {
+        // Row vanished between the lookup and the update; don't leak the just-written objects.
+        await Promise.all(newKeys.map((key) => storage.remove(key).catch(() => {})));
+        return NextResponse.json({ message: 'Track not found.' }, { status: 404 });
+    }
 
     // Remove superseded files only after the row points at the new ones.
     await Promise.all(staleKeys.map((key) => storage.remove(key).catch(() => {})));

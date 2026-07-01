@@ -102,6 +102,7 @@ export function useImportTrackMutation() {
             }
 
             if (!presign.audio) throw new Error('No upload URL returned for the audio file.');
+            if (input.cover && !presign.cover) throw new Error('No upload URL returned for the cover image.');
             await putToStorage(presign.audio, input.file);
             let thumbnailKey: string | undefined;
             if (input.cover && presign.cover) {
@@ -147,6 +148,9 @@ export function useReplaceTrackAssetMutation() {
                 if (input.cover) form.set('cover', input.cover);
                 return api.tracks.replaceAsset(form);
             }
+
+            if (input.audio && !presign.audio) throw new Error('No upload URL returned for the audio file.');
+            if (input.cover && !presign.cover) throw new Error('No upload URL returned for the cover image.');
 
             const updates: AdminTrackUpdateInput = { id: input.id };
             if (input.audio && presign.audio) {

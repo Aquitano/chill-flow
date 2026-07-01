@@ -56,16 +56,25 @@ export async function POST(request: Request) {
         await storage.put(thumbnailKey, await readFileBytes(cover));
     }
 
-    const track = await appRepository.createTrack(database, {
-        id: metadata.id,
-        storageKey,
-        title: metadata.title,
-        artist: metadata.artist,
-        category: metadata.category,
-        tags: metadata.tags,
-        durationSec,
-        thumbnailKey,
-    });
-
-    return NextResponse.json(track);
+    try {
+        const track = await appRepository.createTrack(database, {
+            id: metadata.id,
+            storageKey,
+            title: metadata.title,
+            artist: metadata.artist,
+            category: metadata.category,
+            tags: metadata.tags,
+            durationSec,
+            thumbnailKey,
+        });
+        return NextResponse.json(track);
+    } catch (error) {
+        // Don't leave the just-written objects orphaned if the row can't be created.
+        await Promise.all(
+            [storageKey, thumbnailKey]
+                .filter((key): key is string => Boolean(key))
+                .map((key) => storage.remove(key).catch(() => {})),
+        );
+        throw error;
+    }
 }

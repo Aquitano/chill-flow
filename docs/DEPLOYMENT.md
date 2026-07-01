@@ -41,12 +41,14 @@ live deployment.
 
 1. Create a bucket (e.g. `chillflow-audio`).
 2. **Enable public access** — either the managed `r2.dev` URL (quick start) or a custom
-   domain (recommended for production). The resulting base URL is both `AUDIO_BASE_URL` and
-   `R2_PUBLIC_BASE`.
+   domain (recommended for production). Use this base URL as `AUDIO_BASE_URL` (runtime), and
+   as `R2_PUBLIC_BASE` if you download published files with `bun run audio:pull`.
 3. **Create an S3 API token** (R2 → Manage R2 API Tokens → Object Read & Write). This gives
    `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`; `R2_ACCOUNT_ID` is in the R2 endpoint
    (`https://<account_id>.r2.cloudflarestorage.com`). Put these (and `R2_BUCKET`) in `.env` —
-   they power both the catalog publish and runtime admin uploads.
+   they power both the catalog publish and runtime admin uploads. If the bucket lives in a
+   jurisdiction (e.g. EU), also set `R2_JURISDICTION` (e.g. `eu`) so the S3 endpoint is
+   region-prefixed; leave it unset for the default jurisdiction.
 4. **Set the CORS policy** (mandatory — the audio engine uses `crossOrigin="anonymous"` +
    Web Audio, which fails silently without it). Edit the origins in `scripts/audio/cors.json`
    to your production domain, then apply via the S3 API:
@@ -91,6 +93,7 @@ Import the repo and set the environment variables below, then deploy.
 | `R2_ACCESS_KEY_ID` | for admin upload | R2 S3 access key id |
 | `R2_SECRET_ACCESS_KEY` | for admin upload | R2 S3 secret (server-only) |
 | `R2_BUCKET` | for admin upload | Bucket name |
+| `R2_JURISDICTION` | optional | Bucket jurisdiction (e.g. `eu`); unset for default |
 | `NEXT_PUBLIC_SENTRY_DSN` | optional | Enables Sentry when set |
 
 `DATABASE_URL` and `R2_SECRET_ACCESS_KEY` must stay server-only — never expose them through
