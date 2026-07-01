@@ -56,16 +56,31 @@ class LocalAudioStorage implements AudioStorage {
     }
 }
 
+// The R2 config is fixed for the process lifetime, so build the S3Client once and share it
+// across every put/remove/presign instead of paying the credential-provider + HTTP-handler
+// setup on each admin request.
+let cachedClient: S3Client | null = null;
+
+function getR2Client(config: NonNullable<typeof appEnv.r2>): S3Client {
+    if (!cachedClient) {
+        cachedClient = new S3Client({
+            region: 'auto',
+            endpoint: config.endpoint,
+            credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey },
+            // Don't bake a CRC32 checksum into presigned URLs — R2 + browser PUT can't satisfy the
+            // precomputed placeholder, which breaks the upload. Harmless for server-side puts.
+            requestChecksumCalculation: 'WHEN_REQUIRED',
+        });
+    }
+    return cachedClient;
+}
+
 class R2AudioStorage implements AudioStorage {
     private readonly client: S3Client;
     private readonly bucket: string;
 
     constructor(config: NonNullable<typeof appEnv.r2>) {
-        this.client = new S3Client({
-            region: 'auto',
-            endpoint: config.endpoint,
-            credentials: { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey },
-        });
+        this.client = getR2Client(config);
         this.bucket = config.bucket;
     }
 
@@ -101,14 +116,7 @@ export type PresignedUpload = { url: string; headers: Record<string, string> };
 export async function presignUpload(key: string): Promise<PresignedUpload | null> {
     if (!appEnv.r2) return null;
 
-    const client = new S3Client({
-        region: 'auto',
-        endpoint: appEnv.r2.endpoint,
-        credentials: { accessKeyId: appEnv.r2.accessKeyId, secretAccessKey: appEnv.r2.secretAccessKey },
-        // Don't bake a CRC32 checksum into the presigned URL — R2 + browser PUT can't satisfy
-        // the precomputed placeholder, which breaks the upload.
-        requestChecksumCalculation: 'WHEN_REQUIRED',
-    });
+    const client = getR2Client(appEnv.r2);
     const contentType = contentTypeForKey(key);
     const command = new PutObjectCommand({
         Bucket: appEnv.r2.bucket,

@@ -1,6 +1,7 @@
 'use client';
 
 import { api, type AdminTrackUpdateInput } from '@/lib/api';
+import { MAX_AUDIO_BYTES, MAX_IMAGE_BYTES } from '@/lib/upload-limits';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 const adminTracksKey = ['admin', 'tracks'];
@@ -26,6 +27,16 @@ function useInvalidateTracks() {
 function fileExt(name: string, fallback: string): string {
     const match = /\.[a-z0-9]+$/i.exec(name);
     return match ? match[0].toLowerCase() : fallback;
+}
+
+/** Reject oversized files before uploading (server presign enforces the same caps). */
+function assertWithinLimit(audio: File | null, cover: File | null): void {
+    if (audio && audio.size > MAX_AUDIO_BYTES) {
+        throw new Error('Audio file exceeds the 50MB limit.');
+    }
+    if (cover && cover.size > MAX_IMAGE_BYTES) {
+        throw new Error('Cover image exceeds the 5MB limit.');
+    }
 }
 
 /** Read a media file's duration in seconds via a throwaway <audio> element. */
@@ -65,10 +76,17 @@ export function useImportTrackMutation() {
     const invalidate = useInvalidateTracks();
     return useMutation({
         mutationFn: async (input: ImportTrackInput) => {
+            assertWithinLimit(input.file, input.cover);
             const durationSec = await readAudioDuration(input.file);
             const audioExt = fileExt(input.file.name, '.mp3');
             const coverExt = input.cover ? fileExt(input.cover.name, '.jpg') : undefined;
-            const presign = await api.tracks.presignUpload({ id: input.id, audioExt, coverExt });
+            const presign = await api.tracks.presignUpload({
+                id: input.id,
+                audioExt,
+                coverExt,
+                audioBytes: input.file.size,
+                coverBytes: input.cover?.size,
+            });
 
             // No R2 backend: send the file through the multipart route (local/dev backend).
             if (presign.mode === 'local') {
@@ -111,9 +129,16 @@ export function useReplaceTrackAssetMutation() {
     const invalidate = useInvalidateTracks();
     return useMutation({
         mutationFn: async (input: ReplaceAssetInput) => {
+            assertWithinLimit(input.audio, input.cover);
             const audioExt = input.audio ? fileExt(input.audio.name, '.mp3') : undefined;
             const coverExt = input.cover ? fileExt(input.cover.name, '.jpg') : undefined;
-            const presign = await api.tracks.presignUpload({ id: input.id, audioExt, coverExt });
+            const presign = await api.tracks.presignUpload({
+                id: input.id,
+                audioExt,
+                coverExt,
+                audioBytes: input.audio?.size,
+                coverBytes: input.cover?.size,
+            });
 
             if (presign.mode === 'local') {
                 const form = new FormData();

@@ -55,7 +55,7 @@ const r2 =
 // Base for resolving track storage keys to playable URLs. Server-only (not NEXT_PUBLIC):
 // the catalog router resolves keys before sending them to the client. Dev serves audio
 // same-origin from public/audio/ ('/audio'); prod points at the public R2 bucket.
-const audioBaseUrl = (rawEnv.AUDIO_BASE_URL ?? '/audio').replace(/\/+$/, '');
+const audioBaseUrl = (rawEnv.AUDIO_BASE_URL || '/audio').replace(/\/+$/, '');
 
 export const appEnv = {
     clerkPublishableKey: rawEnv.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,

@@ -1,44 +1,24 @@
-import { getDatabase } from '@/server/db/client';
 import { appRepository } from '@/server/repositories/app-repository';
-import { isAdminUser } from '@/server/security/admin';
-import {
-    AUDIO_EXTENSIONS,
-    IMAGE_EXTENSIONS,
-    MAX_AUDIO_BYTES,
-    MAX_IMAGE_BYTES,
-    fileExtension,
-    probeDurationFromBytes,
-    readFileBytes,
-} from '@/server/storage/asset-upload';
+import { probeDurationFromBytes, readFileBytes } from '@/server/storage/asset-upload';
 import { getAudioStorage } from '@/server/storage/audio-storage';
 import { uploadTrackMetadataSchema } from '@/server/validation/app';
-import { auth } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
+import { requireAdminRequest, validateAsset } from '../_lib';
 
 export const runtime = 'nodejs';
 
 export async function POST(request: Request) {
-    const { userId } = await auth();
-    if (!userId) {
-        return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
-    }
-    if (!(await isAdminUser(userId))) {
-        return NextResponse.json({ message: 'Admin access required.' }, { status: 403 });
-    }
-
-    const database = getDatabase();
-    if (!database) {
-        return NextResponse.json({ message: 'Database is not configured.' }, { status: 503 });
-    }
+    const guard = await requireAdminRequest(request);
+    if ('response' in guard) return guard.response;
+    const { database } = guard;
 
     const form = await request.formData();
     const file = form.get('file');
     if (!(file instanceof File) || file.size === 0) {
         return NextResponse.json({ message: 'An audio file is required.' }, { status: 422 });
     }
-    if (file.size > MAX_AUDIO_BYTES) {
-        return NextResponse.json({ message: 'Audio file exceeds the 50MB limit.' }, { status: 413 });
-    }
+    const audioValidation = validateAsset(file, 'audio');
+    if ('response' in audioValidation) return audioValidation.response;
 
     const parsedMetadata = uploadTrackMetadataSchema.safeParse({
         id: String(form.get('id') ?? ''),
@@ -55,22 +35,12 @@ export async function POST(request: Request) {
     }
     const metadata = parsedMetadata.data;
 
-    const audioExt = fileExtension(file, '.mp3');
-    if (!AUDIO_EXTENSIONS.has(audioExt)) {
-        return NextResponse.json({ message: `Unsupported audio type: ${audioExt}` }, { status: 422 });
-    }
-
     const cover = form.get('cover');
     let thumbnailKey: string | null = null;
     if (cover instanceof File && cover.size > 0) {
-        const imageExt = fileExtension(cover, '.jpg');
-        if (!IMAGE_EXTENSIONS.has(imageExt)) {
-            return NextResponse.json({ message: `Unsupported image type: ${imageExt}` }, { status: 422 });
-        }
-        if (cover.size > MAX_IMAGE_BYTES) {
-            return NextResponse.json({ message: 'Cover image exceeds the 5MB limit.' }, { status: 413 });
-        }
-        thumbnailKey = `cover-${metadata.id}${imageExt}`;
+        const coverValidation = validateAsset(cover, 'image');
+        if ('response' in coverValidation) return coverValidation.response;
+        thumbnailKey = `cover-${metadata.id}${coverValidation.ext}`;
     }
 
     if (await appRepository.getTrackById(database, metadata.id)) {
@@ -78,10 +48,10 @@ export async function POST(request: Request) {
     }
 
     const storage = getAudioStorage();
-    const storageKey = `${metadata.id}${audioExt}`;
+    const storageKey = `${metadata.id}${audioValidation.ext}`;
     const audioBytes = await readFileBytes(file);
     await storage.put(storageKey, audioBytes);
-    const durationSec = await probeDurationFromBytes(audioBytes, audioExt);
+    const durationSec = await probeDurationFromBytes(audioBytes, audioValidation.ext);
     if (thumbnailKey && cover instanceof File) {
         await storage.put(thumbnailKey, await readFileBytes(cover));
     }

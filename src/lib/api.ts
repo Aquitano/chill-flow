@@ -113,7 +113,7 @@ export const api = {
         create: (input: CreateTrackInput) => unwrap<AdminTrack>(client.tracks.create.$post(input)),
         update: (input: AdminTrackUpdateInput) => unwrap<AdminTrack | null>(client.tracks.update.$post(input)),
         delete: (input: { id: string }) => unwrap<{ success: boolean }>(client.tracks.delete.$post(input)),
-        presignUpload: (input: { id: string; audioExt?: string; coverExt?: string }) =>
+        presignUpload: (input: { id: string; audioExt?: string; coverExt?: string; audioBytes?: number; coverBytes?: number }) =>
             unwrap<PresignResponse>(client.tracks.presignUpload.$post(input)),
         upload: (formData: FormData) =>
             unwrap<AdminTrack>(fetch('/api/admin/tracks/upload', { method: 'POST', body: formData })),

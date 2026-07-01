@@ -8,8 +8,7 @@ const execFileAsync = promisify(execFile);
 
 export const AUDIO_EXTENSIONS = new Set(['.mp3', '.m4a', '.aac', '.ogg', '.opus', '.webm', '.wav']);
 export const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif']);
-export const MAX_AUDIO_BYTES = 50 * 1024 * 1024;
-export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+export { MAX_AUDIO_BYTES, MAX_IMAGE_BYTES } from '@/lib/upload-limits';
 
 export function fileExtension(file: File, fallback: string): string {
     return path.extname(file.name).toLowerCase() || fallback;

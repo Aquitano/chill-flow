@@ -128,6 +128,7 @@ export const updateTrackInputSchema = z
         category: trackCategorySchema.optional(),
         tags: trackTagsSchema.optional(),
         storageKey: trackStorageKeySchema.optional(),
+        thumbnailKey: trackStorageKeySchema.optional(),
         durationSec: trackDurationSchema.optional(),
     })
     .refine(
@@ -137,6 +138,7 @@ export const updateTrackInputSchema = z
             input.category !== undefined ||
             input.tags !== undefined ||
             input.storageKey !== undefined ||
+            input.thumbnailKey !== undefined ||
             input.durationSec !== undefined,
         { message: 'Provide at least one track field to update.' },
     );
@@ -159,11 +161,15 @@ export const createTrackInputSchema = z.object({
 
 const trackAssetExtSchema = z.string().trim().regex(/^\.[a-z0-9]+$/, 'Extension must look like ".mp3".');
 
+const uploadByteSizeSchema = z.number().int().positive();
+
 export const presignTrackInputSchema = z
     .object({
         id: trackAdminIdSchema,
         audioExt: trackAssetExtSchema.optional(),
         coverExt: trackAssetExtSchema.optional(),
+        audioBytes: uploadByteSizeSchema.optional(),
+        coverBytes: uploadByteSizeSchema.optional(),
     })
     .refine((input) => input.audioExt !== undefined || input.coverExt !== undefined, {
         message: 'Provide audioExt and/or coverExt.',
