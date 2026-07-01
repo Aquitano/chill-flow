@@ -22,6 +22,27 @@
       "when": 1781381351276,
       "tag": "0002_mysterious_rachel_grey",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1782750450701,
+      "tag": "0003_add_track_storage_key",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1782750464855,
+      "tag": "0004_drop_track_variants",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1782758361386,
+      "tag": "0005_add_track_thumbnail",
+      "breakpoints": true
     }
   ]
 }

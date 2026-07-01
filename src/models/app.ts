@@ -11,6 +11,12 @@ export interface Track {
     isLiked?: boolean;
 }
 
+/** A catalog row as seen by the admin dashboard — includes the raw storage keys. */
+export interface AdminTrack extends Track {
+    storageKey: string;
+    thumbnailKey: string | null;
+}
+
 export interface Quote {
     id: string;
     text: string;

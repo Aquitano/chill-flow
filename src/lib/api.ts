@@ -1,7 +1,34 @@
 'use client';
 
 import { client } from '@/lib/client';
-import { Background, FocusSession, Quote, Task, Track, UserPreferences } from '@/models/app';
+import { AdminTrack, Background, FocusSession, Quote, Task, Track, UserPreferences } from '@/models/app';
+
+export type AdminTrackUpdateInput = {
+    id: string;
+    title?: string;
+    artist?: string;
+    category?: string;
+    tags?: string[];
+    storageKey?: string;
+    durationSec?: number;
+    thumbnailKey?: string;
+};
+
+export type CreateTrackInput = {
+    id: string;
+    storageKey: string;
+    title: string;
+    artist: string;
+    category: string;
+    tags: string[];
+    durationSec: number;
+    thumbnailKey?: string | null;
+};
+
+type PresignedTarget = { key: string; url: string; headers: Record<string, string> };
+export type PresignResponse =
+    | { mode: 'local' }
+    | { mode: 'r2'; audio: PresignedTarget | null; cover: PresignedTarget | null };
 
 export class ApiError extends Error {
     readonly status: number;
@@ -82,6 +109,16 @@ export const api = {
     tracks: {
         list: () => unwrap<Track[]>(client.tracks.list.$get()),
         getById: (id: string) => unwrap<Track | null>(client.tracks.getById.$get({ id })),
+        adminList: () => unwrap<AdminTrack[]>(client.tracks.adminList.$get()),
+        create: (input: CreateTrackInput) => unwrap<AdminTrack>(client.tracks.create.$post(input)),
+        update: (input: AdminTrackUpdateInput) => unwrap<AdminTrack | null>(client.tracks.update.$post(input)),
+        delete: (input: { id: string }) => unwrap<{ success: boolean }>(client.tracks.delete.$post(input)),
+        presignUpload: (input: { id: string; audioExt?: string; coverExt?: string; audioBytes?: number; coverBytes?: number }) =>
+            unwrap<PresignResponse>(client.tracks.presignUpload.$post(input)),
+        upload: (formData: FormData) =>
+            unwrap<AdminTrack>(fetch('/api/admin/tracks/upload', { method: 'POST', body: formData })),
+        replaceAsset: (formData: FormData) =>
+            unwrap<AdminTrack | null>(fetch('/api/admin/tracks/replace', { method: 'POST', body: formData })),
     },
     preferences: {
         get: () => unwrap<PreferencesPayload>(client.preferences.get.$get()),

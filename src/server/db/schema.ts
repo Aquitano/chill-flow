@@ -20,15 +20,11 @@ export const tracks = pgTable(
         category: text('category').notNull(),
         durationSec: integer('durationSec').notNull(),
         tags: jsonb('tags').$type<string[]>().notNull().default([]),
-        variants: jsonb('variants').$type<
-            Array<{
-                codec: 'webm' | 'm4a';
-                bitrateKbps: number;
-                url: string;
-                bytes: number;
-                hash: string;
-            }>
-        >().notNull(),
+        // Relative storage key (e.g. 'deep-focus-01.mp3'). Resolved to a full URL at read
+        // time against AUDIO_BASE_URL, so the same row serves dev (public/) and prod (R2).
+        storageKey: text('storageKey').notNull(),
+        // Optional cover-art key, resolved against the same base as the audio key.
+        thumbnailKey: text('thumbnailKey'),
         createdAt: timestamp('createdAt').defaultNow().notNull(),
         updatedAt: timestamp('updatedAt').defaultNow().notNull(),
     },

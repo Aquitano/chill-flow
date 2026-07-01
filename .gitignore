@@ -52,5 +52,10 @@ yarn-error.log*
 # Cache
 .swc/
 
+# Audio assets (source of truth is R2; pull locally with `bun run audio:pull`)
+/public/audio/
+/scripts/audio/originals/
+/scripts/audio/out/
+
 # clerk configuration (can include secrets)
 /.clerk/

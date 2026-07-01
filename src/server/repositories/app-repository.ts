@@ -1,39 +1,42 @@
+import { appEnv } from '@/lib/env';
 import { backgroundCatalog } from '@/lib/backgrounds';
 import { quotes } from '@/lib/quotes';
-import { Background, FocusSession, Task, Track, UserPreferences } from '@/models/app';
-import { and, desc, eq, isNotNull, ne } from 'drizzle-orm';
+import { AdminTrack, Background, FocusSession, Task, Track, UserPreferences } from '@/models/app';
+import { and, asc, desc, eq, isNotNull, ne } from 'drizzle-orm';
 import { Database } from '../db/client';
-import { DEFAULT_POMODORO_SETTINGS, focusSessions, tasks, userPreferences } from '../db/schema';
+import { DEFAULT_POMODORO_SETTINGS, focusSessions, tasks, tracks, userPreferences } from '../db/schema';
 
-export const trackCatalog: Track[] = [
-    {
-        id: 'deep-focus-01',
-        title: 'Deep Focus Loop',
-        artist: 'ChillFlow Radio',
-        audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-        duration: 356,
-        tags: ['focus', 'instrumental'],
-        category: 'focus',
-    },
-    {
-        id: 'ambient-rain-02',
-        title: 'Rain Study Session',
-        artist: 'ChillFlow Radio',
-        audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
-        duration: 402,
-        tags: ['rain', 'ambient'],
-        category: 'ambient',
-    },
-    {
-        id: 'night-drive-03',
-        title: 'Night Drive Notes',
-        artist: 'ChillFlow Radio',
-        audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
-        duration: 387,
-        tags: ['night', 'creative'],
-        category: 'creative',
-    },
-];
+function resolveAudioUrl(storageKey: string): string {
+    return `${appEnv.audioBaseUrl}/${storageKey.replace(/^\/+/, '')}`;
+}
+
+function mapTrack(row: typeof tracks.$inferSelect): Track {
+    return {
+        id: row.id,
+        title: row.title,
+        artist: row.artist,
+        audioUrl: resolveAudioUrl(row.storageKey),
+        thumbnailUrl: row.thumbnailKey ? resolveAudioUrl(row.thumbnailKey) : undefined,
+        duration: row.durationSec,
+        tags: row.tags,
+        category: row.category,
+    };
+}
+
+function mapAdminTrack(row: typeof tracks.$inferSelect): AdminTrack {
+    return { ...mapTrack(row), storageKey: row.storageKey, thumbnailKey: row.thumbnailKey };
+}
+
+type TrackWriteInput = {
+    id: string;
+    storageKey: string;
+    title: string;
+    artist: string;
+    category: string;
+    tags: string[];
+    durationSec: number;
+    thumbnailKey?: string | null;
+};
 
 export const defaultTasks: Task[] = [
     { id: crypto.randomUUID(), text: 'Review notes', isCompleted: false, priority: 'medium' },
@@ -53,7 +56,9 @@ const defaultPreferences: UserPreferences = {
     customMinutes: '25',
     pomodoroSettings: { ...DEFAULT_POMODORO_SETTINGS },
     customModes: [],
-    selectedTrackId: trackCatalog[0]?.id ?? null,
+    // Resolved on the client from the track list (first available) when null; the catalog
+    // now lives in the DB so there is no static default to point at here.
+    selectedTrackId: null,
     selectedBackgroundId: backgroundCatalog[0]?.id ?? null,
     likedTrackIds: [],
 };
@@ -184,12 +189,69 @@ function calculateCurrentStreak(sessionDates: string[]) {
 }
 
 export const appRepository = {
-    listTracks() {
-        return clone(trackCatalog);
+    async listTracks(database: Database) {
+        const storedTracks = await database.select().from(tracks).orderBy(asc(tracks.createdAt));
+        return storedTracks.map(mapTrack);
     },
 
-    getTrackById(trackId: string) {
-        return clone(trackCatalog.find((track) => track.id === trackId) ?? null);
+    async getTrackById(database: Database, trackId: string) {
+        const [track] = await database.select().from(tracks).where(eq(tracks.id, trackId)).limit(1);
+        return track ? mapTrack(track) : null;
+    },
+
+    async adminListTracks(database: Database): Promise<AdminTrack[]> {
+        const storedTracks = await database.select().from(tracks).orderBy(desc(tracks.createdAt));
+        return storedTracks.map(mapAdminTrack);
+    },
+
+    async getAdminTrackById(database: Database, trackId: string): Promise<AdminTrack | null> {
+        const [track] = await database.select().from(tracks).where(eq(tracks.id, trackId)).limit(1);
+        return track ? mapAdminTrack(track) : null;
+    },
+
+    async createTrack(database: Database, input: TrackWriteInput): Promise<AdminTrack> {
+        const [created] = await database
+            .insert(tracks)
+            .values({
+                id: input.id,
+                title: input.title,
+                artist: input.artist,
+                category: input.category,
+                durationSec: input.durationSec,
+                tags: input.tags,
+                storageKey: input.storageKey,
+                thumbnailKey: input.thumbnailKey ?? null,
+            })
+            .returning();
+
+        if (!created) {
+            throw new Error('Track could not be created.');
+        }
+
+        return mapAdminTrack(created);
+    },
+
+    async updateTrack(
+        database: Database,
+        trackId: string,
+        input: Partial<Omit<TrackWriteInput, 'id'>>,
+    ): Promise<AdminTrack | null> {
+        const [updated] = await database
+            .update(tracks)
+            .set({ ...input, updatedAt: new Date() })
+            .where(eq(tracks.id, trackId))
+            .returning();
+
+        return updated ? mapAdminTrack(updated) : null;
+    },
+
+    async deleteTrack(database: Database, trackId: string) {
+        const [deleted] = await database
+            .delete(tracks)
+            .where(eq(tracks.id, trackId))
+            .returning({ id: tracks.id, storageKey: tracks.storageKey, thumbnailKey: tracks.thumbnailKey });
+
+        return deleted ?? null;
     },
 
     listBackgrounds() {

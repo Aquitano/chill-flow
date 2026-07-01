@@ -2,8 +2,9 @@ import { AccountSettings } from '@/components/account/AccountSettings';
 import { Button } from '@/components/ui/button';
 import { getServerAuthState } from '@/lib/auth';
 import { appEnv } from '@/lib/env';
+import { isAdminUser } from '@/server/security/admin';
 import { SignInButton } from '@clerk/nextjs';
-import { CheckCircle2, Database, ExternalLink, KeyRound, ShieldAlert, UserRound } from 'lucide-react';
+import { CheckCircle2, Database, ExternalLink, KeyRound, ShieldAlert, Sparkles, UserRound } from 'lucide-react';
 import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
@@ -44,13 +45,26 @@ export default async function AccountPage() {
 
     // Configured + signed in → the real settings page.
     if (isWorkspaceReady && authState.isAuthenticated) {
+        const isAdmin = authState.userId ? await isAdminUser(authState.userId) : false;
+
         return (
             <main className="min-h-screen bg-[#070807] px-6 py-10 text-white">
                 <div className="mx-auto w-full max-w-3xl">
                     <PageHeader isWorkspaceReady />
-                    <div className="mb-6 inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium uppercase tracking-[0.2em] text-neutral-300">
-                        <UserRound className="h-3.5 w-3.5" />
-                        Account & settings
+                    <div className="mb-6 flex flex-wrap items-center gap-3">
+                        <div className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium uppercase tracking-[0.2em] text-neutral-300">
+                            <UserRound className="h-3.5 w-3.5" />
+                            Account & settings
+                        </div>
+                        {isAdmin && (
+                            <Link
+                                href="/admin"
+                                className="inline-flex items-center gap-2 rounded-md border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-200 hover:bg-emerald-400/20"
+                            >
+                                <Sparkles className="h-3.5 w-3.5" />
+                                Admin · soundtracks
+                            </Link>
+                        )}
                     </div>
                     <h1 className="mb-8 text-4xl font-semibold leading-tight md:text-5xl">Settings</h1>
                     <AccountSettings />

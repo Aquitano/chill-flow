@@ -14,9 +14,17 @@
         "start": "next start",
         "test": "vitest run",
         "test:ui": "vitest --ui",
-        "format": "prettier --write ."
+        "format": "prettier --write .",
+        "audio:normalize": "bun scripts/audio/normalize.ts",
+        "audio:build": "bun scripts/audio/build-manifest.ts",
+        "audio:cors": "bun scripts/audio/set-cors.ts",
+        "audio:upload": "bun scripts/audio/upload.ts",
+        "audio:pull": "bun scripts/audio/pull.ts",
+        "db:seed:tracks": "bun scripts/audio/seed.ts"
     },
     "dependencies": {
+        "@aws-sdk/client-s3": "^3.1075.0",
+        "@aws-sdk/s3-request-presigner": "^3.1075.0",
         "@clerk/nextjs": "^6.36.9",
         "@million/lint": "^1.0.14",
         "@neondatabase/serverless": "^1.0.2",

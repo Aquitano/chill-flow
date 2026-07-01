@@ -4,6 +4,7 @@ import { env } from 'hono/adapter';
 import { HTTPException } from 'hono/http-exception';
 import { jstack } from 'jstack';
 import { getDatabase } from './db/client';
+import { isAdminUser } from './security/admin';
 import { isTrustedOrigin } from './security/origin';
 
 interface Env {
@@ -67,3 +68,16 @@ export const protectedMutationProcedure = protectedDataProcedure.use(async ({ c,
 
     return next();
 });
+
+const adminMiddleware = j.middleware(async ({ ctx, next }) => {
+    const { userId } = ctx as { userId: string };
+
+    if (!(await isAdminUser(userId))) {
+        throw new HTTPException(403, { message: 'Admin access required.' });
+    }
+
+    return next();
+});
+
+export const adminProcedure = protectedDataProcedure.use(adminMiddleware);
+export const adminMutationProcedure = protectedMutationProcedure.use(adminMiddleware);
