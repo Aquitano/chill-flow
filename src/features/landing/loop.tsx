@@ -259,10 +259,15 @@ function MiniTasks({ checkProgress }: { checkProgress?: MotionValue<number> }) {
                     <span className="text-ink relative">
                         Review chapter notes
                         {checkProgress && (
+                            // Cross-fade to the same done treatment as "Clear inbox" below:
+                            // dimmed text with a real line-through, not a separate drawn bar.
                             <motion.span
-                                style={{ scaleX: checkProgress }}
-                                className="bg-ink-dim absolute top-1/2 left-0 h-px w-full origin-left"
-                            />
+                                aria-hidden
+                                style={{ opacity: checkProgress }}
+                                className="text-ink-dim absolute inset-0 line-through"
+                            >
+                                Review chapter notes
+                            </motion.span>
                         )}
                     </span>
                     <Flag className="ml-auto h-3 w-3 shrink-0 text-rose-400/80" />
