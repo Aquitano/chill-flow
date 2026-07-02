@@ -332,15 +332,8 @@ export const PlayerControls: React.FC = () => {
                     </div>
                 </div>
 
-                {showStreak && (
-                    <div className="ml-1 flex items-center space-x-1 rounded-full bg-stone-800/70 px-2 py-1">
-                        <span className="text-xs font-medium text-stone-300">
-                            {sessionSummary.currentStreak}-day streak
-                        </span>
-                        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-linear-to-br from-yellow-400 to-orange-500 text-xs font-bold">
-                            ✓
-                        </span>
-                    </div>
+                {showStreak && sessionSummary.currentStreak > 0 && (
+                    <span className="ml-1 text-xs text-ink-dim">{sessionSummary.currentStreak}-day streak</span>
                 )}
                 </div>
             </div>

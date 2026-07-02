@@ -10,6 +10,11 @@ const nextConfig = {
                 protocol: 'https',
                 hostname: 'images.unsplash.com',
             },
+            // R2 track assets (covers) served from the project CDN.
+            {
+                protocol: 'https',
+                hostname: 'chill-data.aquitano.me',
+            },
         ],
     },
 };

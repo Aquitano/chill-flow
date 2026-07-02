@@ -12,6 +12,7 @@ import {
     useTasksQuery,
 } from '@/hooks/use-app-data';
 import { selectQuoteForMode } from '@/lib/quotes';
+import { useWorkspaceHotkeys } from '@/hooks/use-workspace-hotkeys';
 import { PomodoroCadence, TimerMode, useAppStore } from '@/store/app-store';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, useRef } from 'react';
@@ -60,6 +61,8 @@ export function AppShell() {
     const preferencesQuery = usePreferencesQuery();
     const sessionsQuery = useSessionsQuery();
     const updatePreferences = useUpdatePreferencesMutation();
+
+    useWorkspaceHotkeys();
 
     const didHydratePreferences = useRef(false);
     const lastPersistedPreferencesRef = useRef('');
@@ -227,10 +230,19 @@ export function AppShell() {
 
     if (tracksQuery.isLoading || tasksQuery.isLoading || preferencesQuery.isLoading || sessionsQuery.isLoading) {
         return (
-            <main className="flex min-h-screen items-center justify-center bg-black text-white">
-                <div className="space-y-3 text-center">
-                    <p className="text-sm uppercase tracking-[0.2em] text-neutral-500">ChillFlow</p>
-                    <p className="text-2xl font-medium">Loading your focus workspace...</p>
+            <main className="relative flex min-h-screen items-center justify-center bg-night text-ink">
+                {/* Skeleton mirrors the workspace layout: dial in the center, player strip below. */}
+                <div
+                    className="aspect-square w-[min(560px,calc(100vw-2rem),calc(100vh-16rem))] animate-pulse rounded-full border border-white/10"
+                    aria-hidden
+                />
+                <p className="sr-only">Loading your focus workspace</p>
+                <div className="absolute inset-x-0 bottom-0 flex items-center gap-4 border-t border-white/5 bg-black/40 p-4">
+                    <div className="h-12 w-12 animate-pulse rounded-md bg-white/10" aria-hidden />
+                    <div className="space-y-2" aria-hidden>
+                        <div className="h-3 w-40 animate-pulse rounded bg-white/10" />
+                        <div className="h-3 w-24 animate-pulse rounded bg-white/5" />
+                    </div>
                 </div>
             </main>
         );
@@ -252,8 +264,8 @@ export function AppShell() {
 
     return (
         <main
-            className={`relative min-h-screen w-screen overflow-hidden text-white ${
-                showBackground ? 'bg-cover bg-center bg-no-repeat' : 'bg-black'
+            className={`relative min-h-screen w-screen overflow-hidden text-ink ${
+                showBackground ? 'bg-cover bg-center bg-no-repeat' : 'bg-night'
             }`}
             style={showBackground && activeBackground?.url ? { backgroundImage: `url('${activeBackground.url}')` } : {}}
         >

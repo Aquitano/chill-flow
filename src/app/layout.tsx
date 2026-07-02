@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Cormorant, Inter } from 'next/font/google';
+import { Inter, Spectral } from 'next/font/google';
 import { Providers } from '../components/providers';
 
 import { ClerkProvider } from '@clerk/nextjs';
@@ -13,10 +13,12 @@ const inter = Inter({
     variable: '--font-inter',
 });
 
-const cormorant = Cormorant({
+const spectral = Spectral({
     subsets: ['latin'],
+    weight: ['300', '400', '500'],
+    style: ['normal', 'italic'],
     display: 'swap',
-    variable: '--font-cormorant',
+    variable: '--font-spectral',
 });
 
 export const metadata: Metadata = {
@@ -41,7 +43,7 @@ export default function RootLayout({
 }>) {
     return (
         <ClerkProvider publishableKey={appEnv.clerkPublishableKey}>
-            <html lang="en" className={`${inter.className} ${cormorant.className} dark`}>
+            <html lang="en" className={`${inter.variable} ${spectral.variable} dark`}>
                 <body className="antialiased">
                     <Providers>{children}</Providers>
                 </body>

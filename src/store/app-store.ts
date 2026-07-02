@@ -30,7 +30,7 @@ export type HydratablePreferences = {
 };
 
 /** Resolve a preset label (and custom-minute fallback) to whole minutes; null means infinite. */
-function presetToMinutes(preset: string, customMinutes: string): number | null {
+export function presetToMinutes(preset: string, customMinutes: string): number | null {
     if (preset === '∞') return null;
     const minutesMatch = /^(\d+)m$/.exec(preset);
     if (minutesMatch) return parseInt(minutesMatch[1]!, 10);
@@ -120,7 +120,7 @@ interface AppState {
     getCurrentModeSettings: () => ModeSettings;
 }
 
-const defaultModes: Record<string, ModeSettings> = {
+export const defaultModes: Record<string, ModeSettings> = {
     DeepWork: {
         label: 'DeepWork',
         description: 'Ultra-minimal environment for deep, distraction-free work.',

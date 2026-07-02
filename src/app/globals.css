@@ -33,25 +33,25 @@
 }
 
 .dark {
-    --background: hsl(0 0% 3.9%);
-    --foreground: hsl(0 0% 98%);
-    --card: hsl(0 0% 3.9%);
-    --card-foreground: hsl(0 0% 98%);
-    --popover: hsl(0 0% 3.9%);
-    --popover-foreground: hsl(0 0% 98%);
-    --primary: hsl(0 0% 98%);
-    --primary-foreground: hsl(0 0% 9%);
-    --secondary: hsl(0 0% 14.9%);
-    --secondary-foreground: hsl(0 0% 98%);
-    --muted: hsl(0 0% 14.9%);
-    --muted-foreground: hsl(0 0% 63.9%);
-    --accent: hsl(0 0% 14.9%);
-    --accent-foreground: hsl(0 0% 98%);
+    --background: hsl(40 12% 5%);
+    --foreground: hsl(40 14% 91%);
+    --card: hsl(40 10% 7%);
+    --card-foreground: hsl(40 14% 91%);
+    --popover: hsl(40 10% 7%);
+    --popover-foreground: hsl(40 14% 91%);
+    --primary: hsl(40 14% 91%);
+    --primary-foreground: hsl(40 12% 8%);
+    --secondary: hsl(40 8% 15%);
+    --secondary-foreground: hsl(40 14% 91%);
+    --muted: hsl(40 8% 15%);
+    --muted-foreground: hsl(40 8% 66%);
+    --accent: hsl(40 8% 15%);
+    --accent-foreground: hsl(40 14% 91%);
     --destructive: hsl(0 62.8% 30.6%);
     --destructive-foreground: hsl(0 0% 98%);
-    --border: hsl(0 0% 14.9%);
-    --input: hsl(0 0% 14.9%);
-    --ring: hsl(0 0% 83.1%);
+    --border: hsl(40 8% 16%);
+    --input: hsl(40 8% 16%);
+    --ring: hsl(40 10% 70%);
     --chart-1: hsl(220 70% 50%);
     --chart-2: hsl(160 60% 45%);
     --chart-3: hsl(30 80% 55%);
@@ -60,8 +60,8 @@
 }
 
 @theme inline {
-    --color-background: oklch(13.39% 0.0026 106.74);
-    --color-foreground: oklch(85.79% 0.0136 106.68);
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
     --color-card: var(--card);
     --color-card-foreground: var(--card-foreground);
     --color-popover: var(--popover);
@@ -90,28 +90,49 @@
     --radius-xl: calc(var(--radius) + 4px);
 }
 
+@theme {
+    --font-sans:
+        var(--font-inter), 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
+        Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+    --font-serif: var(--font-spectral), 'Spectral', Georgia, Cambria, 'Times New Roman', Times, serif;
+
+    /*
+     * ChillFlow palette — a desk after dark, one warm lamp.
+     * night   = the room (body background)
+     * night-2 = raised surfaces (panels, vignettes)
+     * ink     = primary text        (>= 12:1 on night)
+     * ink-mid = secondary text      (>=  7:1 on night)
+     * ink-dim = captions / metadata (>= 4.5:1 on night)
+     * ember   = the lamp — the single accent for actions, glow, and emphasis
+     */
+    --color-night: oklch(0.155 0.008 80);
+    --color-night-2: oklch(0.2 0.009 80);
+    --color-ink: oklch(0.93 0.012 85);
+    --color-ink-mid: oklch(0.78 0.014 85);
+    --color-ink-dim: oklch(0.66 0.014 85);
+    --color-ember: oklch(0.81 0.1 75);
+    --color-ember-deep: oklch(0.65 0.12 60);
+}
+
 @layer base {
     * {
         @apply border-border outline-ring/50;
     }
     body {
-        @apply bg-background text-foreground;
+        @apply bg-night text-ink;
+        font-family: var(--font-sans);
+    }
+    h1,
+    h2,
+    h3 {
+        text-wrap: balance;
     }
 }
 
-@theme {
-    --font-sans:
-        'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans',
-        sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
-    --font-serif: 'Cormorant', Georgia, Cambria, 'Times New Roman', Times, serif;
-}
-
+/* Film-grain wash over the whole page; the vignette keeps edges darker than center. */
 .bg-main {
     background-image:
-        radial-gradient(circle at center 5vh, rgba(0, 0, 0, 0) 20%, rgba(0, 0, 0, 1) 90%), url(/grain.svg);
-    /* background-size:
-        100% 130%,
-        30vh; */
+        radial-gradient(circle at center 5vh, rgba(0, 0, 0, 0) 20%, rgba(0, 0, 0, 0.85) 90%), url(/grain.svg);
     background-position:
         top center,
         center;
@@ -120,28 +141,59 @@
     min-height: 100vh;
 }
 
-.horizontal-flare {
-    position: absolute;
-    height: 10vh;
-    filter: blur(10px);
-}
-
-.full-flare {
+/* The lamp: a slow-breathing warm halo. Static (mid-breath) when motion is reduced. */
+.ember-halo {
     background: radial-gradient(
         closest-side ellipse at center,
-        hsl(4 20% 90% / 80%) 5%,
-        hsl(4 10% 70% / 30%) 50%,
-        transparent 95%
+        oklch(0.81 0.1 75 / 0.32) 0%,
+        oklch(0.65 0.12 60 / 0.12) 45%,
+        transparent 80%
     );
-    width: 100%;
-    top: 48vh;
-    filter: blur(10px);
+    filter: blur(24px);
+    animation: halo-breathe 9s ease-in-out infinite;
 }
 
-body {
-    font-family: var(--font-sans);
+@keyframes halo-breathe {
+    0%,
+    100% {
+        opacity: 0.55;
+        transform: scale(0.96);
+    }
+    50% {
+        opacity: 0.9;
+        transform: scale(1.03);
+    }
 }
 
-* {
-    /* outline: 1px solid red; */
+/* Equalizer bars for the live audio preview; paused unless .playing. */
+.eq-bar {
+    transform-origin: bottom;
+    animation: eq-bounce 1.1s ease-in-out infinite;
+    animation-play-state: paused;
+    transform: scaleY(0.3);
+}
+
+.eq-playing .eq-bar {
+    animation-play-state: running;
+}
+
+@keyframes eq-bounce {
+    0%,
+    100% {
+        transform: scaleY(0.25);
+    }
+    50% {
+        transform: scaleY(1);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ember-halo {
+        animation: none;
+        opacity: 0.7;
+    }
+    .eq-playing .eq-bar {
+        animation: none;
+        transform: scaleY(0.6);
+    }
 }

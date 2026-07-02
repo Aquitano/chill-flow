@@ -63,26 +63,33 @@ export function MobileNav() {
                         {/* Navigation links */}
                         <nav className="space-y-1 px-3 py-6">
                             <Link
-                                href="#features"
+                                href="#inside"
                                 className="flex w-full rounded-md px-3 py-3 text-base font-medium transition-colors hover:bg-white/5"
-                                onClick={() => handleLinkClick('#features')}
+                                onClick={() => handleLinkClick('#inside')}
                             >
-                                Features
+                                Inside the room
                             </Link>
                             <Link
-                                href="#how-it-works"
+                                href="#listen"
                                 className="flex w-full rounded-md px-3 py-3 text-base font-medium transition-colors hover:bg-white/5"
-                                onClick={() => handleLinkClick('#how-it-works')}
+                                onClick={() => handleLinkClick('#listen')}
                             >
-                                How It Works
+                                Hear the room
+                            </Link>
+                            <Link
+                                href="#modes"
+                                className="flex w-full rounded-md px-3 py-3 text-base font-medium transition-colors hover:bg-white/5"
+                                onClick={() => handleLinkClick('#modes')}
+                            >
+                                Modes
                             </Link>
                             <SignedIn>
                                 <Link
                                     href="/app"
-                                    className="flex w-full rounded-md px-3 py-3 text-base font-medium text-blue-400 transition-colors hover:bg-blue-900/20"
+                                    className="flex w-full rounded-md px-3 py-3 text-base font-medium text-ember transition-colors hover:bg-white/5"
                                     onClick={() => setOpen(false)}
                                 >
-                                    Dashboard
+                                    Open workspace
                                 </Link>
                             </SignedIn>
                         </nav>
@@ -104,10 +111,10 @@ export function MobileNav() {
                                 <SignUpButton mode="modal">
                                     <Button
                                         variant="default"
-                                        className="w-full justify-center bg-linear-to-r from-blue-600 to-violet-600 py-6 text-base"
+                                        className="w-full justify-center bg-ember py-6 text-base font-medium text-night hover:bg-ember/90"
                                         onClick={() => setOpen(false)}
                                     >
-                                        Sign Up
+                                        Get started
                                     </Button>
                                 </SignUpButton>
                             </div>

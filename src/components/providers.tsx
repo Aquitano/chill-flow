@@ -2,6 +2,7 @@
 
 import { describeApiError } from '@/lib/api';
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MotionConfig } from 'framer-motion';
 import { HTTPException } from 'hono/http-exception';
 import dynamic from 'next/dynamic';
 import { PropsWithChildren, useState } from 'react';
@@ -37,7 +38,9 @@ export const Providers = ({ children }: PropsWithChildren) => {
 
     return (
         <QueryClientProvider client={queryClient}>
-            {children}
+            {/* reducedMotion="user" turns every Framer transform animation into an
+                instant/opacity-only change when the OS asks for reduced motion. */}
+            <MotionConfig reducedMotion="user">{children}</MotionConfig>
             <Toaster theme="dark" position="bottom-center" richColors closeButton />
             {process.env.NODE_ENV === 'development' ? <AudioDebugTrigger /> : null}
         </QueryClientProvider>

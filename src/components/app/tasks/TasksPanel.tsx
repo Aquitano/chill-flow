@@ -96,7 +96,11 @@ export function TasksPanel() {
             key="tasks-panel"
             style={resizable ? { width: size.width, height: size.height } : undefined}
             className={cn(
-                'absolute top-24 right-4 left-4 z-20 flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-black/70 shadow-lg backdrop-blur-md max-sm:max-h-[32vh] sm:right-auto sm:left-6',
+                'z-20 flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-black/80 shadow-lg backdrop-blur-md',
+                // Phones: a full sheet between the header and the player bar, so the
+                // list never half-covers the dial. Desktop: a floating side panel.
+                'max-sm:fixed max-sm:inset-x-3 max-sm:top-16 max-sm:bottom-28',
+                'sm:absolute sm:top-24 sm:left-6',
                 // Fallback sizing before the desktop resize state is active.
                 !resizable && 'sm:max-h-[calc(100vh-11rem)] sm:w-80',
                 resizing && 'select-none',

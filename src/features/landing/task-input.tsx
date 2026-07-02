@@ -1,23 +1,30 @@
 'use client';
 
-import { Button } from '@/components/ui/button';
 import { useCreateTaskMutation } from '@/hooks/use-app-data';
-import { SignInButton, useUser } from '@clerk/nextjs';
+import { SignInButton, useClerk, useUser } from '@clerk/nextjs';
+import { ArrowRight } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 export function TaskInput() {
     const [task, setTask] = useState('');
     const { user } = useUser();
+    const { openSignIn } = useClerk();
     const createTask = useCreateTaskMutation();
     const router = useRouter();
 
-    const placeholder = user
-        ? `What would you like to focus on, ${user.firstName ?? 'there'}?`
-        : 'Add a focus task and jump into your workspace';
+    const placeholder = user?.firstName
+        ? `What would you like to focus on, ${user.firstName}?`
+        : 'What do you want to focus on?';
 
     const handleSubmit = async () => {
         if (!task.trim()) return;
+
+        // Signed out, Enter should open auth — creating the task would just 401.
+        if (!user) {
+            openSignIn();
+            return;
+        }
 
         try {
             await createTask.mutateAsync({
@@ -30,38 +37,45 @@ export function TaskInput() {
         }
     };
 
+    const submitButton = user ? (
+        <button
+            type="button"
+            disabled={!task.trim() || createTask.isPending}
+            onClick={handleSubmit}
+            className="flex shrink-0 items-center gap-1.5 rounded-xl bg-ember px-4 py-2.5 text-sm font-medium text-night transition hover:bg-ember/90 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+            Start
+            <ArrowRight className="h-4 w-4" />
+        </button>
+    ) : (
+        <SignInButton mode="modal">
+            <button
+                type="button"
+                className="flex shrink-0 items-center gap-1.5 rounded-xl bg-ember px-4 py-2.5 text-sm font-medium text-night transition hover:bg-ember/90"
+            >
+                Start
+                <ArrowRight className="h-4 w-4" />
+            </button>
+        </SignInButton>
+    );
+
     return (
-        <div className="group relative mx-auto w-full max-w-xl rounded-xl bg-linear-to-r from-black/20 via-black/10 to-black/20 transition-colors duration-300 hover:from-black/60 hover:via-black/40 hover:to-black/60">
-            <div className="rounded-xl border-2 border-white/20 bg-black/50 p-4 shadow-lg transition-colors duration-300 hover:border-white/40">
-                <input
-                    type="text"
-                    value={task}
-                    onChange={(event) => setTask(event.target.value)}
-                    placeholder={placeholder}
-                    className="w-full bg-transparent p-2 text-white placeholder-gray-400 focus:outline-none"
-                    onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                            event.preventDefault();
-                            handleSubmit();
-                        }
-                    }}
-                />
-                <div className="mt-3 flex justify-end">
-                    {user ? (
-                        <Button
-                            variant="outline"
-                            disabled={!task.trim() || createTask.isPending}
-                            onClick={handleSubmit}
-                        >
-                            Add to Flow
-                        </Button>
-                    ) : (
-                        <SignInButton mode="modal">
-                            <Button variant="outline">Sign In To Start</Button>
-                        </SignInButton>
-                    )}
-                </div>
-            </div>
+        <div className="group flex w-full items-center gap-2 rounded-2xl border border-white/12 bg-black/40 p-2 pl-4 shadow-lg transition-colors focus-within:border-ember/50 hover:border-white/25">
+            <input
+                type="text"
+                value={task}
+                onChange={(event) => setTask(event.target.value)}
+                placeholder={placeholder}
+                aria-label="Focus task"
+                className="min-w-0 flex-1 bg-transparent py-2 text-ink placeholder:text-ink-dim focus:outline-none"
+                onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        handleSubmit();
+                    }
+                }}
+            />
+            {submitButton}
         </div>
     );
 }
