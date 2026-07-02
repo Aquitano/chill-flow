@@ -2,9 +2,9 @@
 
 import { AppHeader } from '@/components/app/AppHeader';
 import { CenterContent } from '@/components/app/CenterContent';
+import { CommandPalette } from '@/components/app/CommandPalette';
 import { FeatureMenu } from '@/components/app/FeatureMenu';
-import { PlayerControls } from '@/components/app/PlayerControls';
-import { TrackDock } from '@/components/app/TrackDock';
+import { PlayerDock } from '@/components/app/PlayerDock';
 import {
     usePreferencesQuery,
     useSessionsQuery,
@@ -290,8 +290,8 @@ export function AppShell() {
             <AppHeader />
             <FeatureMenu />
             <CenterContent />
-            <TrackDock />
-            <PlayerControls />
+            <PlayerDock />
+            <CommandPalette />
         </main>
     );
 }

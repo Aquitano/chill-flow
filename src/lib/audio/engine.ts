@@ -230,6 +230,16 @@ class AudioEngineImpl {
         return Boolean(this.mediaElement?.src);
     }
 
+    /**
+     * Expose the shared AudioContext so sibling audio modules (ambient layer
+     * synthesis) render into the same output graph instead of opening a second
+     * context. Creates the context on first call.
+     */
+    getAudioContext(): AudioContext | null {
+        this.ensureContext();
+        return this.audioContext;
+    }
+
     async loadMainTrack(url: string): Promise<void> {
         this.debugLogger.debug('TrackLoader', 'Loading main track', {
             url: url.substring(url.lastIndexOf('/') + 1), // Log filename only for privacy

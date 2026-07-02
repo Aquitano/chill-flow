@@ -403,11 +403,12 @@ export const TimerDial: React.FC = () => {
                 </Button>
 
                 <Button
+                    size="icon"
                     onClick={handleToggleTimer}
-                    className="h-14 w-14 rounded-full bg-ember text-night shadow-[0_0_40px_-10px_oklch(0.81_0.1_75/0.7)] hover:bg-ember/90"
+                    className="h-14 w-14 rounded-full bg-ember text-night shadow-[0_0_40px_-10px_oklch(0.81_0.1_75/0.7)] hover:bg-ember/90 [&_svg]:size-[22px]"
                     aria-label={timerActive ? 'Pause timer' : 'Start timer'}
                 >
-                    {timerActive ? <Pause size={22} /> : <Play size={22} className="ml-0.5" />}
+                    {timerActive ? <Pause fill="currentColor" /> : <Play fill="currentColor" className="translate-x-[1px]" />}
                 </Button>
 
                 {timerMode === 'pomodoro' ? (

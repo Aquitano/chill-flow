@@ -1,6 +1,10 @@
+import { tracksInScene } from '@/lib/tracks';
 import { Background, FocusSession, Quote, Task, Track } from '@/models/app';
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
+
+/** Bottom-dock panels and the command palette; only one may be open at a time. */
+export type WorkspaceOverlay = 'library' | 'ambience' | 'palette';
 
 export type ModeSettings = {
     label: string;
@@ -59,6 +63,10 @@ interface AppState {
     volume: number[];
     repeatEnabled: boolean;
 
+    /** Track-category filter for the play queue; null plays across the whole library. */
+    activeScene: string | null;
+    activeOverlay: WorkspaceOverlay | null;
+
     isMenuOpen: boolean;
     isTasksOpen: boolean;
 
@@ -101,6 +109,11 @@ interface AppState {
     toggleTrackLike: (trackId: string) => void;
     nextTrack: () => void;
     previousTrack: () => void;
+    setActiveScene: (scene: string | null) => void;
+    setOverlay: (overlay: WorkspaceOverlay | null) => void;
+    toggleOverlay: (overlay: WorkspaceOverlay) => void;
+    /** Tracks eligible for next/previous under the active scene filter. */
+    getQueue: () => Track[];
     setSelectedBackgroundId: (backgroundId: string | null) => void;
     setCurrentQuote: (quote: Quote | null) => void;
     setSessions: (sessions: FocusSession[], summary: AppState['sessionSummary']) => void;
@@ -168,6 +181,8 @@ export const useAppStore = create<AppState>()(
         likedTrackIds: [],
         volume: [50],
         repeatEnabled: false,
+        activeScene: null,
+        activeOverlay: null,
         isMenuOpen: false,
         isTasksOpen: false,
         currentMode: 'DeepWork',
@@ -259,14 +274,15 @@ export const useAppStore = create<AppState>()(
         nextTrack: () =>
             set(
                 (state) => {
-                    if (state.tracks.length === 0) return state;
+                    const queue = tracksInScene(state.tracks, state.activeScene);
+                    if (queue.length === 0) return state;
                     const currentIndex = state.currentTrack
-                        ? state.tracks.findIndex((track) => track.id === state.currentTrack?.id)
+                        ? queue.findIndex((track) => track.id === state.currentTrack?.id)
                         : -1;
-                    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % state.tracks.length : 0;
+                    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % queue.length : 0;
                     return {
                         lastTrack: state.currentTrack,
-                        currentTrack: state.tracks[nextIndex] ?? null,
+                        currentTrack: queue[nextIndex] ?? null,
                     };
                 },
                 false,
@@ -282,21 +298,34 @@ export const useAppStore = create<AppState>()(
                         };
                     }
 
-                    if (state.tracks.length === 0) return state;
+                    const queue = tracksInScene(state.tracks, state.activeScene);
+                    if (queue.length === 0) return state;
 
                     const currentIndex = state.currentTrack
-                        ? state.tracks.findIndex((track) => track.id === state.currentTrack?.id)
+                        ? queue.findIndex((track) => track.id === state.currentTrack?.id)
                         : 0;
-                    const previousIndex = currentIndex <= 0 ? state.tracks.length - 1 : currentIndex - 1;
+                    const previousIndex = currentIndex <= 0 ? queue.length - 1 : currentIndex - 1;
 
                     return {
                         lastTrack: state.currentTrack,
-                        currentTrack: state.tracks[previousIndex] ?? null,
+                        currentTrack: queue[previousIndex] ?? null,
                     };
                 },
                 false,
                 'previousTrack',
             ),
+        setActiveScene: (scene) => set({ activeScene: scene }, false, 'setActiveScene'),
+        setOverlay: (overlay) => set({ activeOverlay: overlay }, false, 'setOverlay'),
+        toggleOverlay: (overlay) =>
+            set(
+                (state) => ({ activeOverlay: state.activeOverlay === overlay ? null : overlay }),
+                false,
+                'toggleOverlay',
+            ),
+        getQueue: () => {
+            const { tracks, activeScene } = get();
+            return tracksInScene(tracks, activeScene);
+        },
         setSelectedBackgroundId: (backgroundId) => set({ selectedBackgroundId: backgroundId }, false, 'setBackgroundId'),
         setCurrentQuote: (quote) => set({ currentQuote: quote }, false, 'setCurrentQuote'),
         setSessions: (sessions, summary) => set({ sessions, sessionSummary: summary }, false, 'setSessions'),
