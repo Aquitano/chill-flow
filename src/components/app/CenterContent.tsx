@@ -17,7 +17,8 @@ export const CenterContent: React.FC = () => {
     const showTimer = modes[currentMode]?.showTimer || false;
 
     return (
-        <div className="absolute inset-0 z-10 flex min-h-screen w-full flex-col items-center justify-center px-4 py-24 sm:px-6">
+        // Extra bottom padding keeps the dial + caption clear of the track dock.
+        <div className="absolute inset-0 z-10 flex min-h-screen w-full flex-col items-center justify-center px-4 pt-24 pb-44 sm:px-6">
             <AnimatePresence>{isTasksOpen && <TasksPanel />}</AnimatePresence>
 
             <motion.div

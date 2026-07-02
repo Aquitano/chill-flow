@@ -24,11 +24,41 @@ import {
 import { getNotificationPermission, requestNotificationPermission, showTimerNotification } from '@/lib/notifications';
 import { cn } from '@/lib/utils';
 import { TimerMode, presetToMinutes, useAppStore } from '@/store/app-store';
-import { Pause, Play, RefreshCcw, Settings } from 'lucide-react';
+import { motion } from 'framer-motion';
+import {
+    Clock,
+    Hourglass,
+    Infinity as InfinityIcon,
+    Pause,
+    Play,
+    RefreshCcw,
+    Settings,
+    Timer,
+    Zap,
+    type LucideIcon,
+} from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
-const FOCUS_PRESETS = ['15m', '25m', '45m', '60m', '∞'];
+const FOCUS_PRESETS: { label: string; icon: LucideIcon }[] = [
+    { label: '15m', icon: Zap },
+    { label: '25m', icon: Timer },
+    { label: '45m', icon: Hourglass },
+    { label: '60m', icon: Clock },
+    { label: '∞', icon: InfinityIcon },
+];
+
+/** Tick marks around the dial — lit up to the current progress. */
+const TICK_COUNT = 72;
+const TICKS = Array.from({ length: TICK_COUNT }, (_, index) => {
+    const angle = (index / TICK_COUNT) * 2 * Math.PI - Math.PI / 2;
+    return {
+        x1: 50 + 47.2 * Math.cos(angle),
+        y1: 50 + 47.2 * Math.sin(angle),
+        x2: 50 + 49.2 * Math.cos(angle),
+        y2: 50 + 49.2 * Math.sin(angle),
+    };
+});
 
 function formatTime(seconds: number): string {
     const hours = Math.floor(seconds / 3600);
@@ -300,8 +330,6 @@ export const TimerDial: React.FC = () => {
     const ringProgress =
         totalSeconds && totalSeconds > 0 ? Math.min(Math.max(1 - timerSeconds / totalSeconds, 0), 1) : 0;
 
-    const circumference = 2 * Math.PI * 49;
-
     const phaseLabel =
         timerMode === 'pomodoro'
             ? `${pomodoroSettings.isBreak ? 'Break' : 'Focus'} ${pomodoroSettings.currentSession}/${pomodoroSettings.sessionsBeforeLongBreak}`
@@ -311,25 +339,28 @@ export const TimerDial: React.FC = () => {
 
     return (
         <div className="relative z-20 flex h-full w-full flex-col items-center justify-center rounded-full">
-            {/* Progress ring hugging the circle's border */}
-            <svg viewBox="0 0 100 100" className="pointer-events-none absolute inset-1 -rotate-90" aria-hidden>
-                <circle cx="50" cy="50" r="49" fill="none" strokeWidth="0.8" stroke="oklch(1 0 0 / 0.07)" />
-                <circle
-                    cx="50"
-                    cy="50"
-                    r="49"
-                    fill="none"
-                    strokeWidth="0.8"
-                    className={cn('transition-[stroke-dashoffset] duration-1000 ease-linear', {
-                        'stroke-ember': !isBreak && !isInfinite,
-                        'stroke-ink-mid': isBreak,
-                        'stroke-ember/35': isInfinite,
-                    })}
-                    stroke="currentColor"
-                    strokeLinecap="round"
-                    strokeDasharray={circumference}
-                    strokeDashoffset={isInfinite ? 0 : circumference * (1 - ringProgress)}
-                />
+            {/* Tick ring hugging the circle's border — lit ticks mark elapsed progress. */}
+            <svg viewBox="0 0 100 100" className="pointer-events-none absolute inset-1" aria-hidden>
+                {TICKS.map((tick, index) => {
+                    const lit = isInfinite || index / TICK_COUNT < ringProgress;
+                    return (
+                        <line
+                            key={index}
+                            x1={tick.x1}
+                            y1={tick.y1}
+                            x2={tick.x2}
+                            y2={tick.y2}
+                            strokeWidth="0.55"
+                            strokeLinecap="round"
+                            className={cn('stroke-current transition-colors duration-500', {
+                                'text-ember': lit && !isBreak && !isInfinite,
+                                'text-ink-mid': lit && isBreak,
+                                'text-ember/30': lit && isInfinite,
+                                'text-white/10': !lit,
+                            })}
+                        />
+                    );
+                })}
             </svg>
 
             <Tabs value={timerMode} onValueChange={(value) => handleTimerModeChange(value as TimerMode)}>
@@ -345,9 +376,17 @@ export const TimerDial: React.FC = () => {
 
             <p className="mt-5 text-[11px] tracking-[0.2em] text-ink-dim uppercase">{phaseLabel}</p>
 
-            <div className="mt-1 text-6xl font-medium tabular-nums text-ink sm:text-7xl" role="timer" aria-live="off">
+            <motion.div
+                key={`${timerMode}-${selectedPreset}`}
+                initial={{ scale: 0.94, opacity: 0.4 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: 'spring', stiffness: 380, damping: 26 }}
+                className="mt-1 text-6xl font-medium tabular-nums text-ink sm:text-7xl"
+                role="timer"
+                aria-live="off"
+            >
                 {isInfinite ? '∞' : formatTime(timerSeconds)}
-            </div>
+            </motion.div>
 
             <div className="mt-6 flex items-center gap-4">
                 <Button
@@ -514,23 +553,36 @@ export const TimerDial: React.FC = () => {
             </div>
 
             {timerMode === 'focus' ? (
-                <div className="mt-6 flex items-center gap-1.5" role="group" aria-label="Timer presets">
-                    {FOCUS_PRESETS.map((preset) => (
-                        <button
-                            key={preset}
-                            type="button"
-                            onClick={() => setTimerPreset(preset)}
-                            aria-pressed={selectedPreset === preset}
-                            className={cn(
-                                'min-w-10 rounded-full border px-2.5 py-1 text-xs transition',
-                                selectedPreset === preset
-                                    ? 'border-ember/50 bg-ember/15 text-ember'
-                                    : 'border-white/10 text-ink-mid hover:border-white/25 hover:text-ink',
-                            )}
-                        >
-                            {preset}
-                        </button>
-                    ))}
+                <div className="mt-6 flex items-center gap-1" role="group" aria-label="Timer presets">
+                    {FOCUS_PRESETS.map((preset) => {
+                        const active = selectedPreset === preset.label;
+                        const Icon = preset.icon;
+                        return (
+                            <button
+                                key={preset.label}
+                                type="button"
+                                onClick={() => setTimerPreset(preset.label)}
+                                aria-pressed={active}
+                                aria-label={preset.label === '∞' ? 'Open-ended focus' : `${preset.label} focus block`}
+                                className={cn(
+                                    'relative rounded-full px-3 py-1.5 text-xs transition-colors',
+                                    active ? 'text-ember' : 'text-ink-mid hover:text-ink',
+                                )}
+                            >
+                                {active && (
+                                    <motion.span
+                                        layoutId="focus-preset-pill"
+                                        className="absolute inset-0 rounded-full border border-ember/50 bg-ember/12"
+                                        transition={{ type: 'spring', stiffness: 450, damping: 34 }}
+                                    />
+                                )}
+                                <span className="relative flex items-center gap-1.5">
+                                    <Icon className="h-3 w-3" aria-hidden />
+                                    {preset.label !== '∞' && preset.label}
+                                </span>
+                            </button>
+                        );
+                    })}
                 </div>
             ) : (
                 <div className="mt-6 flex items-center gap-2 text-xs" aria-label="Pomodoro cadence">

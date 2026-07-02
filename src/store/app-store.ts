@@ -370,13 +370,9 @@ export const useAppStore = create<AppState>()(
                 'hydratePreferences',
             ),
 
-        startTimer: () => {
-            const state = get();
-            if (!state.isPlaying) {
-                set({ isPlaying: true }, false, 'startPlaybackWithTimer');
-            }
-            set({ timerActive: true }, false, 'startTimer');
-        },
+        // Timer and playback are deliberately independent: starting a focus block must
+        // not force the music on (and vice versa).
+        startTimer: () => set({ timerActive: true }, false, 'startTimer'),
 
         pauseTimer: () => set({ timerActive: false }, false, 'pauseTimer'),
 

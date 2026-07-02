@@ -77,8 +77,8 @@ export const PlayerControls: React.FC = () => {
 
     // The Zustand store's `isPlaying` is the single source of truth for playback
     // intent. The engine is driven FROM the store (below), so any path that flips
-    // `isPlaying` — the player button, the focus timer's startTimer, etc. — actually
-    // starts audio. A ref mirrors the latest intent for use inside async callbacks.
+    // `isPlaying` actually starts audio. A ref mirrors the latest intent for use
+    // inside async callbacks.
     const isPlayingRef = useRef(isPlayingStore);
     useEffect(() => {
         isPlayingRef.current = isPlayingStore;
@@ -235,26 +235,31 @@ export const PlayerControls: React.FC = () => {
                 </span>
             </div>
 
-            <div className="flex items-center justify-between gap-4">
-                <div className="flex min-w-0 items-center space-x-4">
-                {currentTrack?.thumbnailUrl ? (
-                    <img
-                        src={currentTrack.thumbnailUrl}
-                        alt=""
-                        className="h-12 w-12 rounded-md object-cover shadow-md"
-                    />
-                ) : (
-                    <div className="h-12 w-12 rounded-md bg-linear-to-br from-stone-400 to-stone-600 shadow-md" />
-                )}
-                <div className="min-w-0 text-left">
-                    <h2 className="truncate text-base font-semibold">{currentTrack?.title ?? 'Select a track'}</h2>
-                    <p className="truncate text-sm text-stone-400">{currentTrack?.artist ?? 'Track catalog ready'}</p>
-                </div>
-                <div className="hidden items-center space-x-2 md:flex">
+            {/* Three fixed zones so the transport cluster is truly centered regardless
+                of how wide the track info or volume sides are. */}
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4">
+                <div className="flex min-w-0 items-center gap-3">
+                    {currentTrack?.thumbnailUrl ? (
+                        <img
+                            src={currentTrack.thumbnailUrl}
+                            alt=""
+                            className="h-12 w-12 shrink-0 rounded-md object-cover shadow-md"
+                        />
+                    ) : (
+                        <div className="h-12 w-12 shrink-0 rounded-md bg-linear-to-br from-night-2 to-black shadow-md" />
+                    )}
+                    <div className="min-w-0 text-left">
+                        <h2 className="truncate text-sm font-medium text-ink">
+                            {currentTrack?.title ?? 'Select a track'}
+                        </h2>
+                        <p className="truncate text-xs text-ink-dim">
+                            {currentTrack?.artist ?? 'Track catalog ready'}
+                        </p>
+                    </div>
                     <Button
                         variant="ghost"
                         size="icon"
-                        className={`rounded-full hover:bg-white/10 ${isLiked ? 'text-rose-400' : ''}`}
+                        className={`hidden rounded-full hover:bg-white/10 md:inline-flex ${isLiked ? 'text-rose-400' : 'text-ink-dim'}`}
                         onClick={handleLikeToggle}
                         disabled={!currentTrack}
                         aria-pressed={isLiked}
@@ -263,64 +268,68 @@ export const PlayerControls: React.FC = () => {
                         <Heart size={16} />
                     </Button>
                 </div>
-            </div>
 
-            <div className="flex items-center space-x-3">
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className="rounded-full hover:bg-white/10"
-                    onClick={previousTrack}
-                    aria-label="Previous track"
-                >
-                    <SkipBack size={18} />
-                </Button>
+                <div className="flex items-center gap-2 sm:gap-3">
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="rounded-full text-ink-mid hover:bg-white/10 hover:text-ink"
+                        onClick={previousTrack}
+                        aria-label="Previous track"
+                    >
+                        <SkipBack size={18} />
+                    </Button>
 
-                <Button
-                    onClick={handleTogglePlay}
-                    className="h-10 w-10 rounded-full bg-white/20 hover:bg-white/30"
-                    aria-label={isPlayingStore ? 'Pause' : 'Play'}
-                >
-                    {isPlayingStore ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}
-                </Button>
+                    <Button
+                        onClick={handleTogglePlay}
+                        className="h-11 w-11 rounded-full bg-ember text-night shadow-[0_0_28px_-8px_oklch(0.81_0.1_75/0.6)] hover:bg-ember/90"
+                        aria-label={isPlayingStore ? 'Pause' : 'Play'}
+                    >
+                        {isPlayingStore ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}
+                    </Button>
 
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className="rounded-full hover:bg-white/10"
-                    onClick={nextTrack}
-                    aria-label="Next track"
-                >
-                    <SkipForward size={18} />
-                </Button>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="rounded-full text-ink-mid hover:bg-white/10 hover:text-ink"
+                        onClick={nextTrack}
+                        aria-label="Next track"
+                    >
+                        <SkipForward size={18} />
+                    </Button>
 
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className={`rounded-full hover:bg-white/10 ${repeatEnabled ? 'text-emerald-400' : ''}`}
-                    onClick={toggleRepeat}
-                    aria-label="Repeat track"
-                    aria-pressed={repeatEnabled}
-                >
-                    <Repeat size={16} />
-                </Button>
-            </div>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={`rounded-full hover:bg-white/10 ${repeatEnabled ? 'text-ember' : 'text-ink-dim hover:text-ink'}`}
+                        onClick={toggleRepeat}
+                        aria-label="Repeat track"
+                        aria-pressed={repeatEnabled}
+                    >
+                        <Repeat size={16} />
+                    </Button>
+                </div>
 
-            <div className="flex items-center space-x-3">
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center justify-end gap-3">
+                    {showStreak && sessionSummary.currentStreak > 0 && (
+                        <span className="hidden text-xs text-ink-dim lg:inline">
+                            {sessionSummary.currentStreak}-day streak
+                        </span>
+                    )}
                     <button
                         onClick={() => (audio.muted ? engine.unmute() : engine.mute())}
+                        className="rounded p-1 transition hover:bg-white/10"
                         title={audio.muted ? 'Unmute' : 'Mute'}
                         aria-label={audio.muted ? 'Unmute' : 'Mute'}
                         aria-pressed={audio.muted}
                     >
                         {audio.muted ? (
-                            <VolumeX size={16} className="text-stone-400" />
+                            <VolumeX size={16} className="text-ink-dim" />
                         ) : (
-                            <Volume2 size={16} className="text-stone-400" />
+                            <Volume2 size={16} className="text-ink-dim" />
                         )}
                     </button>
-                    <div className="w-24">
+                    <div className="hidden w-24 sm:block">
                         <Slider
                             value={volume}
                             onValueChange={setVolume}
@@ -330,11 +339,6 @@ export const PlayerControls: React.FC = () => {
                             className="cursor-pointer"
                         />
                     </div>
-                </div>
-
-                {showStreak && sessionSummary.currentStreak > 0 && (
-                    <span className="ml-1 text-xs text-ink-dim">{sessionSummary.currentStreak}-day streak</span>
-                )}
                 </div>
             </div>
         </motion.div>

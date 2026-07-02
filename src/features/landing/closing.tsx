@@ -1,5 +1,6 @@
 'use client';
 
+import { EmberDust } from '@/components/ember-dust';
 import { SignUpButton, SignedIn, SignedOut } from '@clerk/nextjs';
 import { motion } from 'framer-motion';
 import { ArrowRight } from 'lucide-react';
@@ -12,6 +13,7 @@ export function ClosingSection() {
                 aria-hidden
                 className="ember-halo pointer-events-none absolute top-1/2 left-1/2 aspect-[2/1] w-[min(64rem,120vw)] -translate-x-1/2 -translate-y-1/2 rounded-full"
             />
+            <EmberDust density={24} />
             <motion.div
                 initial={{ opacity: 0, y: 24 }}
                 whileInView={{ opacity: 1, y: 0 }}

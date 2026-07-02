@@ -6,6 +6,7 @@ import { Hero } from '@/features/landing/hero';
 import { ListenSection } from '@/features/landing/listen';
 import { LoopSection } from '@/features/landing/loop';
 import { ModesSection } from '@/features/landing/modes';
+import { StatementSection } from '@/features/landing/statement';
 
 export default function Home() {
     return (
@@ -13,6 +14,7 @@ export default function Home() {
             <Header />
             <Hero />
             <LoopSection />
+            <StatementSection />
             <ListenSection />
             <ModesSection />
             <ClosingSection />
