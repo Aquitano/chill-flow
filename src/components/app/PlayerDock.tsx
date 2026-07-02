@@ -262,7 +262,7 @@ export const PlayerDock: React.FC = () => {
                 transition={{ delay: 0.3, duration: 0.8 }}
             >
                 <div className="flex items-center gap-3">
-                    <span className="w-10 shrink-0 text-right text-[11px] text-stone-400 tabular-nums">
+                    <span className="text-ink-dim w-10 shrink-0 text-right text-[11px] tabular-nums">
                         {formatClock(sliderPosition)}
                     </span>
                     <Slider
@@ -278,7 +278,7 @@ export const PlayerDock: React.FC = () => {
                         aria-label="Seek"
                         className="flex-1 cursor-pointer disabled:opacity-40"
                     />
-                    <span className="w-10 shrink-0 text-[11px] text-stone-400 tabular-nums">
+                    <span className="text-ink-dim w-10 shrink-0 text-[11px] tabular-nums">
                         {canScrub ? formatClock(duration) : '--:--'}
                     </span>
                 </div>
@@ -411,7 +411,7 @@ export const PlayerDock: React.FC = () => {
                         </Button>
                         <button
                             onClick={() => (audio.muted ? engine.unmute() : engine.mute())}
-                            className="rounded p-1 transition hover:bg-white/10"
+                            className="focus-visible:outline-ember rounded p-1 transition hover:bg-white/10 focus-visible:outline-2"
                             title={audio.muted ? 'Unmute' : 'Mute'}
                             aria-label={audio.muted ? 'Unmute' : 'Mute'}
                             aria-pressed={audio.muted}

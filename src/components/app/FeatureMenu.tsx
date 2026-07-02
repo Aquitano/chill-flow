@@ -4,8 +4,12 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app-store';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, Image as ImageIcon, Music, Sparkles, X } from 'lucide-react';
+import { Check, Image as ImageIcon, Music, Search, Sparkles, X } from 'lucide-react';
 import Image from 'next/image';
+import { useState } from 'react';
+
+// Below this the drawer's track list is short enough to scan without a filter.
+const SOUND_SEARCH_THRESHOLD = 6;
 
 const SHORTCUTS = [
     { keys: 'Space', action: 'Play / pause music' },
@@ -32,6 +36,16 @@ export const FeatureMenu: React.FC = () => {
 
     const backgroundApplies = modes[currentMode]?.showBackground ?? false;
 
+    const [soundQuery, setSoundQuery] = useState('');
+    const showSoundSearch = tracks.length > SOUND_SEARCH_THRESHOLD;
+    const soundTokens = soundQuery.toLowerCase().split(/\s+/).filter(Boolean);
+    const filteredTracks = showSoundSearch
+        ? tracks.filter((track) => {
+              const haystack = `${track.title} ${track.artist}`.toLowerCase();
+              return soundTokens.every((token) => haystack.includes(token));
+          })
+        : tracks;
+
     return (
         <>
             <motion.div
@@ -45,7 +59,7 @@ export const FeatureMenu: React.FC = () => {
                 inert={!isMenuOpen}
             >
                 <div className="flex items-center justify-between px-5 pt-5 pb-4">
-                    <h3 className="text-lg font-semibold text-ink">Workspace</h3>
+                    <h3 className="text-ink text-lg font-semibold">Workspace</h3>
                     <Button
                         variant="ghost"
                         size="icon"
@@ -59,7 +73,7 @@ export const FeatureMenu: React.FC = () => {
 
                 <div className="space-y-7 px-5 pb-8">
                     <section>
-                        <h4 className="mb-3 flex items-center gap-2 text-xs tracking-wider text-ink-dim uppercase">
+                        <h4 className="text-ink-dim mb-3 flex items-center gap-2 text-xs tracking-wider uppercase">
                             <Sparkles className="h-3.5 w-3.5" /> Mode
                         </h4>
                         <div className="space-y-1">
@@ -72,7 +86,7 @@ export const FeatureMenu: React.FC = () => {
                                         onClick={() => setMode(modeKey)}
                                         aria-pressed={active}
                                         className={cn(
-                                            'flex w-full items-start gap-2.5 rounded-lg px-3 py-2 text-left transition',
+                                            'focus-visible:outline-ember flex w-full items-start gap-2.5 rounded-lg px-3 py-2 text-left transition focus-visible:outline-2 focus-visible:-outline-offset-2',
                                             active ? 'bg-white/8' : 'hover:bg-white/5',
                                         )}
                                     >
@@ -81,10 +95,10 @@ export const FeatureMenu: React.FC = () => {
                                             className={cn('mt-1 shrink-0', active ? 'text-ember' : 'text-transparent')}
                                         />
                                         <span>
-                                            <span className="block text-sm font-medium text-ink">
+                                            <span className="text-ink block text-sm font-medium">
                                                 {modes[modeKey]?.label}
                                             </span>
-                                            <span className="mt-0.5 block text-xs text-ink-dim">
+                                            <span className="text-ink-dim mt-0.5 block text-xs">
                                                 {modes[modeKey]?.description}
                                             </span>
                                         </span>
@@ -95,65 +109,86 @@ export const FeatureMenu: React.FC = () => {
                     </section>
 
                     <section>
-                        <h4 className="mb-3 flex items-center gap-2 text-xs tracking-wider text-ink-dim uppercase">
+                        <h4 className="text-ink-dim mb-3 flex items-center gap-2 text-xs tracking-wider uppercase">
                             <Music className="h-3.5 w-3.5" /> Sound
                         </h4>
-                        <div className="space-y-1">
-                            {tracks.map((track) => {
-                                const active = currentTrack?.id === track.id;
-                                return (
-                                    <button
-                                        key={track.id}
-                                        type="button"
-                                        onClick={() => setCurrentTrack(track)}
-                                        aria-pressed={active}
-                                        className={cn(
-                                            'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition',
-                                            active ? 'bg-white/8' : 'hover:bg-white/5',
-                                        )}
-                                    >
-                                        {track.thumbnailUrl ? (
-                                            <Image
-                                                src={track.thumbnailUrl}
-                                                alt=""
-                                                width={32}
-                                                height={32}
-                                                className="h-8 w-8 rounded object-cover"
-                                            />
-                                        ) : (
-                                            <span className="flex h-8 w-8 items-center justify-center rounded bg-white/10">
-                                                <Music className="h-3.5 w-3.5 text-ink-dim" />
+                        {showSoundSearch && (
+                            <div className="mb-2 flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5">
+                                <Search size={13} className="text-ink-dim shrink-0" aria-hidden />
+                                <input
+                                    type="text"
+                                    value={soundQuery}
+                                    onChange={(event) => setSoundQuery(event.target.value)}
+                                    placeholder="Search sounds…"
+                                    aria-label="Search sounds"
+                                    autoComplete="off"
+                                    spellCheck={false}
+                                    className="text-ink placeholder:text-ink-dim min-w-0 flex-1 bg-transparent text-sm outline-none"
+                                />
+                            </div>
+                        )}
+                        {filteredTracks.length === 0 ? (
+                            <p className="text-ink-dim px-1 py-2 text-sm">No sounds match “{soundQuery}”</p>
+                        ) : (
+                            <div className="space-y-1">
+                                {filteredTracks.map((track) => {
+                                    const active = currentTrack?.id === track.id;
+                                    return (
+                                        <button
+                                            key={track.id}
+                                            type="button"
+                                            onClick={() => setCurrentTrack(track)}
+                                            aria-pressed={active}
+                                            className={cn(
+                                                'focus-visible:outline-ember flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition focus-visible:outline-2 focus-visible:-outline-offset-2',
+                                                active ? 'bg-white/8' : 'hover:bg-white/5',
+                                            )}
+                                        >
+                                            {track.thumbnailUrl ? (
+                                                <Image
+                                                    src={track.thumbnailUrl}
+                                                    alt=""
+                                                    width={32}
+                                                    height={32}
+                                                    className="h-8 w-8 rounded object-cover"
+                                                />
+                                            ) : (
+                                                <span className="flex h-8 w-8 items-center justify-center rounded bg-white/10">
+                                                    <Music className="text-ink-dim h-3.5 w-3.5" />
+                                                </span>
+                                            )}
+                                            <span className="min-w-0 flex-1">
+                                                <span className="text-ink block truncate text-sm">{track.title}</span>
+                                                <span className="text-ink-dim block truncate text-xs">
+                                                    {track.artist}
+                                                </span>
                                             </span>
-                                        )}
-                                        <span className="min-w-0 flex-1">
-                                            <span className="block truncate text-sm text-ink">{track.title}</span>
-                                            <span className="block truncate text-xs text-ink-dim">{track.artist}</span>
-                                        </span>
-                                        {active && (
-                                            <span
-                                                className={cn(
-                                                    'flex h-5 items-end gap-[2px]',
-                                                    isPlaying && 'eq-playing',
-                                                )}
-                                                aria-hidden
-                                            >
-                                                {[0, 0.2, 0.1].map((delay, index) => (
-                                                    <span
-                                                        key={index}
-                                                        className="eq-bar w-[2px] rounded-full bg-ember"
-                                                        style={{ height: '100%', animationDelay: `${delay}s` }}
-                                                    />
-                                                ))}
-                                            </span>
-                                        )}
-                                    </button>
-                                );
-                            })}
-                        </div>
+                                            {active && (
+                                                <span
+                                                    className={cn(
+                                                        'flex h-5 items-end gap-[2px]',
+                                                        isPlaying && 'eq-playing',
+                                                    )}
+                                                    aria-hidden
+                                                >
+                                                    {[0, 0.2, 0.1].map((delay, index) => (
+                                                        <span
+                                                            key={index}
+                                                            className="eq-bar bg-ember w-[2px] rounded-full"
+                                                            style={{ height: '100%', animationDelay: `${delay}s` }}
+                                                        />
+                                                    ))}
+                                                </span>
+                                            )}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </section>
 
                     <section>
-                        <h4 className="mb-3 flex items-center gap-2 text-xs tracking-wider text-ink-dim uppercase">
+                        <h4 className="text-ink-dim mb-3 flex items-center gap-2 text-xs tracking-wider uppercase">
                             <ImageIcon className="h-3.5 w-3.5" /> Scene
                         </h4>
                         <div className="grid grid-cols-2 gap-2">
@@ -166,9 +201,9 @@ export const FeatureMenu: React.FC = () => {
                                         onClick={() => setSelectedBackgroundId(background.id)}
                                         aria-pressed={active}
                                         className={cn(
-                                            'group relative overflow-hidden rounded-lg border transition',
+                                            'focus-visible:outline-ember group relative overflow-hidden rounded-lg border transition focus-visible:outline-2',
                                             active
-                                                ? 'border-ember/60 ring-1 ring-ember/40'
+                                                ? 'border-ember/60 ring-ember/40 ring-1'
                                                 : 'border-white/10 hover:border-white/30',
                                         )}
                                     >
@@ -182,11 +217,11 @@ export const FeatureMenu: React.FC = () => {
                                             />
                                         )}
                                         <span className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
-                                        <span className="absolute bottom-1.5 left-2 text-xs font-medium text-ink">
+                                        <span className="text-ink absolute bottom-1.5 left-2 text-xs font-medium">
                                             {background.name}
                                         </span>
                                         {active && (
-                                            <span className="absolute top-1.5 right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-ember text-night">
+                                            <span className="bg-ember text-night absolute top-1.5 right-1.5 flex h-4 w-4 items-center justify-center rounded-full">
                                                 <Check className="h-2.5 w-2.5" />
                                             </span>
                                         )}
@@ -195,29 +230,29 @@ export const FeatureMenu: React.FC = () => {
                             })}
                         </div>
                         {!backgroundApplies && (
-                            <p className="mt-2 text-xs text-ink-dim">
+                            <p className="text-ink-dim mt-2 text-xs">
                                 The scene appears in modes that show a background (LearnFlow, CreativeSpark).
                             </p>
                         )}
                     </section>
 
                     <section className="rounded-xl border border-white/10 bg-white/5 p-4">
-                        <h4 className="text-xs tracking-wider text-ink-dim uppercase">Progress</h4>
-                        <p className="mt-2 text-sm text-ink">
+                        <h4 className="text-ink-dim text-xs tracking-wider uppercase">Progress</h4>
+                        <p className="text-ink mt-2 text-sm">
                             {sessionSummary.totalMinutes} minutes focused · {sessionSummary.totalSessions} sessions
                         </p>
                         {sessionSummary.currentStreak > 0 && (
-                            <p className="mt-1 text-xs text-ink-dim">{sessionSummary.currentStreak}-day streak</p>
+                            <p className="text-ink-dim mt-1 text-xs">{sessionSummary.currentStreak}-day streak</p>
                         )}
                     </section>
 
                     <section>
-                        <h4 className="mb-3 text-xs tracking-wider text-ink-dim uppercase">Shortcuts</h4>
+                        <h4 className="text-ink-dim mb-3 text-xs tracking-wider uppercase">Shortcuts</h4>
                         <ul className="space-y-1.5">
                             {SHORTCUTS.map((shortcut) => (
                                 <li key={shortcut.keys} className="flex items-center justify-between text-sm">
                                     <span className="text-ink-mid">{shortcut.action}</span>
-                                    <kbd className="rounded border border-white/15 bg-black/40 px-1.5 py-0.5 font-sans text-[11px] text-ink-dim">
+                                    <kbd className="text-ink-dim rounded border border-white/15 bg-black/40 px-1.5 py-0.5 font-sans text-[11px]">
                                         {shortcut.keys}
                                     </kbd>
                                 </li>

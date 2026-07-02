@@ -1,10 +1,6 @@
 'use client';
 
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -374,14 +370,14 @@ export const TimerDial: React.FC = () => {
                 </TabsList>
             </Tabs>
 
-            <p className="mt-5 text-[11px] tracking-[0.2em] text-ink-dim uppercase">{phaseLabel}</p>
+            <p className="text-ink-dim mt-5 text-[11px] tracking-[0.2em] uppercase">{phaseLabel}</p>
 
             <motion.div
                 key={`${timerMode}-${selectedPreset}`}
                 initial={{ scale: 0.94, opacity: 0.4 }}
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ type: 'spring', stiffness: 380, damping: 26 }}
-                className="mt-1 text-6xl font-medium tabular-nums text-ink sm:text-7xl"
+                className="text-ink mt-1 text-6xl font-medium tabular-nums sm:text-7xl"
                 role="timer"
                 aria-live="off"
             >
@@ -405,10 +401,14 @@ export const TimerDial: React.FC = () => {
                 <Button
                     size="icon"
                     onClick={handleToggleTimer}
-                    className="h-14 w-14 rounded-full bg-ember text-night shadow-[0_0_40px_-10px_oklch(0.81_0.1_75/0.7)] hover:bg-ember/90 [&_svg]:size-[22px]"
+                    className="bg-ember text-night hover:bg-ember/90 h-14 w-14 rounded-full shadow-[0_0_40px_-10px_oklch(0.81_0.1_75/0.7)] [&_svg]:size-[22px]"
                     aria-label={timerActive ? 'Pause timer' : 'Start timer'}
                 >
-                    {timerActive ? <Pause fill="currentColor" /> : <Play fill="currentColor" className="translate-x-[1px]" />}
+                    {timerActive ? (
+                        <Pause fill="currentColor" />
+                    ) : (
+                        <Play fill="currentColor" className="translate-x-[1px]" />
+                    )}
                 </Button>
 
                 {timerMode === 'pomodoro' ? (
@@ -425,7 +425,7 @@ export const TimerDial: React.FC = () => {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="center" className="space-y-2 bg-black/90 p-3 backdrop-blur-md">
                             <div className="space-y-1">
-                                <label htmlFor={focusMinutesId} className="text-xs text-neutral-400">
+                                <label htmlFor={focusMinutesId} className="text-ink-dim text-xs">
                                     Focus (minutes)
                                 </label>
                                 <Input
@@ -441,7 +441,7 @@ export const TimerDial: React.FC = () => {
                                 />
                             </div>
                             <div className="space-y-1">
-                                <label htmlFor={breakMinutesId} className="text-xs text-neutral-400">
+                                <label htmlFor={breakMinutesId} className="text-ink-dim text-xs">
                                     Break (minutes)
                                 </label>
                                 <Input
@@ -457,7 +457,7 @@ export const TimerDial: React.FC = () => {
                                 />
                             </div>
                             <div className="space-y-1">
-                                <label htmlFor={longBreakMinutesId} className="text-xs text-neutral-400">
+                                <label htmlFor={longBreakMinutesId} className="text-ink-dim text-xs">
                                     Long break (minutes)
                                 </label>
                                 <Input
@@ -473,7 +473,7 @@ export const TimerDial: React.FC = () => {
                                 />
                             </div>
                             <div className="space-y-1">
-                                <label htmlFor={sessionsId} className="text-xs text-neutral-400">
+                                <label htmlFor={sessionsId} className="text-ink-dim text-xs">
                                     Sessions before long break
                                 </label>
                                 <Input
@@ -505,10 +505,10 @@ export const TimerDial: React.FC = () => {
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="center" className="bg-black/90 p-3 backdrop-blur-md">
-                            <div className="mb-2 text-xs text-neutral-300">Custom duration</div>
+                            <div className="text-ink-mid mb-2 text-xs">Custom duration</div>
                             <div className="flex items-end gap-2">
                                 <div className="flex flex-col">
-                                    <label htmlFor={customHoursId} className="mb-1 text-xs text-neutral-400">
+                                    <label htmlFor={customHoursId} className="text-ink-dim mb-1 text-xs">
                                         Hours
                                     </label>
                                     <Input
@@ -523,7 +523,7 @@ export const TimerDial: React.FC = () => {
                                     />
                                 </div>
                                 <div className="flex flex-col">
-                                    <label htmlFor={customMinsId} className="mb-1 text-xs text-neutral-400">
+                                    <label htmlFor={customMinsId} className="text-ink-dim mb-1 text-xs">
                                         Minutes
                                     </label>
                                     <Input
@@ -566,14 +566,14 @@ export const TimerDial: React.FC = () => {
                                 aria-pressed={active}
                                 aria-label={preset.label === '∞' ? 'Open-ended focus' : `${preset.label} focus block`}
                                 className={cn(
-                                    'relative rounded-full px-3 py-1.5 text-xs transition-colors',
+                                    'focus-visible:outline-ember relative rounded-full px-3 py-1.5 text-xs transition-colors focus-visible:outline-2',
                                     active ? 'text-ember' : 'text-ink-mid hover:text-ink',
                                 )}
                             >
                                 {active && (
                                     <motion.span
                                         layoutId="focus-preset-pill"
-                                        className="absolute inset-0 rounded-full border border-ember/50 bg-ember/12"
+                                        className="border-ember/50 bg-ember/12 absolute inset-0 rounded-full border"
                                         transition={{ type: 'spring', stiffness: 450, damping: 34 }}
                                     />
                                 )}
@@ -592,7 +592,7 @@ export const TimerDial: React.FC = () => {
                             'rounded-full border px-3 py-1',
                             !pomodoroSettings.isBreak
                                 ? 'border-ember/50 bg-ember/15 text-ember'
-                                : 'border-white/10 text-ink-dim',
+                                : 'text-ink-dim border-white/10',
                         )}
                     >
                         Focus {pomodoroSettings.focusMinutes}m
@@ -601,8 +601,8 @@ export const TimerDial: React.FC = () => {
                         className={cn(
                             'rounded-full border px-3 py-1',
                             pomodoroSettings.isBreak
-                                ? 'border-white/40 bg-white/10 text-ink'
-                                : 'border-white/10 text-ink-dim',
+                                ? 'text-ink border-white/40 bg-white/10'
+                                : 'text-ink-dim border-white/10',
                         )}
                     >
                         Break {pomodoroSettings.breakMinutes}m
