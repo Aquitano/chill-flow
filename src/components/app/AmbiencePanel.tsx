@@ -1,12 +1,7 @@
 'use client';
 
 import { ambientCategoryIcon } from '@/components/app/ambient-icons';
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Combobox } from '@/components/ui/combobox';
 import { Slider } from '@/components/ui/slider';
 import {
     useAmbientMixesQuery,
@@ -28,9 +23,12 @@ import { cn } from '@/lib/utils';
 import { AmbientMix, AmbientSound } from '@/models/app';
 import { useUser } from '@clerk/nextjs';
 import { motion } from 'framer-motion';
-import { Check, Plus, Power, X } from 'lucide-react';
+import { Check, Plus, Power, Search, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
+
+// Below this the chips are easy to scan by eye; a search field would be clutter.
+const PRESET_SEARCH_THRESHOLD = 6;
 
 /**
  * myNoise-style board: eight slots filled from the sound library, one vertical
@@ -48,6 +46,7 @@ export function AmbiencePanel() {
     const [localMixes, setLocalMixes] = useState<AmbientMix[]>(() => readLocalMixes());
     const [activeMixId, setActiveMixId] = useState<string | null>(null);
     const [mixName, setMixName] = useState('');
+    const [presetQuery, setPresetQuery] = useState('');
 
     // The mixer singleton owns board state; the query only feeds it the library.
     useEffect(() => {
@@ -66,6 +65,11 @@ export function AmbiencePanel() {
 
     const savedMixes = isSignedIn ? (mixesQuery.data ?? []) : localMixes;
     const presets = [...playableMixes(BUILTIN_MIXES, sounds), ...savedMixes];
+    const showPresetSearch = presets.length > PRESET_SEARCH_THRESHOLD;
+    const presetTokens = presetQuery.toLowerCase().split(/\s+/).filter(Boolean);
+    const visiblePresets = showPresetSearch
+        ? presets.filter((mix) => presetTokens.every((token) => mix.name.toLowerCase().includes(token)))
+        : presets;
     const soundById = new Map(sounds.map((sound) => [sound.id, sound]));
     const onBoard = new Set(board.flatMap((slot) => (slot ? [slot.soundId] : [])));
     const available = sounds.filter((sound) => !onBoard.has(sound.id));
@@ -149,44 +153,65 @@ export function AmbiencePanel() {
             </header>
 
             {presets.length > 0 && (
-                <div
-                    className="scrollbar-custom flex gap-1.5 overflow-x-auto px-4 pt-3 pb-1.5"
-                    role="listbox"
-                    aria-label="Presets"
-                >
-                    {presets.map((mix) => {
-                        const isActive = activeMixId === mix.id;
-                        const deletable = !mix.id.startsWith('builtin-');
-                        return (
-                            <span key={mix.id} className="group relative shrink-0">
-                                <button
-                                    type="button"
-                                    role="option"
-                                    aria-selected={isActive}
-                                    onClick={() => applyMix(mix)}
-                                    className={cn(
-                                        'focus-visible:outline-ember rounded-full border px-3 py-1 text-xs whitespace-nowrap transition-colors focus-visible:outline-2',
-                                        deletable && 'pr-7',
-                                        isActive
-                                            ? 'border-ember/50 bg-ember/15 text-ember'
-                                            : 'text-ink-mid hover:text-ink border-white/10 bg-white/5 hover:bg-white/10',
-                                    )}
-                                >
-                                    {mix.name}
-                                </button>
-                                {deletable && (
-                                    <button
-                                        type="button"
-                                        aria-label={`Delete mix ${mix.name}`}
-                                        onClick={() => handleDeleteMix(mix)}
-                                        className="text-ink-dim hover:text-ink focus-visible:outline-ember absolute top-1/2 right-1.5 -translate-y-1/2 rounded-full p-0.5 transition-colors focus-visible:outline-2"
-                                    >
-                                        <X size={11} aria-hidden />
-                                    </button>
-                                )}
-                            </span>
-                        );
-                    })}
+                <div className="px-4 pt-3">
+                    {showPresetSearch && (
+                        <div className="mb-2 flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5">
+                            <Search size={13} className="text-ink-dim shrink-0" aria-hidden />
+                            <input
+                                type="text"
+                                value={presetQuery}
+                                onChange={(event) => setPresetQuery(event.target.value)}
+                                placeholder="Search presets…"
+                                aria-label="Search presets"
+                                autoComplete="off"
+                                spellCheck={false}
+                                className="text-ink placeholder:text-ink-dim min-w-0 flex-1 bg-transparent text-xs outline-none"
+                            />
+                        </div>
+                    )}
+                    {visiblePresets.length === 0 ? (
+                        <p className="text-ink-dim px-1 pb-1 text-xs">No presets match “{presetQuery}”</p>
+                    ) : (
+                        <div
+                            className="scrollbar-custom flex gap-1.5 overflow-x-auto pb-1.5"
+                            role="listbox"
+                            aria-label="Presets"
+                        >
+                            {visiblePresets.map((mix) => {
+                                const isActive = activeMixId === mix.id;
+                                const deletable = !mix.id.startsWith('builtin-');
+                                return (
+                                    <span key={mix.id} className="group relative shrink-0">
+                                        <button
+                                            type="button"
+                                            role="option"
+                                            aria-selected={isActive}
+                                            onClick={() => applyMix(mix)}
+                                            className={cn(
+                                                'focus-visible:outline-ember rounded-full border px-3 py-1 text-xs whitespace-nowrap transition-colors focus-visible:outline-2',
+                                                deletable && 'pr-7',
+                                                isActive
+                                                    ? 'border-ember/50 bg-ember/15 text-ember'
+                                                    : 'text-ink-mid hover:text-ink border-white/10 bg-white/5 hover:bg-white/10',
+                                            )}
+                                        >
+                                            {mix.name}
+                                        </button>
+                                        {deletable && (
+                                            <button
+                                                type="button"
+                                                aria-label={`Delete mix ${mix.name}`}
+                                                onClick={() => handleDeleteMix(mix)}
+                                                className="text-ink-dim hover:text-ink focus-visible:outline-ember absolute top-1/2 right-1.5 -translate-y-1/2 rounded-full p-0.5 transition-colors focus-visible:outline-2"
+                                            >
+                                                <X size={11} aria-hidden />
+                                            </button>
+                                        )}
+                                    </span>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -269,6 +294,11 @@ export function AmbiencePanel() {
     );
 }
 
+function AmbientOptionIcon({ category }: { category: string }) {
+    const Icon = ambientCategoryIcon(category);
+    return <Icon size={14} aria-hidden />;
+}
+
 function BoardSlot({
     slot,
     sound,
@@ -291,8 +321,18 @@ function BoardSlot({
     if (!slot || !sound) {
         return (
             <li className="flex w-12 shrink-0 flex-col items-center">
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
+                <Combobox
+                    ariaLabel="Add a sound"
+                    placeholder="Search sounds…"
+                    emptyText="No sounds left"
+                    items={available.map((option) => ({
+                        id: option.id,
+                        label: option.label,
+                        keywords: option.category,
+                        icon: <AmbientOptionIcon category={option.category} />,
+                    }))}
+                    onSelect={onAdd}
+                    trigger={
                         <button
                             type="button"
                             aria-label="Add a sound"
@@ -301,22 +341,8 @@ function BoardSlot({
                         >
                             <Plus size={14} aria-hidden />
                         </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent
-                        align="center"
-                        className="scrollbar-custom max-h-64 w-44 overflow-y-auto border-white/10 bg-black/90 backdrop-blur-md"
-                    >
-                        {available.map((option) => {
-                            const Icon = ambientCategoryIcon(option.category);
-                            return (
-                                <DropdownMenuItem key={option.id} onClick={() => onAdd(option.id)} className="gap-2.5">
-                                    <Icon size={14} className="text-ink-dim" aria-hidden />
-                                    {option.label}
-                                </DropdownMenuItem>
-                            );
-                        })}
-                    </DropdownMenuContent>
-                </DropdownMenu>
+                    }
+                />
             </li>
         );
     }

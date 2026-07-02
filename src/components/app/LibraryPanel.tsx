@@ -5,26 +5,18 @@ import { deriveScenes, formatDuration, tracksInScene } from '@/lib/tracks';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app-store';
 import { motion } from 'framer-motion';
-import { Music } from 'lucide-react';
-import { useMemo } from 'react';
+import { Music, Search } from 'lucide-react';
+import { useMemo, useState } from 'react';
 
-function SceneChip({
-    active,
-    onClick,
-    children,
-}: {
-    active: boolean;
-    onClick: () => void;
-    children: React.ReactNode;
-}) {
+function SceneChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
     return (
         <button
             type="button"
             aria-pressed={active}
             onClick={onClick}
             className={cn(
-                'shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ember',
-                active ? 'bg-ember text-night' : 'bg-white/5 text-ink-mid hover:bg-white/10 hover:text-ink',
+                'focus-visible:outline-ember shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-2',
+                active ? 'bg-ember text-night' : 'text-ink-mid hover:text-ink bg-white/5 hover:bg-white/10',
             )}
         >
             {children}
@@ -45,8 +37,19 @@ export function LibraryPanel() {
     const activeScene = useAppStore((state) => state.activeScene);
     const setActiveScene = useAppStore((state) => state.setActiveScene);
 
+    const [query, setQuery] = useState('');
+
     const scenes = useMemo(() => deriveScenes(tracks), [tracks]);
     const visibleTracks = tracksInScene(tracks, activeScene);
+    const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+    const filteredTracks =
+        tokens.length === 0
+            ? visibleTracks
+            : visibleTracks.filter((track) => {
+                  const haystack =
+                      `${track.title} ${track.artist} ${track.tags.join(' ')} ${track.category ?? ''}`.toLowerCase();
+                  return tokens.every((token) => haystack.includes(token));
+              });
 
     return (
         <motion.section
@@ -81,61 +84,87 @@ export function LibraryPanel() {
                 </div>
             )}
 
-            {visibleTracks.length === 0 ? (
+            {tracks.length === 0 ? (
                 <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
-                    <Music className="size-5 text-ink-dim" aria-hidden />
-                    <p className="text-sm text-ink-mid">No tracks yet</p>
-                    <p className="text-xs text-ink-dim">New soundtracks appear here as they land in the catalog.</p>
+                    <Music className="text-ink-dim size-5" aria-hidden />
+                    <p className="text-ink-mid text-sm">No tracks yet</p>
+                    <p className="text-ink-dim text-xs">New soundtracks appear here as they land in the catalog.</p>
                 </div>
             ) : (
-                <div role="listbox" aria-label="Tracks" className="scrollbar-custom max-h-[38vh] space-y-0.5 overflow-y-auto p-2">
-                    {visibleTracks.map((track) => {
-                        const active = currentTrack?.id === track.id;
-                        return (
-                            <button
-                                key={track.id}
-                                type="button"
-                                role="option"
-                                aria-selected={active}
-                                onClick={() => {
-                                    setCurrentTrack(track);
-                                    setIsPlaying(true);
-                                }}
-                                className={cn(
-                                    'flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ember',
-                                    active ? 'bg-white/8' : 'hover:bg-white/5',
-                                )}
-                            >
-                                <TrackArt track={track} className="h-10 w-10" />
-                                <span className="min-w-0 flex-1">
-                                    <span
+                <>
+                    <div className={cn('px-3 pb-2', scenes.length > 0 ? 'pt-0.5' : 'pt-3')}>
+                        <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5">
+                            <Search size={14} className="text-ink-dim shrink-0" aria-hidden />
+                            <input
+                                type="text"
+                                value={query}
+                                onChange={(event) => setQuery(event.target.value)}
+                                placeholder="Search tracks…"
+                                aria-label="Search tracks"
+                                autoComplete="off"
+                                spellCheck={false}
+                                className="text-ink placeholder:text-ink-dim min-w-0 flex-1 bg-transparent text-sm outline-none"
+                            />
+                        </div>
+                    </div>
+
+                    {filteredTracks.length === 0 ? (
+                        <p className="text-ink-dim px-4 pb-6 text-center text-sm">No tracks match “{query}”</p>
+                    ) : (
+                        <div
+                            role="listbox"
+                            aria-label="Tracks"
+                            className="scrollbar-custom max-h-[38vh] space-y-0.5 overflow-y-auto p-2"
+                        >
+                            {filteredTracks.map((track) => {
+                                const active = currentTrack?.id === track.id;
+                                return (
+                                    <button
+                                        key={track.id}
+                                        type="button"
+                                        role="option"
+                                        aria-selected={active}
+                                        onClick={() => {
+                                            setCurrentTrack(track);
+                                            setIsPlaying(true);
+                                        }}
                                         className={cn(
-                                            'block truncate text-sm font-medium',
-                                            active ? 'text-ember' : 'text-ink',
+                                            'focus-visible:outline-ember flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2',
+                                            active ? 'bg-white/8' : 'hover:bg-white/5',
                                         )}
                                     >
-                                        {track.title}
-                                    </span>
-                                    <span className="block truncate text-xs text-ink-dim">{track.artist}</span>
-                                </span>
-                                {active && isPlaying && (
-                                    <span className="eq-playing flex shrink-0 items-end gap-[2px]" aria-hidden>
-                                        {[0, 0.2, 0.1].map((delay, index) => (
+                                        <TrackArt track={track} className="h-10 w-10" />
+                                        <span className="min-w-0 flex-1">
                                             <span
-                                                key={index}
-                                                className="eq-bar h-3 w-[2px] rounded-full bg-ember"
-                                                style={{ animationDelay: `${delay}s` }}
-                                            />
-                                        ))}
-                                    </span>
-                                )}
-                                <span className="shrink-0 text-xs tabular-nums text-ink-dim">
-                                    {formatDuration(track.duration)}
-                                </span>
-                            </button>
-                        );
-                    })}
-                </div>
+                                                className={cn(
+                                                    'block truncate text-sm font-medium',
+                                                    active ? 'text-ember' : 'text-ink',
+                                                )}
+                                            >
+                                                {track.title}
+                                            </span>
+                                            <span className="text-ink-dim block truncate text-xs">{track.artist}</span>
+                                        </span>
+                                        {active && isPlaying && (
+                                            <span className="eq-playing flex shrink-0 items-end gap-[2px]" aria-hidden>
+                                                {[0, 0.2, 0.1].map((delay, index) => (
+                                                    <span
+                                                        key={index}
+                                                        className="eq-bar bg-ember h-3 w-[2px] rounded-full"
+                                                        style={{ animationDelay: `${delay}s` }}
+                                                    />
+                                                ))}
+                                            </span>
+                                        )}
+                                        <span className="text-ink-dim shrink-0 text-xs tabular-nums">
+                                            {formatDuration(track.duration)}
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+                </>
             )}
         </motion.section>
     );
