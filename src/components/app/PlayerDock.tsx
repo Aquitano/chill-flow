@@ -226,6 +226,11 @@ export const PlayerDock: React.FC = () => {
         if (!libraryOpen && !ambienceOpen) return;
         const handlePointerDown = (event: PointerEvent) => {
             if (event.target instanceof Node && dockRef.current?.contains(event.target)) return;
+            // Radix portals (the ambience sound picker) render outside the dock but
+            // belong to it — picking a sound must not dismiss the panel.
+            if (event.target instanceof Element && event.target.closest('[data-radix-popper-content-wrapper]')) {
+                return;
+            }
             setOverlay(null);
         };
         document.addEventListener('pointerdown', handlePointerDown);
@@ -257,7 +262,7 @@ export const PlayerDock: React.FC = () => {
                 transition={{ delay: 0.3, duration: 0.8 }}
             >
                 <div className="flex items-center gap-3">
-                    <span className="w-10 shrink-0 text-right text-[11px] tabular-nums text-stone-400">
+                    <span className="w-10 shrink-0 text-right text-[11px] text-stone-400 tabular-nums">
                         {formatClock(sliderPosition)}
                     </span>
                     <Slider
@@ -273,7 +278,7 @@ export const PlayerDock: React.FC = () => {
                         aria-label="Seek"
                         className="flex-1 cursor-pointer disabled:opacity-40"
                     />
-                    <span className="w-10 shrink-0 text-[11px] tabular-nums text-stone-400">
+                    <span className="w-10 shrink-0 text-[11px] text-stone-400 tabular-nums">
                         {canScrub ? formatClock(duration) : '--:--'}
                     </span>
                 </div>
@@ -288,29 +293,29 @@ export const PlayerDock: React.FC = () => {
                             aria-expanded={libraryOpen}
                             aria-controls="dock-panel-library"
                             aria-label={libraryOpen ? 'Close library' : 'Open library'}
-                            className="group -m-1.5 flex min-w-0 items-center gap-3 rounded-lg p-1.5 text-left transition-colors hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-ember"
+                            className="group focus-visible:outline-ember -m-1.5 flex min-w-0 items-center gap-3 rounded-lg p-1.5 text-left transition-colors hover:bg-white/5 focus-visible:outline-2"
                         >
                             {currentTrack ? (
                                 <TrackArt track={currentTrack} className="h-12 w-12 rounded-md shadow-md" />
                             ) : (
-                                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md bg-linear-to-br from-night-2 to-black shadow-md">
-                                    <Music className="size-4 text-ink-dim" aria-hidden />
+                                <span className="from-night-2 flex h-12 w-12 shrink-0 items-center justify-center rounded-md bg-linear-to-br to-black shadow-md">
+                                    <Music className="text-ink-dim size-4" aria-hidden />
                                 </span>
                             )}
                             {/* On narrow screens the cover + chevron alone carry the affordance;
                                 a two-letter truncated title is worse than none. */}
                             <span className="hidden min-w-0 sm:block">
-                                <span className="block truncate text-sm font-medium text-ink">
+                                <span className="text-ink block truncate text-sm font-medium">
                                     {currentTrack?.title ?? 'Browse the library'}
                                 </span>
-                                <span className="block truncate text-xs text-ink-dim">
+                                <span className="text-ink-dim block truncate text-xs">
                                     {currentTrack?.artist ?? 'Choose a soundtrack'}
                                 </span>
                             </span>
                             <ChevronUp
                                 aria-hidden
                                 className={cn(
-                                    'size-4 shrink-0 text-ink-dim transition-transform duration-200 group-hover:text-ink-mid',
+                                    'text-ink-dim group-hover:text-ink-mid size-4 shrink-0 transition-transform duration-200',
                                     libraryOpen && 'rotate-180',
                                 )}
                             />
@@ -333,7 +338,7 @@ export const PlayerDock: React.FC = () => {
                         <Button
                             variant="ghost"
                             size="icon"
-                            className="rounded-full text-ink-mid hover:bg-white/10 hover:text-ink"
+                            className="text-ink-mid hover:text-ink rounded-full hover:bg-white/10"
                             onClick={previousTrack}
                             aria-label="Previous track"
                         >
@@ -343,7 +348,7 @@ export const PlayerDock: React.FC = () => {
                         <Button
                             size="icon"
                             onClick={togglePlay}
-                            className="h-11 w-11 rounded-full bg-ember text-night shadow-[0_0_28px_-8px_oklch(0.81_0.1_75/0.6)] hover:bg-ember/90 [&_svg]:size-[18px]"
+                            className="bg-ember text-night hover:bg-ember/90 h-11 w-11 rounded-full shadow-[0_0_28px_-8px_oklch(0.81_0.1_75/0.6)] [&_svg]:size-[18px]"
                             aria-label={isPlayingStore ? 'Pause' : 'Play'}
                         >
                             {isPlayingStore ? (
@@ -356,7 +361,7 @@ export const PlayerDock: React.FC = () => {
                         <Button
                             variant="ghost"
                             size="icon"
-                            className="rounded-full text-ink-mid hover:bg-white/10 hover:text-ink"
+                            className="text-ink-mid hover:text-ink rounded-full hover:bg-white/10"
                             onClick={nextTrack}
                             aria-label="Next track"
                         >
@@ -378,7 +383,7 @@ export const PlayerDock: React.FC = () => {
 
                     <div className="flex items-center justify-end gap-2 sm:gap-3">
                         {showStreak && sessionSummary.currentStreak > 0 && (
-                            <span className="hidden text-xs text-ink-dim lg:inline">
+                            <span className="text-ink-dim hidden text-xs lg:inline">
                                 {sessionSummary.currentStreak}-day streak
                             </span>
                         )}
@@ -400,7 +405,7 @@ export const PlayerDock: React.FC = () => {
                             {ambientCount > 0 && (
                                 <span
                                     aria-hidden
-                                    className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-ember"
+                                    className="bg-ember absolute top-1 right-1 h-1.5 w-1.5 rounded-full"
                                 />
                             )}
                         </Button>

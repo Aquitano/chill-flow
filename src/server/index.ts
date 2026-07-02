@@ -1,6 +1,7 @@
 import { appEnv } from '@/lib/env';
 import { cors } from 'hono/cors';
 import { j } from './jstack';
+import { ambientRouter } from './routers/ambient-router';
 import { preferencesRouter } from './routers/preferences-router';
 import { sessionsRouter } from './routers/sessions-router';
 import { tasksRouter } from './routers/tasks-router';
@@ -39,6 +40,7 @@ const api = j
  * All routers in /server/routers should be added here manually.
  */
 const appRouter = j.mergeRouters(api, {
+    ambient: ambientRouter,
     preferences: preferencesRouter,
     sessions: sessionsRouter,
     tasks: tasksRouter,

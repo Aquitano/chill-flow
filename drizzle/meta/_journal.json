@@ -43,6 +43,13 @@
       "when": 1782758361386,
       "tag": "0005_add_track_thumbnail",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783021048274,
+      "tag": "0006_complex_moondragon",
+      "breakpoints": true
     }
   ]
 }

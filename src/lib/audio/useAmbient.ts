@@ -1,21 +1,28 @@
 'use client';
 
+import { AmbientSound } from '@/models/app';
 import { useEffect, useMemo, useState } from 'react';
-import { AmbientState, getAmbientMixer } from './ambient';
+import { AmbientBoard, getAmbientMixer } from './ambient';
 
 export function useAmbient() {
     const mixer = useMemo(() => getAmbientMixer(), []);
-    const [state, setState] = useState<AmbientState>(() => mixer.getState());
+    const [board, setBoard] = useState<AmbientBoard>(() => mixer.getBoard());
+    const [sounds, setSounds] = useState<AmbientSound[]>(() => mixer.getSounds());
+    const [powered, setPowered] = useState(() => mixer.isPowered());
 
     useEffect(() => {
-        const handleChange = () => setState(mixer.getState());
+        const handleChange = () => {
+            setBoard(mixer.getBoard());
+            setSounds(mixer.getSounds());
+            setPowered(mixer.isPowered());
+        };
         mixer.addEventListener('change', handleChange);
-        // Re-sync in case another consumer changed layers between render and subscribe.
+        // Re-sync in case another consumer changed the board between render and subscribe.
         handleChange();
         return () => mixer.removeEventListener('change', handleChange);
     }, [mixer]);
 
-    const activeCount = Object.values(state).filter((layer) => layer.enabled).length;
+    const activeCount = powered ? board.filter((slot) => slot && !slot.muted).length : 0;
 
-    return { mixer, state, activeCount };
+    return { mixer, board, sounds, powered, activeCount };
 }

@@ -1,7 +1,17 @@
 'use client';
 
 import { client } from '@/lib/client';
-import { AdminTrack, Background, FocusSession, Quote, Task, Track, UserPreferences } from '@/models/app';
+import {
+    AdminTrack,
+    AmbientMix,
+    AmbientSound,
+    Background,
+    FocusSession,
+    Quote,
+    Task,
+    Track,
+    UserPreferences,
+} from '@/models/app';
 
 export type AdminTrackUpdateInput = {
     id: string;
@@ -113,17 +123,28 @@ export const api = {
         create: (input: CreateTrackInput) => unwrap<AdminTrack>(client.tracks.create.$post(input)),
         update: (input: AdminTrackUpdateInput) => unwrap<AdminTrack | null>(client.tracks.update.$post(input)),
         delete: (input: { id: string }) => unwrap<{ success: boolean }>(client.tracks.delete.$post(input)),
-        presignUpload: (input: { id: string; audioExt?: string; coverExt?: string; audioBytes?: number; coverBytes?: number }) =>
-            unwrap<PresignResponse>(client.tracks.presignUpload.$post(input)),
+        presignUpload: (input: {
+            id: string;
+            audioExt?: string;
+            coverExt?: string;
+            audioBytes?: number;
+            coverBytes?: number;
+        }) => unwrap<PresignResponse>(client.tracks.presignUpload.$post(input)),
         upload: (formData: FormData) =>
             unwrap<AdminTrack>(fetch('/api/admin/tracks/upload', { method: 'POST', body: formData })),
         replaceAsset: (formData: FormData) =>
             unwrap<AdminTrack | null>(fetch('/api/admin/tracks/replace', { method: 'POST', body: formData })),
     },
+    ambient: {
+        sounds: () => unwrap<AmbientSound[]>(client.ambient.sounds.$get()),
+        listMixes: () => unwrap<AmbientMix[]>(client.ambient.listMixes.$get()),
+        saveMix: (input: { name: string; levels: Record<string, number> }) =>
+            unwrap<AmbientMix>(client.ambient.saveMix.$post(input)),
+        deleteMix: (input: { id: string }) => unwrap<{ success: boolean }>(client.ambient.deleteMix.$post(input)),
+    },
     preferences: {
         get: () => unwrap<PreferencesPayload>(client.preferences.get.$get()),
-        update: (input: Partial<UserPreferences>) =>
-            unwrap<UserPreferences>(client.preferences.update.$post(input)),
+        update: (input: Partial<UserPreferences>) => unwrap<UserPreferences>(client.preferences.update.$post(input)),
     },
     sessions: {
         list: () => unwrap<SessionPayload>(client.sessions.list.$get()),

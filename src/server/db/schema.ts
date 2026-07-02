@@ -102,6 +102,39 @@ export const focusSessions = pgTable(
     (table) => [index('FocusSessions_userId_status_completedAt_idx').on(table.userId, table.status, table.completedAt)],
 );
 
+export const ambientSounds = pgTable(
+    'ambient_sounds',
+    {
+        id: text('id').primaryKey(),
+        label: text('label').notNull(),
+        category: text('category').notNull(),
+        // Relative storage key resolved against AUDIO_BASE_URL at read time, same as tracks.
+        storageKey: text('storageKey').notNull(),
+        // Loudness trim in percent (100 = unity) applied under the user's slider so
+        // recordings from different sources sit at a comparable level in the mix.
+        gainPercent: integer('gainPercent').notNull().default(100),
+        sortIndex: integer('sortIndex').notNull().default(0),
+        isActive: boolean('isActive').notNull().default(true),
+        createdAt: timestamp('createdAt').defaultNow().notNull(),
+        updatedAt: timestamp('updatedAt').defaultNow().notNull(),
+    },
+    (table) => [index('AmbientSounds_isActive_sortIndex_idx').on(table.isActive, table.sortIndex)],
+);
+
+export const ambientMixes = pgTable(
+    'ambient_mixes',
+    {
+        id: text('id').primaryKey(),
+        userId: text('userId').notNull(),
+        name: text('name').notNull(),
+        // Sound id -> level 0..100; ids absent from the map are off. Ids that no longer
+        // exist in ambient_sounds are ignored when the mix is applied on the client.
+        levels: jsonb('levels').$type<Record<string, number>>().notNull().default({}),
+        createdAt: timestamp('createdAt').defaultNow().notNull(),
+    },
+    (table) => [index('AmbientMixes_userId_idx').on(table.userId)],
+);
+
 export const savedPresets = pgTable(
     'saved_presets',
     {

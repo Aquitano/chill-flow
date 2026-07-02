@@ -3,7 +3,12 @@ import { z } from 'zod';
 
 const backgroundIds = new Set(backgroundCatalog.map((background) => background.id));
 
-const modeSchema = z.string().trim().min(1).max(40).regex(/^[\p{L}\p{N}\s_-]+$/u);
+const modeSchema = z
+    .string()
+    .trim()
+    .min(1)
+    .max(40)
+    .regex(/^[\p{L}\p{N}\s_-]+$/u);
 // Shape-only: the track catalog now lives in the DB, so membership is not validated here.
 // An unknown id simply yields no playable track (handled gracefully in the player).
 const trackIdSchema = z.string().min(1).max(64);
@@ -72,13 +77,21 @@ export const updatePreferencesInputSchema = z.object({
 
 export const startSessionInputSchema = z.object({
     mode: modeSchema,
-    plannedDurationSeconds: z.number().int().min(60).max(12 * 60 * 60),
+    plannedDurationSeconds: z
+        .number()
+        .int()
+        .min(60)
+        .max(12 * 60 * 60),
     trackId: nullableTrackIdSchema,
 });
 
 export const completeSessionInputSchema = z.object({
     id: taskIdSchema,
-    elapsedSeconds: z.number().int().min(0).max(12 * 60 * 60),
+    elapsedSeconds: z
+        .number()
+        .int()
+        .min(0)
+        .max(12 * 60 * 60),
 });
 
 export const cancelSessionInputSchema = z.object({
@@ -87,6 +100,20 @@ export const cancelSessionInputSchema = z.object({
 
 export const trackLookupInputSchema = z.object({
     id: trackIdSchema,
+});
+
+const ambientSoundIdSchema = z.string().min(1).max(64);
+const ambientLevelsSchema = z
+    .record(ambientSoundIdSchema, z.number().int().min(0).max(100))
+    .refine((levels) => Object.keys(levels).length <= 24, { message: 'A mix may hold at most 24 layers.' });
+
+export const saveAmbientMixInputSchema = z.object({
+    name: z.string().trim().min(1).max(40),
+    levels: ambientLevelsSchema,
+});
+
+export const deleteAmbientMixInputSchema = z.object({
+    id: z.uuid(),
 });
 
 const trackAdminIdSchema = z
@@ -159,7 +186,10 @@ export const createTrackInputSchema = z.object({
     thumbnailKey: trackStorageKeySchema.nullish(),
 });
 
-const trackAssetExtSchema = z.string().trim().regex(/^\.[a-z0-9]+$/, 'Extension must look like ".mp3".');
+const trackAssetExtSchema = z
+    .string()
+    .trim()
+    .regex(/^\.[a-z0-9]+$/, 'Extension must look like ".mp3".');
 
 const uploadByteSizeSchema = z.number().int().positive();
 

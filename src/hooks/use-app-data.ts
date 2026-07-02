@@ -9,6 +9,8 @@ const queryKeys = {
     tracks: ['tracks'],
     preferences: ['preferences'],
     sessions: ['sessions'],
+    ambientSounds: ['ambient', 'sounds'],
+    ambientMixes: ['ambient', 'mixes'],
 };
 
 export function useTasksQuery() {
@@ -22,6 +24,45 @@ export function useTracksQuery() {
     return useQuery({
         queryKey: queryKeys.tracks,
         queryFn: api.tracks.list,
+    });
+}
+
+export function useAmbientSoundsQuery() {
+    return useQuery({
+        queryKey: queryKeys.ambientSounds,
+        queryFn: api.ambient.sounds,
+        staleTime: 5 * 60 * 1000,
+    });
+}
+
+/** Account-saved ambient mixes; pass enabled=false while signed out (the route is protected). */
+export function useAmbientMixesQuery(enabled: boolean) {
+    return useQuery({
+        queryKey: queryKeys.ambientMixes,
+        queryFn: api.ambient.listMixes,
+        enabled,
+    });
+}
+
+export function useSaveAmbientMixMutation() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (input: { name: string; levels: Record<string, number> }) => api.ambient.saveMix(input),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: queryKeys.ambientMixes });
+        },
+    });
+}
+
+export function useDeleteAmbientMixMutation() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (input: { id: string }) => api.ambient.deleteMix(input),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: queryKeys.ambientMixes });
+        },
     });
 }
 
@@ -103,9 +144,7 @@ export function useDeleteTaskMutation() {
         onMutate: async (input): Promise<TaskListContext> => {
             await queryClient.cancelQueries({ queryKey: queryKeys.tasks });
             const previous = queryClient.getQueryData<Task[]>(queryKeys.tasks);
-            queryClient.setQueryData<Task[]>(queryKeys.tasks, (old = []) =>
-                old.filter((task) => task.id !== input.id),
-            );
+            queryClient.setQueryData<Task[]>(queryKeys.tasks, (old = []) => old.filter((task) => task.id !== input.id));
             return { previous };
         },
         onError: (_error, _input, context) => {

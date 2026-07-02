@@ -1,0 +1,155 @@
+[
+    {
+        "id": "rain-soft",
+        "label": "Rain",
+        "category": "rain",
+        "storageKey": "ambient-rain-soft.mp3",
+        "sortIndex": 0,
+        "trimStartSec": 1,
+        "loopSec": 45,
+        "source": {
+            "url": "https://archive.org/download/Red_Library_Nature_Rain/R30-25a-Steady%20Heavy%20Rain.mp3",
+            "page": "https://archive.org/details/Red_Library_Nature_Rain",
+            "author": "USC Cinema / Sunset Editorial Collection",
+            "license": "CC0 1.0"
+        }
+    },
+    {
+        "id": "rain-window",
+        "label": "Rain on roof",
+        "category": "rain",
+        "storageKey": "ambient-rain-window.mp3",
+        "sortIndex": 1,
+        "trimStartSec": 0,
+        "loopSec": 60,
+        "source": {
+            "url": "https://archive.org/download/Red_Library_Nature_Rain/R22-26-Interior%20with%20Rain%20on%20Roof.mp3",
+            "page": "https://archive.org/details/Red_Library_Nature_Rain",
+            "author": "USC Cinema / Sunset Editorial Collection",
+            "license": "CC0 1.0"
+        }
+    },
+    {
+        "id": "thunder-distant",
+        "label": "Thunder",
+        "category": "storm",
+        "storageKey": "ambient-thunder-distant.mp3",
+        "sortIndex": 2,
+        "trimStartSec": 2,
+        "loopSec": 90,
+        "source": {
+            "url": "https://archive.org/download/Red_Library_Nature_Rain/R27-29-Good%20Heavy%20Rumble.mp3",
+            "page": "https://archive.org/details/Red_Library_Nature_Rain",
+            "author": "USC Cinema / Sunset Editorial Collection",
+            "license": "CC0 1.0"
+        }
+    },
+    {
+        "id": "wind-soft",
+        "label": "Wind",
+        "category": "wind",
+        "storageKey": "ambient-wind-soft.mp3",
+        "gainPercent": 85,
+        "sortIndex": 3,
+        "trimStartSec": 2,
+        "loopSec": 100,
+        "source": {
+            "url": "https://upload.wikimedia.org/wikipedia/commons/2/2d/Howling_wind.ogg",
+            "page": "https://commons.wikimedia.org/wiki/File:Howling_wind.ogg",
+            "author": "Tvabutzku1234",
+            "license": "CC0 1.0"
+        }
+    },
+    {
+        "id": "fire-crackle",
+        "label": "Fire",
+        "category": "fire",
+        "storageKey": "ambient-fire-crackle.mp3",
+        "sortIndex": 4,
+        "trimStartSec": 1,
+        "loopSec": 55,
+        "source": {
+            "url": "https://archive.org/download/Red_Library_Fire/R09-66-Close%20Up%20Burning%20Fire.wav",
+            "page": "https://archive.org/details/Red_Library_Fire",
+            "author": "USC Cinema / Sunset Editorial Collection",
+            "license": "CC0 1.0"
+        }
+    },
+    {
+        "id": "birds-forest",
+        "label": "Birds",
+        "category": "birds",
+        "storageKey": "ambient-birds-forest.mp3",
+        "gainPercent": 90,
+        "sortIndex": 5,
+        "trimStartSec": 1,
+        "loopSec": 30,
+        "source": {
+            "url": "https://upload.wikimedia.org/wikipedia/commons/0/0e/Gentle_breeze_and_birds_singing.ogg",
+            "page": "https://commons.wikimedia.org/wiki/File:Gentle_breeze_and_birds_singing.ogg",
+            "author": "ezwa",
+            "license": "Public domain"
+        }
+    },
+    {
+        "id": "stream-creek",
+        "label": "Stream",
+        "category": "water",
+        "storageKey": "ambient-stream-creek.mp3",
+        "sortIndex": 6,
+        "trimStartSec": 3,
+        "loopSec": 90,
+        "source": {
+            "url": "https://upload.wikimedia.org/wikipedia/commons/2/2f/Vojn%C3%ADkov%2C_3._jez%2C_st%C5%99eda.ogg",
+            "page": "https://commons.wikimedia.org/wiki/File:Vojn%C3%ADkov,_3._jez,_st%C5%99eda.ogg",
+            "author": "Juandev",
+            "license": "Public domain (PD-ineligible)"
+        }
+    },
+    {
+        "id": "waves-ocean",
+        "label": "Waves",
+        "category": "water",
+        "storageKey": "ambient-waves-ocean.mp3",
+        "sortIndex": 7,
+        "trimStartSec": 3,
+        "loopSec": 90,
+        "source": {
+            "url": "https://upload.wikimedia.org/wikipedia/commons/1/1f/Waves.ogg",
+            "page": "https://commons.wikimedia.org/wiki/File:Waves.ogg",
+            "author": "Dsw4",
+            "license": "Public domain (author release)"
+        }
+    },
+    {
+        "id": "cafe-murmur",
+        "label": "Café",
+        "category": "people",
+        "storageKey": "ambient-cafe-murmur.mp3",
+        "sortIndex": 8,
+        "trimStartSec": 2,
+        "loopSec": 70,
+        "source": {
+            "url": "https://upload.wikimedia.org/wikipedia/commons/b/b5/Restaurant_ambience.ogg",
+            "page": "https://commons.wikimedia.org/wiki/File:Restaurant_ambience.ogg",
+            "author": "Stephan (pdsounds.org)",
+            "license": "Public domain (pdsounds)"
+        }
+    },
+    {
+        "id": "crickets-night",
+        "label": "Crickets",
+        "category": "night",
+        "storageKey": "ambient-crickets-night.mp3",
+        "gainPercent": 80,
+        "sortIndex": 9,
+        "trimStartSec": 10,
+        "loopSec": 90,
+        "source": {
+            "url": "https://upload.wikimedia.org/wikipedia/commons/4/4c/Crickets_choir.ogg",
+            "page": "https://commons.wikimedia.org/wiki/File:Crickets_choir.ogg",
+            "author": "Serg Childed",
+            "license": "CC BY-SA 4.0 (attribution required; the prepared loop is an adaptation and stays BY-SA)"
+        }
+    }
+]

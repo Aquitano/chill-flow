@@ -1,17 +1,14 @@
 'use client';
 
-import { AMBIENT_LAYERS } from '@/lib/audio/ambient';
+import { ambientCategoryIcon } from '@/components/app/ambient-icons';
 import { useAmbient } from '@/lib/audio/useAmbient';
 import { deriveScenes, tracksInScene } from '@/lib/tracks';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app-store';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import {
-    CloudRain,
-    Flame,
     Heart,
     ListMusic,
-    Moon,
     Music,
     Pause,
     Play,
@@ -21,7 +18,6 @@ import {
     SquareCheckBig,
     Timer,
     Waves,
-    Wind,
     type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -34,13 +30,6 @@ type PaletteItem = {
     icon: LucideIcon;
     keywords?: string;
     run: () => void;
-};
-
-const AMBIENT_ICONS: Record<string, LucideIcon> = {
-    rain: CloudRain,
-    wind: Wind,
-    embers: Flame,
-    deep: Moon,
 };
 
 function matchesQuery(item: PaletteItem, query: string): boolean {
@@ -61,7 +50,7 @@ export function CommandPalette() {
     const open = useAppStore((state) => state.activeOverlay === 'palette');
     const setOverlay = useAppStore((state) => state.setOverlay);
     const tracks = useAppStore((state) => state.tracks);
-    const { mixer, state: ambient } = useAmbient();
+    const { mixer, board, sounds: ambientSounds, powered } = useAmbient();
 
     const [query, setQuery] = useState('');
     const [activeIndex, setActiveIndex] = useState(0);
@@ -206,23 +195,41 @@ export function CommandPalette() {
                 keywords: 'noise background sound mixer',
                 run: () => store().setOverlay('ambience'),
             },
-            ...AMBIENT_LAYERS.map((layer) => ({
-                id: `action-ambient-${layer.id}`,
+            {
+                id: 'action-ambience-power',
                 group: 'Actions' as const,
-                label: `${ambient[layer.id].enabled ? 'Turn off' : 'Turn on'} ${layer.label.toLowerCase()}`,
-                sub: layer.hint,
-                icon: AMBIENT_ICONS[layer.id] ?? Waves,
-                keywords: 'ambience ambient layer noise',
+                label: powered ? 'Turn ambience off' : 'Turn ambience on',
+                icon: Waves,
+                keywords: 'ambience ambient noise power mute',
                 run: () => {
-                    mixer.toggleLayer(layer.id);
+                    mixer.setPowered(!powered);
                     close();
                 },
-            })),
+            },
+            ...board.flatMap((slot, index) => {
+                const sound = slot ? ambientSounds.find((entry) => entry.id === slot.soundId) : undefined;
+                if (!slot || !sound) return [];
+                return [
+                    {
+                        id: `action-ambient-${sound.id}`,
+                        group: 'Actions' as const,
+                        label: `${slot.muted ? 'Turn on' : 'Turn off'} ${sound.label.toLowerCase()}`,
+                        sub: sound.category,
+                        icon: ambientCategoryIcon(sound.category),
+                        keywords: 'ambience ambient layer noise',
+                        run: () => {
+                            if (!powered && slot.muted) mixer.setPowered(true);
+                            mixer.toggleSlotMute(index);
+                            close();
+                        },
+                    },
+                ];
+            }),
         ];
 
         return [...trackItems, ...sceneItems, ...actionItems];
         // `open` retriggers the snapshot so labels (Play/Pause, timer) are fresh per opening.
-    }, [tracks, ambient, mixer, open]);
+    }, [tracks, board, ambientSounds, powered, mixer, open]);
 
     const filtered = useMemo(() => items.filter((item) => matchesQuery(item, query)), [items, query]);
     const clampedIndex = Math.min(activeIndex, Math.max(0, filtered.length - 1));
@@ -252,10 +259,10 @@ export function CommandPalette() {
     return (
         <DialogPrimitive.Root open={open} onOpenChange={(next) => setOverlay(next ? 'palette' : null)}>
             <DialogPrimitive.Portal>
-                <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0 motion-reduce:animate-none" />
+                <DialogPrimitive.Overlay className="data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] motion-reduce:animate-none" />
                 <DialogPrimitive.Content
                     onKeyDown={handleKeyDown}
-                    className="fixed top-[16%] left-1/2 z-50 w-[min(34rem,calc(100vw-2rem))] -translate-x-1/2 overflow-hidden rounded-2xl border border-white/10 bg-night-2/95 shadow-[0_40px_80px_-32px_rgba(0,0,0,0.9)] backdrop-blur-xl duration-200 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 motion-reduce:animate-none"
+                    className="bg-night-2/95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 fixed top-[16%] left-1/2 z-50 w-[min(34rem,calc(100vw-2rem))] -translate-x-1/2 overflow-hidden rounded-2xl border border-white/10 shadow-[0_40px_80px_-32px_rgba(0,0,0,0.9)] backdrop-blur-xl duration-200 motion-reduce:animate-none"
                 >
                     <DialogPrimitive.Title className="sr-only">Command palette</DialogPrimitive.Title>
                     <DialogPrimitive.Description className="sr-only">
@@ -263,7 +270,7 @@ export function CommandPalette() {
                     </DialogPrimitive.Description>
 
                     <div className="flex items-center gap-3 border-b border-white/8 px-4 py-3">
-                        <Search size={15} className="shrink-0 text-ink-dim" aria-hidden />
+                        <Search size={15} className="text-ink-dim shrink-0" aria-hidden />
                         <input
                             value={query}
                             onChange={(event) => {
@@ -276,11 +283,11 @@ export function CommandPalette() {
                             aria-activedescendant={activeItem ? `palette-item-${activeItem.id}` : undefined}
                             aria-label="Search tracks, scenes, and actions"
                             placeholder="Search tracks, scenes, actions…"
-                            className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-dim"
+                            className="text-ink placeholder:text-ink-dim min-w-0 flex-1 bg-transparent text-sm outline-none"
                             autoComplete="off"
                             spellCheck={false}
                         />
-                        <kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-ink-dim">
+                        <kbd className="text-ink-dim rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px]">
                             esc
                         </kbd>
                     </div>
@@ -290,12 +297,10 @@ export function CommandPalette() {
                         id="palette-results"
                         role="listbox"
                         aria-label="Results"
-                        className="max-h-[46vh] overflow-y-auto p-2"
+                        className="scrollbar-custom max-h-[46vh] overflow-y-auto p-2"
                     >
                         {filtered.length === 0 ? (
-                            <p className="px-3 py-8 text-center text-sm text-ink-dim">
-                                Nothing matches “{query}”
-                            </p>
+                            <p className="text-ink-dim px-3 py-8 text-center text-sm">Nothing matches “{query}”</p>
                         ) : (
                             filtered.map((item, index) => {
                                 const showHeading = item.group !== lastGroup;
@@ -307,7 +312,7 @@ export function CommandPalette() {
                                         {showHeading && (
                                             <p
                                                 aria-hidden
-                                                className="px-3 pt-2 pb-1 text-[10px] font-medium tracking-wide text-ink-dim uppercase"
+                                                className="text-ink-dim px-3 pt-2 pb-1 text-[10px] font-medium tracking-wide uppercase"
                                             >
                                                 {item.group}
                                             </p>
@@ -322,13 +327,19 @@ export function CommandPalette() {
                                             onPointerMove={() => setActiveIndex(index)}
                                             className={cn(
                                                 'flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors',
-                                                active ? 'bg-white/8 text-ink' : 'text-ink-mid',
+                                                active ? 'text-ink bg-white/8' : 'text-ink-mid',
                                             )}
                                         >
-                                            <Icon size={15} className={cn('shrink-0', active ? 'text-ember' : 'text-ink-dim')} aria-hidden />
+                                            <Icon
+                                                size={15}
+                                                className={cn('shrink-0', active ? 'text-ember' : 'text-ink-dim')}
+                                                aria-hidden
+                                            />
                                             <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
                                             {item.sub && (
-                                                <span className="shrink-0 truncate text-xs text-ink-dim">{item.sub}</span>
+                                                <span className="text-ink-dim shrink-0 truncate text-xs">
+                                                    {item.sub}
+                                                </span>
                                             )}
                                         </button>
                                     </div>
@@ -337,7 +348,7 @@ export function CommandPalette() {
                         )}
                     </div>
 
-                    <p className="flex items-center gap-3 border-t border-white/8 px-4 py-2 text-[11px] text-ink-dim">
+                    <p className="text-ink-dim flex items-center gap-3 border-t border-white/8 px-4 py-2 text-[11px]">
                         <span>↑↓ navigate</span>
                         <span>↵ select</span>
                     </p>

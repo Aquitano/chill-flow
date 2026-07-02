@@ -1,4 +1,3 @@
-
 export interface Track {
     id: string;
     title: string;
@@ -15,6 +14,22 @@ export interface Track {
 export interface AdminTrack extends Track {
     storageKey: string;
     thumbnailKey: string | null;
+}
+
+export interface AmbientSound {
+    id: string;
+    label: string;
+    category: string;
+    audioUrl: string;
+    /** Loudness trim applied under the user's slider (100 = unity). */
+    gainPercent: number;
+}
+
+/** A named ambient mix: sound id -> level 0..100. Ids absent from the map are off. */
+export interface AmbientMix {
+    id: string;
+    name: string;
+    levels: Record<string, number>;
 }
 
 export interface Quote {

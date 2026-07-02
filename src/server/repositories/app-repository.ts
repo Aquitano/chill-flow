@@ -1,10 +1,27 @@
 import { appEnv } from '@/lib/env';
 import { backgroundCatalog } from '@/lib/backgrounds';
 import { quotes } from '@/lib/quotes';
-import { AdminTrack, Background, FocusSession, Task, Track, UserPreferences } from '@/models/app';
+import {
+    AdminTrack,
+    AmbientMix,
+    AmbientSound,
+    Background,
+    FocusSession,
+    Task,
+    Track,
+    UserPreferences,
+} from '@/models/app';
 import { and, asc, desc, eq, isNotNull, ne } from 'drizzle-orm';
 import { Database } from '../db/client';
-import { DEFAULT_POMODORO_SETTINGS, focusSessions, tasks, tracks, userPreferences } from '../db/schema';
+import {
+    DEFAULT_POMODORO_SETTINGS,
+    ambientMixes,
+    ambientSounds,
+    focusSessions,
+    tasks,
+    tracks,
+    userPreferences,
+} from '../db/schema';
 
 function resolveAudioUrl(storageKey: string): string {
     return `${appEnv.audioBaseUrl}/${storageKey.replace(/^\/+/, '')}`;
@@ -25,6 +42,20 @@ function mapTrack(row: typeof tracks.$inferSelect): Track {
 
 function mapAdminTrack(row: typeof tracks.$inferSelect): AdminTrack {
     return { ...mapTrack(row), storageKey: row.storageKey, thumbnailKey: row.thumbnailKey };
+}
+
+function mapAmbientSound(row: typeof ambientSounds.$inferSelect): AmbientSound {
+    return {
+        id: row.id,
+        label: row.label,
+        category: row.category,
+        audioUrl: resolveAudioUrl(row.storageKey),
+        gainPercent: row.gainPercent,
+    };
+}
+
+function mapAmbientMix(row: typeof ambientMixes.$inferSelect): AmbientMix {
+    return { id: row.id, name: row.name, levels: row.levels };
 }
 
 type TrackWriteInput = {
@@ -254,6 +285,55 @@ export const appRepository = {
         return deleted ?? null;
     },
 
+    async listAmbientSounds(database: Database): Promise<AmbientSound[]> {
+        const rows = await database
+            .select()
+            .from(ambientSounds)
+            .where(eq(ambientSounds.isActive, true))
+            .orderBy(asc(ambientSounds.sortIndex), asc(ambientSounds.label));
+        return rows.map(mapAmbientSound);
+    },
+
+    async listAmbientMixes(database: Database, userId: string): Promise<AmbientMix[]> {
+        const rows = await database
+            .select()
+            .from(ambientMixes)
+            .where(eq(ambientMixes.userId, userId))
+            .orderBy(asc(ambientMixes.createdAt));
+        return rows.map(mapAmbientMix);
+    },
+
+    async createAmbientMix(
+        database: Database,
+        userId: string,
+        input: Pick<AmbientMix, 'name' | 'levels'>,
+    ): Promise<AmbientMix> {
+        const [created] = await database
+            .insert(ambientMixes)
+            .values({
+                id: crypto.randomUUID(),
+                userId,
+                name: input.name,
+                levels: input.levels,
+            })
+            .returning();
+
+        if (!created) {
+            throw new Error('Ambient mix could not be created.');
+        }
+
+        return mapAmbientMix(created);
+    },
+
+    async deleteAmbientMix(database: Database, userId: string, mixId: string) {
+        const deleted = await database
+            .delete(ambientMixes)
+            .where(and(eq(ambientMixes.userId, userId), eq(ambientMixes.id, mixId)))
+            .returning({ id: ambientMixes.id });
+
+        return { success: deleted.length > 0 };
+    },
+
     listBackgrounds() {
         return clone(backgroundCatalog);
     },
@@ -263,7 +343,11 @@ export const appRepository = {
     },
 
     async listTasks(database: Database, userId: string) {
-        const storedTasks = await database.select().from(tasks).where(eq(tasks.userId, userId)).orderBy(desc(tasks.createdAt));
+        const storedTasks = await database
+            .select()
+            .from(tasks)
+            .where(eq(tasks.userId, userId))
+            .orderBy(desc(tasks.createdAt));
         return storedTasks.map(mapTask);
     },
 
@@ -346,7 +430,13 @@ export const appRepository = {
         const storedSessions = await database
             .select()
             .from(focusSessions)
-            .where(and(eq(focusSessions.userId, userId), eq(focusSessions.status, 'completed'), isNotNull(focusSessions.completedAt)))
+            .where(
+                and(
+                    eq(focusSessions.userId, userId),
+                    eq(focusSessions.status, 'completed'),
+                    isNotNull(focusSessions.completedAt),
+                ),
+            )
             .orderBy(desc(focusSessions.completedAt));
 
         return storedSessions.map(mapSession);
@@ -406,7 +496,13 @@ export const appRepository = {
                 canceledAt: null,
                 elapsedSeconds,
             })
-            .where(and(eq(focusSessions.userId, userId), eq(focusSessions.id, sessionId), ne(focusSessions.status, 'completed')))
+            .where(
+                and(
+                    eq(focusSessions.userId, userId),
+                    eq(focusSessions.id, sessionId),
+                    ne(focusSessions.status, 'completed'),
+                ),
+            )
             .returning();
 
         return completedSession ? mapSession(completedSession) : null;
@@ -419,7 +515,13 @@ export const appRepository = {
                 status: 'canceled',
                 canceledAt: new Date(),
             })
-            .where(and(eq(focusSessions.userId, userId), eq(focusSessions.id, sessionId), eq(focusSessions.status, 'active')))
+            .where(
+                and(
+                    eq(focusSessions.userId, userId),
+                    eq(focusSessions.id, sessionId),
+                    eq(focusSessions.status, 'active'),
+                ),
+            )
             .returning();
 
         return canceledSession ? mapSession(canceledSession) : null;
@@ -432,7 +534,13 @@ export const appRepository = {
                 completedAt: focusSessions.completedAt,
             })
             .from(focusSessions)
-            .where(and(eq(focusSessions.userId, userId), eq(focusSessions.status, 'completed'), isNotNull(focusSessions.completedAt)));
+            .where(
+                and(
+                    eq(focusSessions.userId, userId),
+                    eq(focusSessions.status, 'completed'),
+                    isNotNull(focusSessions.completedAt),
+                ),
+            );
 
         const totalSessions = storedSessions.length;
         const totalMinutes = Math.round(storedSessions.reduce((sum, session) => sum + session.elapsedSeconds, 0) / 60);

@@ -41,7 +41,7 @@ export const AppHeader: React.FC = () => {
                             variant="ghost"
                             className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 text-sm font-normal hover:bg-white/10"
                         >
-                            <span className="h-1.5 w-1.5 rounded-full bg-ember" aria-hidden />
+                            <span className="bg-ember h-1.5 w-1.5 rounded-full" aria-hidden />
                             <span>{currentModeSettings?.label ?? 'Select mode'}</span>
                             <ChevronDown size={14} className="text-ink-dim" />
                         </Button>
@@ -61,7 +61,7 @@ export const AppHeader: React.FC = () => {
                                 />
                                 <span className="flex flex-col">
                                     <span className="font-medium">{modes[modeKey]?.label ?? modeKey}</span>
-                                    <span className="mt-0.5 text-xs text-ink-dim">
+                                    <span className="text-ink-dim mt-0.5 text-xs">
                                         {modes[modeKey]?.description ?? ''}
                                     </span>
                                 </span>
@@ -69,14 +69,10 @@ export const AppHeader: React.FC = () => {
                         ))}
                     </DropdownMenuContent>
                 </DropdownMenu>
-
-                <span className="hidden truncate text-xs text-ink-dim lg:block">
-                    {currentModeSettings?.description}
-                </span>
             </div>
 
             <div className="flex items-center gap-2 sm:gap-3">
-                <span className="hidden text-xs text-ink-dim md:block">
+                <span className="text-ink-dim hidden text-xs md:block">
                     {sessionSummary.totalSessions} sessions
                     {sessionSummary.currentStreak > 0 ? ` · ${sessionSummary.currentStreak}-day streak` : ''}
                 </span>

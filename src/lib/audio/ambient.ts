@@ -1,270 +1,100 @@
 'use client';
 
+import { AmbientSound } from '@/models/app';
 import { getAudioEngine } from './engine';
 
 /*
- * Ambient layers are synthesized live with Web Audio (filtered noise + LFOs),
- * myNoise-style: no audio files, no network, seamless forever. Each layer is a
- * small node graph feeding a per-layer gain into a shared ambient master gain.
+ * The ambient mixer is a board of AMBIENT_SLOT_COUNT slots fed from the sound
+ * library (ambient_sounds in the DB — it grows without client changes). Each
+ * filled slot is a decoded AudioBuffer looping through a per-slot gain into a
+ * shared ambient master gain. A single power flag gates all ambient audio; it
+ * always starts off so nothing plays without a gesture, while the board layout
+ * itself persists across sessions.
  */
 
-export type AmbientLayerId = 'rain' | 'wind' | 'embers' | 'deep';
+export const AMBIENT_SLOT_COUNT = 8;
 
-export type AmbientLayerState = {
-    enabled: boolean;
+export type AmbientSlot = {
+    soundId: string;
     /** Normalized 0..1 control value (perceptual curve applied at the gain node). */
     volume: number;
+    muted: boolean;
+    /** True while the slot's buffer is being fetched/decoded. */
+    loading: boolean;
 };
 
-export type AmbientState = Record<AmbientLayerId, AmbientLayerState>;
+export type AmbientBoard = (AmbientSlot | null)[];
 
-export const AMBIENT_LAYERS: { id: AmbientLayerId; label: string; hint: string }[] = [
-    { id: 'rain', label: 'Rain', hint: 'Steady rainfall' },
-    { id: 'wind', label: 'Wind', hint: 'Slow moving air' },
-    { id: 'embers', label: 'Embers', hint: 'Fire crackle' },
-    { id: 'deep', label: 'Deep', hint: 'Low rumble' },
-];
-
-const STORAGE_KEY = 'audio.ambientLayers';
+const BOARD_STORAGE_KEY = 'audio.ambientBoard';
 const DEFAULT_VOLUME = 0.5;
 
+function clamp01(value: number): number {
+    return Math.max(0, Math.min(1, value));
+}
+
 function perceptual(v01: number): number {
-    const v = Math.max(0, Math.min(1, v01));
+    const v = clamp01(v01);
     return v * v;
 }
 
-type NoiseColor = 'white' | 'pink' | 'brown';
-
 /**
- * 4s looping noise buffer. The tail is crossfaded into the head so the loop
- * seam is inaudible — critical for brown noise, whose random-walk value at the
- * end never matches the start and would otherwise thump every cycle.
+ * Crossfade the buffer's tail into a copy of its head so the loop seam is
+ * inaudible regardless of how the source file was cut.
  */
-function createNoiseBuffer(ctx: AudioContext, color: NoiseColor): AudioBuffer {
-    const seconds = 4;
-    const rate = ctx.sampleRate;
-    const length = rate * seconds;
-    const buffer = ctx.createBuffer(2, length, rate);
-
-    for (let channel = 0; channel < 2; channel += 1) {
+function makeSeamless(buffer: AudioBuffer): AudioBuffer {
+    const fade = Math.min(Math.floor(buffer.sampleRate * 0.5), Math.floor(buffer.length / 4));
+    if (fade < 2) return buffer;
+    for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
         const data = buffer.getChannelData(channel);
-
-        if (color === 'white') {
-            for (let i = 0; i < length; i += 1) data[i] = Math.random() * 2 - 1;
-        } else if (color === 'pink') {
-            // Paul Kellet's economy pink noise approximation.
-            let b0 = 0;
-            let b1 = 0;
-            let b2 = 0;
-            for (let i = 0; i < length; i += 1) {
-                const white = Math.random() * 2 - 1;
-                b0 = 0.99765 * b0 + white * 0.099046;
-                b1 = 0.963 * b1 + white * 0.2965164;
-                b2 = 0.57 * b2 + white * 1.0526913;
-                data[i] = (b0 + b1 + b2 + white * 0.1848) * 0.22;
-            }
-        } else {
-            // Brown noise via leaky integration of white noise.
-            let last = 0;
-            for (let i = 0; i < length; i += 1) {
-                const white = Math.random() * 2 - 1;
-                last = (last + 0.02 * white) / 1.02;
-                data[i] = last * 3.5;
-            }
-        }
-
-        const fade = Math.floor(rate * 0.25);
         for (let i = 0; i < fade; i += 1) {
             const t = i / fade;
-            const j = length - fade + i;
+            const j = buffer.length - fade + i;
             data[j] = data[j]! * (1 - t) + data[i]! * t;
         }
     }
-
     return buffer;
 }
 
-function startLoop(ctx: AudioContext, buffer: AudioBuffer): AudioBufferSourceNode {
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.loop = true;
-    source.start();
-    return source;
-}
-
-function lfo(ctx: AudioContext, frequency: number, depth: number, target: AudioParam): OscillatorNode {
-    const osc = ctx.createOscillator();
-    osc.frequency.value = frequency;
-    const amount = ctx.createGain();
-    amount.gain.value = depth;
-    osc.connect(amount);
-    amount.connect(target);
-    osc.start();
-    return osc;
-}
-
-type LayerNodes = {
-    /** Post-synthesis gain the mixer ramps for volume/fade in-out. */
+type ChannelNodes = {
+    source: AudioBufferSourceNode;
     gain: GainNode;
-    stop: () => void;
 };
 
-function buildRain(ctx: AudioContext, out: GainNode): LayerNodes {
-    const source = startLoop(ctx, createNoiseBuffer(ctx, 'pink'));
-    const highpass = ctx.createBiquadFilter();
-    highpass.type = 'highpass';
-    highpass.frequency.value = 320;
-    const lowpass = ctx.createBiquadFilter();
-    lowpass.type = 'lowpass';
-    lowpass.frequency.value = 1900;
-    const body = ctx.createGain();
-    body.gain.value = 0.5;
-    // Slow amplitude drift so the rainfall doesn't read as a frozen hiss.
-    const drift = lfo(ctx, 0.09, 0.06, body.gain);
-
-    source.connect(highpass);
-    highpass.connect(lowpass);
-    lowpass.connect(body);
-    body.connect(out);
-
-    return {
-        gain: out,
-        stop: () => {
-            source.stop();
-            drift.stop();
-            body.disconnect();
-        },
-    };
-}
-
-function buildWind(ctx: AudioContext, out: GainNode): LayerNodes {
-    const source = startLoop(ctx, createNoiseBuffer(ctx, 'brown'));
-    const bandpass = ctx.createBiquadFilter();
-    bandpass.type = 'bandpass';
-    bandpass.frequency.value = 260;
-    bandpass.Q.value = 0.9;
-    const body = ctx.createGain();
-    body.gain.value = 0.75;
-    // Two incommensurate LFO rates keep the gusts from sounding periodic.
-    const sweep = lfo(ctx, 0.05, 110, bandpass.frequency);
-    const gust = lfo(ctx, 0.13, 0.18, body.gain);
-
-    source.connect(bandpass);
-    bandpass.connect(body);
-    body.connect(out);
-
-    return {
-        gain: out,
-        stop: () => {
-            source.stop();
-            sweep.stop();
-            gust.stop();
-            body.disconnect();
-        },
-    };
-}
-
-function buildEmbers(ctx: AudioContext, out: GainNode): LayerNodes {
-    // Low "roar" bed.
-    const bed = startLoop(ctx, createNoiseBuffer(ctx, 'brown'));
-    const bedFilter = ctx.createBiquadFilter();
-    bedFilter.type = 'lowpass';
-    bedFilter.frequency.value = 300;
-    const bedGain = ctx.createGain();
-    bedGain.gain.value = 0.45;
-    bed.connect(bedFilter);
-    bedFilter.connect(bedGain);
-    bedGain.connect(out);
-
-    // Crackle: bright noise gated by short randomly-timed envelopes.
-    const crackleSource = startLoop(ctx, createNoiseBuffer(ctx, 'white'));
-    const crackleFilter = ctx.createBiquadFilter();
-    crackleFilter.type = 'highpass';
-    crackleFilter.frequency.value = 2400;
-    const crackleGain = ctx.createGain();
-    crackleGain.gain.value = 0;
-    crackleSource.connect(crackleFilter);
-    crackleFilter.connect(crackleGain);
-    crackleGain.connect(out);
-
-    let timeout: ReturnType<typeof setTimeout> | null = null;
-    const scheduleCrackle = () => {
-        const now = ctx.currentTime;
-        const strength = 0.08 + Math.random() * 0.3;
-        crackleGain.gain.cancelScheduledValues(now);
-        crackleGain.gain.setValueAtTime(strength, now);
-        crackleGain.gain.setTargetAtTime(0, now + 0.004, 0.014);
-        timeout = setTimeout(scheduleCrackle, 70 + Math.random() * 420);
-    };
-    scheduleCrackle();
-
-    return {
-        gain: out,
-        stop: () => {
-            if (timeout) clearTimeout(timeout);
-            bed.stop();
-            crackleSource.stop();
-            bedGain.disconnect();
-            crackleGain.disconnect();
-        },
-    };
-}
-
-function buildDeep(ctx: AudioContext, out: GainNode): LayerNodes {
-    const source = startLoop(ctx, createNoiseBuffer(ctx, 'brown'));
-    const lowpass = ctx.createBiquadFilter();
-    lowpass.type = 'lowpass';
-    lowpass.frequency.value = 210;
-    const body = ctx.createGain();
-    body.gain.value = 0.7;
-
-    source.connect(lowpass);
-    lowpass.connect(body);
-    body.connect(out);
-
-    return {
-        gain: out,
-        stop: () => {
-            source.stop();
-            body.disconnect();
-        },
-    };
-}
-
-const BUILDERS: Record<AmbientLayerId, (ctx: AudioContext, out: GainNode) => LayerNodes> = {
-    rain: buildRain,
-    wind: buildWind,
-    embers: buildEmbers,
-    deep: buildDeep,
-};
-
-function defaultState(): AmbientState {
-    const state = {} as AmbientState;
-    for (const layer of AMBIENT_LAYERS) {
-        state[layer.id] = { enabled: false, volume: DEFAULT_VOLUME };
-    }
-    return state;
-}
+type AmbientEventType = 'change' | 'error';
 
 class AmbientMixer {
-    private state: AmbientState = defaultState();
-    private nodes = new Map<AmbientLayerId, LayerNodes>();
+    private sounds = new Map<string, AmbientSound>();
+    private order: string[] = [];
+    private board: AmbientBoard = Array.from({ length: AMBIENT_SLOT_COUNT }, () => null);
+    private powered = false;
+    private buffers = new Map<string, Promise<AudioBuffer>>();
+    private nodes = new Map<string, ChannelNodes>();
     private masterGain: GainNode | null = null;
     private muted = false;
     private eventTarget = new EventTarget();
 
     constructor() {
-        // Only volumes are restored — layers always start disabled so the UI
+        // The board layout is restored, but power always starts off so the UI
         // never claims sound the browser won't produce without a gesture.
         try {
-            const saved = localStorage.getItem(STORAGE_KEY);
+            const saved = localStorage.getItem(BOARD_STORAGE_KEY);
             if (saved) {
-                const parsed = JSON.parse(saved) as Partial<Record<AmbientLayerId, { volume?: number }>>;
-                for (const layer of AMBIENT_LAYERS) {
-                    const volume = parsed[layer.id]?.volume;
-                    if (typeof volume === 'number' && Number.isFinite(volume)) {
-                        this.state[layer.id].volume = Math.max(0, Math.min(1, volume));
-                    }
+                const parsed = JSON.parse(saved) as unknown;
+                if (Array.isArray(parsed)) {
+                    parsed.slice(0, AMBIENT_SLOT_COUNT).forEach((entry, index) => {
+                        const slot = entry as { soundId?: unknown; volume?: unknown; muted?: unknown } | null;
+                        if (slot && typeof slot.soundId === 'string') {
+                            this.board[index] = {
+                                soundId: slot.soundId,
+                                volume:
+                                    typeof slot.volume === 'number' && Number.isFinite(slot.volume)
+                                        ? clamp01(slot.volume)
+                                        : DEFAULT_VOLUME,
+                                muted: slot.muted === true,
+                                loading: false,
+                            };
+                        }
+                    });
                 }
             }
         } catch {
@@ -272,41 +102,140 @@ class AmbientMixer {
         }
     }
 
-    getState(): AmbientState {
-        const copy = {} as AmbientState;
-        for (const layer of AMBIENT_LAYERS) {
-            copy[layer.id] = { ...this.state[layer.id] };
-        }
-        return copy;
+    /** Install/refresh the library definitions (from the ambient catalog query). */
+    setSounds(sounds: AmbientSound[]): void {
+        this.sounds = new Map(sounds.map((sound) => [sound.id, sound]));
+        this.order = sounds.map((sound) => sound.id);
+        // Slots pointing at retired sounds are cleared rather than lingering broken.
+        this.board = this.board.map((slot) => {
+            if (slot && !this.sounds.has(slot.soundId)) {
+                this.stopSound(slot.soundId);
+                return null;
+            }
+            return slot;
+        });
+        this.dispatchChange();
     }
 
+    getSounds(): AmbientSound[] {
+        return this.order.map((id) => this.sounds.get(id)).filter((sound): sound is AmbientSound => Boolean(sound));
+    }
+
+    getBoard(): AmbientBoard {
+        return this.board.map((slot) => (slot ? { ...slot } : null));
+    }
+
+    isPowered(): boolean {
+        return this.powered;
+    }
+
+    /** Audible layer count (0 while powered off) — drives the dock badge. */
     activeCount(): number {
-        return AMBIENT_LAYERS.filter((layer) => this.state[layer.id].enabled).length;
+        if (!this.powered) return 0;
+        return this.board.filter((slot) => slot && !slot.muted).length;
     }
 
-    toggleLayer(id: AmbientLayerId): void {
-        this.setLayer(id, { enabled: !this.state[id].enabled });
-    }
-
-    setLayer(id: AmbientLayerId, patch: Partial<AmbientLayerState>): void {
-        const next = { ...this.state[id], ...patch };
-        const wasEnabled = this.state[id].enabled;
-        this.state[id] = next;
-
-        if (next.enabled && !wasEnabled) {
-            this.startLayer(id);
-        } else if (!next.enabled && wasEnabled) {
-            this.stopLayer(id);
-        } else if (next.enabled && patch.volume !== undefined) {
-            const nodes = this.nodes.get(id);
-            const ctx = this.context();
-            if (nodes && ctx) {
-                nodes.gain.gain.setTargetAtTime(perceptual(next.volume), ctx.currentTime, 0.05);
+    /** Master switch for all ambient audio. Call from a user gesture. */
+    setPowered(on: boolean): void {
+        if (this.powered === on) return;
+        this.powered = on;
+        for (const slot of this.board) {
+            if (!slot) continue;
+            if (on && !slot.muted) {
+                void this.startSound(slot.soundId);
+            } else {
+                this.stopSound(slot.soundId);
             }
         }
+        this.dispatchChange();
+    }
 
+    /** Add a library sound to the first empty slot. Returns false when the board is full. */
+    addSound(soundId: string): boolean {
+        if (!this.sounds.has(soundId)) return false;
+        if (this.board.some((slot) => slot?.soundId === soundId)) return false;
+        const index = this.board.findIndex((slot) => slot === null);
+        if (index === -1) return false;
+        this.board[index] = { soundId, volume: DEFAULT_VOLUME, muted: false, loading: false };
+        if (this.powered) void this.startSound(soundId);
         this.persist();
         this.dispatchChange();
+        return true;
+    }
+
+    removeSlot(index: number): void {
+        const slot = this.board[index];
+        if (!slot) return;
+        this.stopSound(slot.soundId);
+        this.board[index] = null;
+        this.persist();
+        this.dispatchChange();
+    }
+
+    setSlotVolume(index: number, volume: number): void {
+        const slot = this.board[index];
+        if (!slot) return;
+        slot.volume = clamp01(volume);
+        const ctx = this.context();
+        const nodes = this.nodes.get(slot.soundId);
+        if (nodes && ctx) {
+            nodes.gain.gain.setTargetAtTime(this.targetGain(slot), ctx.currentTime, 0.05);
+        } else if (this.powered && !slot.muted) {
+            // Dragging a fader is a gesture: it may also wake a slot that failed to load.
+            void this.startSound(slot.soundId);
+        }
+        this.persist();
+        this.dispatchChange();
+    }
+
+    toggleSlotMute(index: number): void {
+        const slot = this.board[index];
+        if (!slot) return;
+        slot.muted = !slot.muted;
+        if (this.powered) {
+            if (slot.muted) {
+                this.stopSound(slot.soundId);
+            } else {
+                void this.startSound(slot.soundId);
+            }
+        }
+        this.persist();
+        this.dispatchChange();
+    }
+
+    /**
+     * Load a named mix: the first AMBIENT_SLOT_COUNT sounds with a level > 0
+     * fill the board (catalog order) and ambience powers on. Unknown ids are
+     * ignored.
+     */
+    applyMix(levels: Record<string, number>): void {
+        const incoming = this.order.filter((id) => (levels[id] ?? 0) > 0).slice(0, AMBIENT_SLOT_COUNT);
+        const keep = new Set(incoming);
+        for (const slot of this.board) {
+            if (slot && !keep.has(slot.soundId)) this.stopSound(slot.soundId);
+        }
+        this.board = Array.from({ length: AMBIENT_SLOT_COUNT }, (_, index) => {
+            const soundId = incoming[index];
+            if (!soundId) return null;
+            return { soundId, volume: clamp01((levels[soundId] ?? 0) / 100), muted: false, loading: false };
+        });
+        this.powered = true;
+        for (const soundId of incoming) {
+            void this.startSound(soundId);
+        }
+        this.persist();
+        this.dispatchChange();
+    }
+
+    /** Snapshot of the audible board as levels (0..100), for saving as a mix. */
+    currentLevels(): Record<string, number> {
+        const levels: Record<string, number> = {};
+        for (const slot of this.board) {
+            if (slot && !slot.muted && slot.volume > 0) {
+                levels[slot.soundId] = Math.round(slot.volume * 100);
+            }
+        }
+        return levels;
     }
 
     /** Follows the player's mute so "mute" silences the whole room, not just the music. */
@@ -319,19 +248,11 @@ class AmbientMixer {
         }
     }
 
-    stopAll(): void {
-        for (const layer of AMBIENT_LAYERS) {
-            if (this.state[layer.id].enabled) {
-                this.setLayer(layer.id, { enabled: false });
-            }
-        }
-    }
-
-    addEventListener(type: 'change', listener: () => void): void {
+    addEventListener(type: AmbientEventType, listener: (event: Event) => void): void {
         this.eventTarget.addEventListener(type, listener);
     }
 
-    removeEventListener(type: 'change', listener: () => void): void {
+    removeEventListener(type: AmbientEventType, listener: (event: Event) => void): void {
         this.eventTarget.removeEventListener(type, listener);
     }
 
@@ -351,39 +272,99 @@ class AmbientMixer {
         return this.masterGain;
     }
 
-    private startLayer(id: AmbientLayerId): void {
-        const ctx = this.context();
-        if (!ctx) {
-            this.state[id] = { ...this.state[id], enabled: false };
-            return;
-        }
-        if (ctx.state === 'suspended') {
-            // Called from a user gesture (toggle click), so resume is permitted.
-            void ctx.resume();
-        }
-
-        this.stopLayer(id);
-
-        const master = this.ensureMaster(ctx);
-        const layerGain = ctx.createGain();
-        layerGain.gain.value = 0;
-        layerGain.connect(master);
-        const nodes = BUILDERS[id](ctx, layerGain);
-        this.nodes.set(id, nodes);
-        // Fade in so a toggle never clicks.
-        layerGain.gain.setTargetAtTime(perceptual(this.state[id].volume), ctx.currentTime, 0.12);
+    private slotFor(soundId: string): AmbientSlot | null {
+        return this.board.find((slot) => slot?.soundId === soundId) ?? null;
     }
 
-    private stopLayer(id: AmbientLayerId): void {
-        const nodes = this.nodes.get(id);
+    /** Volume with the perceptual curve and the sound's catalog loudness trim applied. */
+    private targetGain(slot: AmbientSlot): number {
+        const sound = this.sounds.get(slot.soundId);
+        if (!sound) return 0;
+        return perceptual(slot.volume) * (sound.gainPercent / 100);
+    }
+
+    private loadBuffer(soundId: string, ctx: AudioContext): Promise<AudioBuffer> {
+        const cached = this.buffers.get(soundId);
+        if (cached) return cached;
+
+        const sound = this.sounds.get(soundId);
+        if (!sound) return Promise.reject(new Error('Unknown ambient sound.'));
+
+        const promise = fetch(sound.audioUrl)
+            .then((response) => {
+                if (!response.ok) throw new Error(`Failed to fetch ambient audio (${response.status}).`);
+                return response.arrayBuffer();
+            })
+            .then((data) => ctx.decodeAudioData(data))
+            .then(makeSeamless);
+
+        // Drop failed loads from the cache so a later attempt retries the download.
+        promise.catch(() => this.buffers.delete(soundId));
+        this.buffers.set(soundId, promise);
+        return promise;
+    }
+
+    private async startSound(soundId: string): Promise<void> {
+        const ctx = this.context();
+        const slot = this.slotFor(soundId);
+        if (!slot || !ctx) return;
+        if (ctx.state === 'suspended') {
+            // Reached from a user gesture (power/toggle/add), so resume is permitted.
+            void ctx.resume();
+        }
+        if (this.nodes.has(soundId)) return;
+
+        slot.loading = true;
+        this.dispatchChange();
+
+        try {
+            const buffer = await this.loadBuffer(soundId, ctx);
+            // The slot may have been muted, cleared, or powered down while downloading.
+            const current = this.slotFor(soundId);
+            if (!this.powered || !current || current.muted || this.nodes.has(soundId)) return;
+
+            const master = this.ensureMaster(ctx);
+            const gain = ctx.createGain();
+            gain.gain.value = 0;
+            gain.connect(master);
+
+            const source = ctx.createBufferSource();
+            source.buffer = buffer;
+            source.loop = true;
+            source.connect(gain);
+            source.start();
+
+            this.nodes.set(soundId, { source, gain });
+            // Fade in so a toggle never clicks.
+            gain.gain.setTargetAtTime(this.targetGain(current), ctx.currentTime, 0.12);
+        } catch {
+            const sound = this.sounds.get(soundId);
+            const current = this.slotFor(soundId);
+            if (current) current.muted = true;
+            this.eventTarget.dispatchEvent(
+                new CustomEvent('error', {
+                    detail: {
+                        message: `Couldn't load ${sound?.label ?? 'that sound'} — check your connection and retry.`,
+                    },
+                }),
+            );
+        } finally {
+            const current = this.slotFor(soundId);
+            if (current) current.loading = false;
+            this.dispatchChange();
+        }
+    }
+
+    private stopSound(soundId: string): void {
+        const nodes = this.nodes.get(soundId);
         if (!nodes) return;
-        this.nodes.delete(id);
+        this.nodes.delete(soundId);
         const ctx = this.context();
         if (ctx) {
             nodes.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.06);
             setTimeout(() => {
                 try {
-                    nodes.stop();
+                    nodes.source.stop();
                     nodes.gain.disconnect();
                 } catch {
                     /* nodes may already be gone */
@@ -391,7 +372,7 @@ class AmbientMixer {
             }, 400);
         } else {
             try {
-                nodes.stop();
+                nodes.source.stop();
             } catch {
                 /* ignore */
             }
@@ -400,11 +381,10 @@ class AmbientMixer {
 
     private persist(): void {
         try {
-            const payload = {} as Record<AmbientLayerId, { volume: number }>;
-            for (const layer of AMBIENT_LAYERS) {
-                payload[layer.id] = { volume: this.state[layer.id].volume };
-            }
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+            const payload = this.board.map((slot) =>
+                slot ? { soundId: slot.soundId, volume: slot.volume, muted: slot.muted } : null,
+            );
+            localStorage.setItem(BOARD_STORAGE_KEY, JSON.stringify(payload));
         } catch {
             /* storage unavailable */
         }

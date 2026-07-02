@@ -1,6 +1,6 @@
 'use client';
 
-import { MotionValue, motion, useReducedMotion, useScroll, useTransform } from 'framer-motion';
+import { MotionValue, motion, useReducedMotion, useScroll, useSpring, useTransform } from 'framer-motion';
 import { useRef } from 'react';
 
 const WORDS = ['Work', 'wants', 'a', 'quieter', 'room.'];
@@ -17,11 +17,14 @@ export function StatementSection() {
         target: containerRef,
         offset: ['start end', 'end start'],
     });
+    // Same wheel-step smoothing as the pinned tour: glide the word reveal between
+    // discrete scroll deltas without hijacking native scroll.
+    const progress = useSpring(scrollYProgress, { stiffness: 100, damping: 30, restDelta: 0.001 });
 
     if (prefersReduced) {
         return (
             <section className="relative z-10 mt-36 sm:mt-44">
-                <p className="mx-auto max-w-5xl px-6 text-center font-serif text-4xl font-light text-ink italic sm:text-6xl">
+                <p className="text-ink mx-auto max-w-5xl px-6 text-center font-serif text-4xl font-light italic sm:text-6xl">
                     {WORDS.join(' ')}
                 </p>
             </section>
@@ -31,15 +34,9 @@ export function StatementSection() {
     return (
         <section ref={containerRef} className="relative z-10 mt-24 h-[160vh] sm:mt-32">
             <div className="sticky top-0 flex h-screen items-center justify-center px-6">
-                <p className="max-w-5xl text-center font-serif text-[clamp(2.5rem,7vw,6rem)] leading-[1.15] font-light italic [text-wrap:balance]">
+                <p className="max-w-5xl text-center font-serif text-[clamp(2.5rem,7vw,6rem)] leading-[1.15] font-light [text-wrap:balance] italic">
                     {WORDS.map((word, index) => (
-                        <StatementWord
-                            key={index}
-                            word={word}
-                            index={index}
-                            total={WORDS.length}
-                            progress={scrollYProgress}
-                        />
+                        <StatementWord key={index} word={word} index={index} total={WORDS.length} progress={progress} />
                     ))}
                 </p>
             </div>

@@ -1,90 +1,372 @@
 'use client';
 
+import { ambientCategoryIcon } from '@/components/app/ambient-icons';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Slider } from '@/components/ui/slider';
-import { AMBIENT_LAYERS, AmbientLayerId } from '@/lib/audio/ambient';
+import {
+    useAmbientMixesQuery,
+    useAmbientSoundsQuery,
+    useDeleteAmbientMixMutation,
+    useSaveAmbientMixMutation,
+} from '@/hooks/use-app-data';
+import { describeApiError } from '@/lib/api';
+import {
+    BUILTIN_MIXES,
+    deleteLocalMix,
+    playableMixes,
+    readLocalMixes,
+    saveLocalMix,
+} from '@/lib/audio/ambient-presets';
+import { AmbientSlot } from '@/lib/audio/ambient';
 import { useAmbient } from '@/lib/audio/useAmbient';
 import { cn } from '@/lib/utils';
+import { AmbientMix, AmbientSound } from '@/models/app';
+import { useUser } from '@clerk/nextjs';
 import { motion } from 'framer-motion';
-import { CloudRain, Flame, Moon, Wind, type LucideIcon } from 'lucide-react';
-
-const LAYER_ICONS: Record<AmbientLayerId, LucideIcon> = {
-    rain: CloudRain,
-    wind: Wind,
-    embers: Flame,
-    deep: Moon,
-};
+import { Check, Plus, Power, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 
 /**
- * myNoise-style layer mixer: each row is a procedurally synthesized ambient
- * sound with its own on/off switch and level, mixed under the music.
+ * myNoise-style board: eight slots filled from the sound library, one vertical
+ * fader per slot. Presets (curated + the user's own) load a whole board at
+ * once; the power switch silences everything without losing the layout.
  */
 export function AmbiencePanel() {
-    const { mixer, state } = useAmbient();
+    const { mixer, board, sounds, powered } = useAmbient();
+    const soundsQuery = useAmbientSoundsQuery();
+    const { isSignedIn } = useUser();
+    const mixesQuery = useAmbientMixesQuery(Boolean(isSignedIn));
+    const saveMix = useSaveAmbientMixMutation();
+    const deleteMix = useDeleteAmbientMixMutation();
+
+    const [localMixes, setLocalMixes] = useState<AmbientMix[]>(() => readLocalMixes());
+    const [activeMixId, setActiveMixId] = useState<string | null>(null);
+    const [mixName, setMixName] = useState('');
+
+    // The mixer singleton owns board state; the query only feeds it the library.
+    useEffect(() => {
+        if (soundsQuery.data) mixer.setSounds(soundsQuery.data);
+    }, [mixer, soundsQuery.data]);
+
+    // Buffer fetch/decode failures surface as engine events, not query errors.
+    useEffect(() => {
+        const handleError = (event: Event) => {
+            const detail = (event as CustomEvent<{ message: string }>).detail;
+            toast.error("Couldn't start ambience", { id: 'ambient-error', description: detail.message });
+        };
+        mixer.addEventListener('error', handleError);
+        return () => mixer.removeEventListener('error', handleError);
+    }, [mixer]);
+
+    const savedMixes = isSignedIn ? (mixesQuery.data ?? []) : localMixes;
+    const presets = [...playableMixes(BUILTIN_MIXES, sounds), ...savedMixes];
+    const soundById = new Map(sounds.map((sound) => [sound.id, sound]));
+    const onBoard = new Set(board.flatMap((slot) => (slot ? [slot.soundId] : [])));
+    const available = sounds.filter((sound) => !onBoard.has(sound.id));
+
+    const applyMix = (mix: AmbientMix) => {
+        mixer.applyMix(mix.levels);
+        setActiveMixId(mix.id);
+    };
+
+    const handleDeleteMix = (mix: AmbientMix) => {
+        if (activeMixId === mix.id) setActiveMixId(null);
+        if (mix.id.startsWith('local-')) {
+            setLocalMixes(deleteLocalMix(mix.id));
+            return;
+        }
+        deleteMix.mutate(
+            { id: mix.id },
+            { onError: (error) => toast.error("Couldn't delete the mix", { description: describeApiError(error) }) },
+        );
+    };
+
+    const handleSaveMix = () => {
+        const name = mixName.trim();
+        const levels = mixer.currentLevels();
+        if (!name || Object.keys(levels).length === 0) return;
+
+        if (isSignedIn) {
+            saveMix.mutate(
+                { name, levels },
+                {
+                    onSuccess: (mix) => {
+                        setActiveMixId(mix.id);
+                        setMixName('');
+                    },
+                    onError: (error) => toast.error("Couldn't save the mix", { description: describeApiError(error) }),
+                },
+            );
+            return;
+        }
+
+        const mix = saveLocalMix(name, levels);
+        if (!mix) {
+            toast.error("Couldn't save the mix", { description: 'Local mix storage is full or unavailable.' });
+            return;
+        }
+        setLocalMixes(readLocalMixes());
+        setActiveMixId(mix.id);
+        setMixName('');
+    };
+
+    const boardHasSound = board.some((slot) => slot && !slot.muted);
 
     return (
         <motion.section
             id="dock-panel-ambience"
             data-workspace-panel
-            aria-label="Ambience layers"
+            aria-label="Ambience mixer"
             initial={{ opacity: 0, y: 12, scale: 0.99 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 12, scale: 0.99 }}
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-            className="pointer-events-auto mr-4 mb-3 ml-auto w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-white/10 bg-black/75 shadow-[0_24px_60px_-24px_rgba(0,0,0,0.85)] backdrop-blur-xl"
+            className="pointer-events-auto mr-4 mb-3 ml-auto w-[min(30rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-white/10 bg-black/75 shadow-[0_24px_60px_-24px_rgba(0,0,0,0.85)] backdrop-blur-xl"
         >
-            <header className="flex items-baseline justify-between px-4 pt-4">
-                <h3 className="text-sm font-medium text-ink">Ambience</h3>
-                <p className="text-xs text-ink-dim">Mixes under the music</p>
+            <header className="flex items-center justify-between px-4 pt-3.5">
+                <h3 className="text-ink text-sm font-medium">Ambience</h3>
+                <button
+                    type="button"
+                    role="switch"
+                    aria-checked={powered}
+                    aria-label={powered ? 'Turn ambience off' : 'Turn ambience on'}
+                    onClick={() => mixer.setPowered(!powered)}
+                    className={cn(
+                        'focus-visible:outline-ember flex h-7 w-7 items-center justify-center rounded-full border transition-colors focus-visible:outline-2',
+                        powered
+                            ? 'border-ember/40 bg-ember/15 text-ember shadow-[0_0_18px_-6px_oklch(0.81_0.1_75/0.5)]'
+                            : 'text-ink-dim hover:text-ink-mid border-white/10 bg-white/5 hover:bg-white/10',
+                    )}
+                >
+                    <Power size={13} aria-hidden />
+                </button>
             </header>
 
-            <ul className="p-2">
-                {AMBIENT_LAYERS.map((layer) => {
-                    const Icon = LAYER_ICONS[layer.id];
-                    const { enabled, volume } = state[layer.id];
-                    return (
-                        <li key={layer.id} className="flex items-center gap-3 rounded-xl px-2 py-2.5">
-                            <button
-                                type="button"
-                                role="switch"
-                                aria-checked={enabled}
-                                aria-label={`${layer.label} layer`}
-                                onClick={() => mixer.toggleLayer(layer.id)}
-                                className={cn(
-                                    'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors focus-visible:outline-2 focus-visible:outline-ember',
-                                    enabled
-                                        ? 'border-ember/40 bg-ember/15 text-ember shadow-[0_0_18px_-6px_oklch(0.81_0.1_75/0.5)]'
-                                        : 'border-white/10 bg-white/5 text-ink-dim hover:bg-white/10 hover:text-ink-mid',
+            {presets.length > 0 && (
+                <div
+                    className="scrollbar-custom flex gap-1.5 overflow-x-auto px-4 pt-3 pb-1.5"
+                    role="listbox"
+                    aria-label="Presets"
+                >
+                    {presets.map((mix) => {
+                        const isActive = activeMixId === mix.id;
+                        const deletable = !mix.id.startsWith('builtin-');
+                        return (
+                            <span key={mix.id} className="group relative shrink-0">
+                                <button
+                                    type="button"
+                                    role="option"
+                                    aria-selected={isActive}
+                                    onClick={() => applyMix(mix)}
+                                    className={cn(
+                                        'focus-visible:outline-ember rounded-full border px-3 py-1 text-xs whitespace-nowrap transition-colors focus-visible:outline-2',
+                                        deletable && 'pr-7',
+                                        isActive
+                                            ? 'border-ember/50 bg-ember/15 text-ember'
+                                            : 'text-ink-mid hover:text-ink border-white/10 bg-white/5 hover:bg-white/10',
+                                    )}
+                                >
+                                    {mix.name}
+                                </button>
+                                {deletable && (
+                                    <button
+                                        type="button"
+                                        aria-label={`Delete mix ${mix.name}`}
+                                        onClick={() => handleDeleteMix(mix)}
+                                        className="text-ink-dim hover:text-ink focus-visible:outline-ember absolute top-1/2 right-1.5 -translate-y-1/2 rounded-full p-0.5 transition-colors focus-visible:outline-2"
+                                    >
+                                        <X size={11} aria-hidden />
+                                    </button>
                                 )}
-                            >
-                                <Icon size={16} aria-hidden />
-                            </button>
-                            <div className="min-w-0 flex-1">
-                                <div className="flex items-baseline justify-between gap-2">
-                                    <span className={cn('text-sm', enabled ? 'text-ink' : 'text-ink-mid')}>
-                                        {layer.label}
-                                    </span>
-                                    <span className="text-[11px] text-ink-dim">{layer.hint}</span>
-                                </div>
-                                <Slider
-                                    value={[Math.round(volume * 100)]}
-                                    max={100}
-                                    step={1}
-                                    disabled={!enabled}
-                                    onValueChange={(next) =>
-                                        mixer.setLayer(layer.id, { volume: (next[0] ?? 50) / 100 })
-                                    }
-                                    aria-label={`${layer.label} volume`}
-                                    className="mt-2 cursor-pointer"
-                                />
-                            </div>
-                        </li>
-                    );
-                })}
-            </ul>
+                            </span>
+                        );
+                    })}
+                </div>
+            )}
 
-            <p className="border-t border-white/5 px-4 py-2.5 text-[11px] text-ink-dim">
-                Generated live in your browser — nothing to download.
-            </p>
+            {soundsQuery.isLoading ? (
+                <div className="flex justify-between gap-1 px-4 py-4" aria-hidden>
+                    {Array.from({ length: 8 }, (_, index) => (
+                        <div key={index} className="flex w-12 flex-col items-center gap-2">
+                            <div className="h-8 w-8 animate-pulse rounded-lg bg-white/5" />
+                            <div className="h-28 w-1.5 animate-pulse rounded-full bg-white/5" />
+                        </div>
+                    ))}
+                </div>
+            ) : sounds.length === 0 ? (
+                <p className="text-ink-mid px-4 py-6 text-sm">
+                    {soundsQuery.isError
+                        ? "The sound library couldn't be loaded. Check your connection and reopen this panel."
+                        : 'No ambient sounds are available yet.'}
+                </p>
+            ) : (
+                <ul className="flex justify-between gap-1 px-4 py-4">
+                    {board.map((slot, index) => (
+                        <BoardSlot
+                            key={slot ? slot.soundId : `empty-${index}`}
+                            slot={slot}
+                            sound={slot ? (soundById.get(slot.soundId) ?? null) : null}
+                            powered={powered}
+                            available={available}
+                            onAdd={(soundId) => {
+                                setActiveMixId(null);
+                                mixer.addSound(soundId);
+                            }}
+                            onRemove={() => {
+                                setActiveMixId(null);
+                                mixer.removeSlot(index);
+                            }}
+                            onToggleMute={() => {
+                                setActiveMixId(null);
+                                // Waking a single layer while the bus is off should make sound.
+                                if (!powered && slot?.muted) mixer.setPowered(true);
+                                mixer.toggleSlotMute(index);
+                            }}
+                            onVolume={(volume) => {
+                                setActiveMixId(null);
+                                mixer.setSlotVolume(index, volume);
+                            }}
+                        />
+                    ))}
+                </ul>
+            )}
+
+            {sounds.length > 0 && (
+                <form
+                    className="flex items-center gap-2 border-t border-white/5 px-4 py-2.5"
+                    onSubmit={(event) => {
+                        event.preventDefault();
+                        handleSaveMix();
+                    }}
+                >
+                    <input
+                        type="text"
+                        value={mixName}
+                        onChange={(event) => setMixName(event.target.value)}
+                        placeholder="Name this mix"
+                        maxLength={40}
+                        disabled={!boardHasSound}
+                        aria-label="Mix name"
+                        className="text-ink placeholder:text-ink-dim focus-visible:outline-ember min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs focus-visible:outline-2 disabled:opacity-50"
+                    />
+                    <button
+                        type="submit"
+                        disabled={!boardHasSound || !mixName.trim() || saveMix.isPending}
+                        className="border-ember/40 bg-ember/15 text-ember hover:bg-ember/25 focus-visible:outline-ember flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-colors focus-visible:outline-2 disabled:pointer-events-none disabled:opacity-40"
+                    >
+                        <Check size={12} aria-hidden />
+                        Save mix
+                    </button>
+                </form>
+            )}
         </motion.section>
+    );
+}
+
+function BoardSlot({
+    slot,
+    sound,
+    powered,
+    available,
+    onAdd,
+    onRemove,
+    onToggleMute,
+    onVolume,
+}: {
+    slot: AmbientSlot | null;
+    sound: AmbientSound | null;
+    powered: boolean;
+    available: AmbientSound[];
+    onAdd: (soundId: string) => void;
+    onRemove: () => void;
+    onToggleMute: () => void;
+    onVolume: (volume: number) => void;
+}) {
+    if (!slot || !sound) {
+        return (
+            <li className="flex w-12 shrink-0 flex-col items-center">
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <button
+                            type="button"
+                            aria-label="Add a sound"
+                            disabled={available.length === 0}
+                            className="text-ink-dim hover:text-ink-mid focus-visible:outline-ember flex h-[10.5rem] w-9 items-center justify-center rounded-lg border border-dashed border-white/10 transition-colors hover:border-white/25 focus-visible:outline-2 disabled:pointer-events-none disabled:opacity-40"
+                        >
+                            <Plus size={14} aria-hidden />
+                        </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                        align="center"
+                        className="scrollbar-custom max-h-64 w-44 overflow-y-auto border-white/10 bg-black/90 backdrop-blur-md"
+                    >
+                        {available.map((option) => {
+                            const Icon = ambientCategoryIcon(option.category);
+                            return (
+                                <DropdownMenuItem key={option.id} onClick={() => onAdd(option.id)} className="gap-2.5">
+                                    <Icon size={14} className="text-ink-dim" aria-hidden />
+                                    {option.label}
+                                </DropdownMenuItem>
+                            );
+                        })}
+                    </DropdownMenuContent>
+                </DropdownMenu>
+            </li>
+        );
+    }
+
+    const audible = powered && !slot.muted;
+    const Icon = ambientCategoryIcon(sound.category);
+
+    return (
+        <li className="group relative flex w-12 shrink-0 flex-col items-center gap-2">
+            <button
+                type="button"
+                aria-label={`Remove ${sound.label}`}
+                onClick={onRemove}
+                className="bg-night-2 text-ink-dim hover:text-ink focus-visible:outline-ember absolute -top-1.5 -right-0.5 z-10 rounded-full p-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2"
+            >
+                <X size={11} aria-hidden />
+            </button>
+            <button
+                type="button"
+                role="switch"
+                aria-checked={!slot.muted}
+                aria-label={`${sound.label} layer`}
+                onClick={onToggleMute}
+                className={cn(
+                    'focus-visible:outline-ember flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-colors focus-visible:outline-2',
+                    audible
+                        ? 'border-ember/40 bg-ember/15 text-ember shadow-[0_0_18px_-6px_oklch(0.81_0.1_75/0.5)]'
+                        : 'text-ink-dim hover:text-ink-mid border-white/10 bg-white/5 hover:bg-white/10',
+                    slot.loading && 'animate-pulse',
+                )}
+            >
+                <Icon size={14} aria-hidden />
+            </button>
+            <Slider
+                orientation="vertical"
+                value={[Math.round(slot.volume * 100)]}
+                max={100}
+                step={1}
+                onValueChange={(next) => onVolume((next[0] ?? 50) / 100)}
+                aria-label={`${sound.label} volume`}
+                className={cn(
+                    'h-28 cursor-pointer data-[orientation=vertical]:min-h-28',
+                    audible
+                        ? '[&_[data-slot=slider-range]]:bg-ember [&_[data-slot=slider-thumb]]:border-ember'
+                        : '[&_[data-slot=slider-range]]:bg-white/20 [&_[data-slot=slider-thumb]]:border-white/25',
+                )}
+            />
+            <span className={cn('max-w-full truncate text-[10px]', audible ? 'text-ink' : 'text-ink-dim')}>
+                {sound.label}
+            </span>
+        </li>
     );
 }

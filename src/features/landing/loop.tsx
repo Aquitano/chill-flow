@@ -1,6 +1,14 @@
 'use client';
 
-import { MotionValue, motion, useMotionValue, useReducedMotion, useScroll, useTransform } from 'framer-motion';
+import {
+    MotionValue,
+    motion,
+    useMotionValue,
+    useReducedMotion,
+    useScroll,
+    useSpring,
+    useTransform,
+} from 'framer-motion';
 import { Check, Flag, Heart, Pause, Play, Repeat, SkipBack, SkipForward, Volume2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
@@ -54,12 +62,11 @@ export function LoopSection() {
 
     return (
         <section id="inside" className="relative z-10 scroll-mt-24">
-            <div className="mx-auto max-w-6xl px-6">
-                <h2 className="max-w-2xl text-3xl font-medium tracking-tight text-ink sm:text-4xl">
-                    Sound, timer, tasks, progress —{' '}
-                    <em className="font-serif font-light text-ember">one loop.</em>
+            <div className="mx-auto flex max-w-3xl flex-col items-center px-6 pt-24 text-center sm:pt-32">
+                <h2 className="text-ink text-3xl font-medium tracking-tight text-balance sm:text-4xl md:text-5xl">
+                    Sound, timer, tasks, progress — <em className="text-ember font-serif font-light">one loop.</em>
                 </h2>
-                <p className="mt-4 max-w-xl text-base text-ink-mid">
+                <p className="text-ink-mid mt-5 max-w-xl text-base sm:text-lg">
                     The workspace below is the actual product, not a mockup of things to come.
                 </p>
             </div>
@@ -79,30 +86,27 @@ function LoopPinned() {
         target: containerRef,
         offset: ['start start', 'end end'],
     });
+    // Mouse wheels deliver scroll in discrete steps, which lands as visible jumps in the
+    // scroll-linked transforms. The spring glides between steps; native scroll is untouched.
+    const progress = useSpring(scrollYProgress, { stiffness: 100, damping: 30, restDelta: 0.001 });
 
     return (
-        <div ref={containerRef} className="relative mt-8 h-[340vh]">
+        <div ref={containerRef} className="relative mt-6 h-[340vh]">
             <div className="sticky top-0 flex h-screen items-center">
                 <div className="mx-auto grid w-full max-w-6xl grid-cols-[minmax(0,22rem)_1fr] items-center gap-16 px-6">
                     <div className="flex flex-col gap-10">
                         {STAGES.map((stage) => (
-                            <PinnedCaption key={stage.id} stage={stage} progress={scrollYProgress} />
+                            <PinnedCaption key={stage.id} stage={stage} progress={progress} />
                         ))}
                     </div>
-                    <WorkspaceMock progress={scrollYProgress} />
+                    <WorkspaceMock progress={progress} />
                 </div>
             </div>
         </div>
     );
 }
 
-function PinnedCaption({
-    stage,
-    progress,
-}: {
-    stage: (typeof STAGES)[number];
-    progress: MotionValue<number>;
-}) {
+function PinnedCaption({ stage, progress }: { stage: (typeof STAGES)[number]; progress: MotionValue<number> }) {
     const [start, end] = stage.range;
     const opacity = useTransform(
         progress,
@@ -113,8 +117,8 @@ function PinnedCaption({
 
     return (
         <motion.div style={{ opacity, x }}>
-            <h3 className="text-xl font-medium text-ink">{stage.title}</h3>
-            <p className="mt-2 text-sm leading-relaxed text-ink-mid">{stage.body}</p>
+            <h3 className="text-ink text-xl font-medium">{stage.title}</h3>
+            <p className="text-ink-mid mt-2 text-sm leading-relaxed">{stage.body}</p>
         </motion.div>
     );
 }
@@ -140,13 +144,13 @@ function WorkspaceMock({ progress }: { progress: MotionValue<number> }) {
     const checkProgress = useTransform(progress, [0.56, 0.62], [0, 1]);
 
     return (
-        <div className="relative aspect-[16/10] w-full overflow-hidden rounded-2xl border border-white/10 bg-night-2 shadow-[0_40px_120px_-40px_rgba(0,0,0,0.9)]">
+        <div className="bg-night-2 relative aspect-[16/10] w-full overflow-hidden rounded-2xl border border-white/10 shadow-[0_40px_120px_-40px_rgba(0,0,0,0.9)]">
             {/* Mode bar */}
-            <div className="flex items-center justify-between px-5 py-3 text-xs text-ink-dim">
+            <div className="text-ink-dim flex items-center justify-between px-5 py-3 text-xs">
                 <span className="rounded-full border border-white/10 px-2.5 py-1">LearnFlow</span>
                 <motion.span
                     style={{ opacity: progressEmphasis }}
-                    className="rounded-full border border-white/10 bg-black/30 px-2.5 py-1 text-ink-mid"
+                    className="text-ink-mid rounded-full border border-white/10 bg-black/30 px-2.5 py-1"
                 >
                     41 min focused · 3 sessions
                 </motion.span>
@@ -182,9 +186,9 @@ function LoopStacked() {
         <div className="mx-auto mt-14 flex max-w-2xl flex-col gap-16 px-6">
             {STAGES.map((stage) => (
                 <div key={stage.id}>
-                    <h3 className="text-xl font-medium text-ink">{stage.title}</h3>
-                    <p className="mt-2 max-w-lg text-sm leading-relaxed text-ink-mid">{stage.body}</p>
-                    <div className="mt-6 overflow-hidden rounded-2xl border border-white/10 bg-night-2 p-5">
+                    <h3 className="text-ink text-xl font-medium">{stage.title}</h3>
+                    <p className="text-ink-mid mt-2 max-w-lg text-sm leading-relaxed">{stage.body}</p>
+                    <div className="bg-night-2 mt-6 overflow-hidden rounded-2xl border border-white/10 p-5">
                         {stage.id === 'sound' && <MiniPlayer playing={false} />}
                         {stage.id === 'timer' && (
                             <div className="flex justify-center py-2">
@@ -226,8 +230,8 @@ function MiniDial({ ringProgress }: { ringProgress?: MotionValue<number> }) {
                 />
             </svg>
             <div className="flex flex-col items-center">
-                <span className="text-3xl font-medium tabular-nums text-ink">25:00</span>
-                <span className="mt-1 text-[10px] tracking-widest text-ink-dim uppercase">Focus</span>
+                <span className="text-ink text-3xl font-medium tabular-nums">25:00</span>
+                <span className="text-ink-dim mt-1 text-[10px] tracking-widest uppercase">Focus</span>
             </div>
         </div>
     );
@@ -237,8 +241,8 @@ function MiniTasks({ checkProgress }: { checkProgress?: MotionValue<number> }) {
     return (
         <div className="rounded-xl border border-white/10 bg-black/40 p-3 text-left backdrop-blur-sm">
             <div className="flex items-center justify-between px-1 pb-2">
-                <span className="text-sm font-medium text-ink">Tasks</span>
-                <span className="text-[11px] text-ink-dim">2 open</span>
+                <span className="text-ink text-sm font-medium">Tasks</span>
+                <span className="text-ink-dim text-[11px]">2 open</span>
             </div>
             <ul className="space-y-1 text-sm">
                 <li className="flex items-center gap-2.5 rounded-lg px-1.5 py-1.5">
@@ -252,12 +256,12 @@ function MiniTasks({ checkProgress }: { checkProgress?: MotionValue<number> }) {
                             </motion.span>
                         )}
                     </span>
-                    <span className="relative text-ink">
+                    <span className="text-ink relative">
                         Review chapter notes
                         {checkProgress && (
                             <motion.span
                                 style={{ scaleX: checkProgress }}
-                                className="absolute top-1/2 left-0 h-px w-full origin-left bg-ink-dim"
+                                className="bg-ink-dim absolute top-1/2 left-0 h-px w-full origin-left"
                             />
                         )}
                     </span>
@@ -284,27 +288,27 @@ function MiniPlayer({ playing }: { playing: boolean }) {
             {/* Stylized stand-in for the track's cover (real art streams from the catalog). */}
             <span
                 aria-hidden
-                className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md bg-gradient-to-b from-night-2 to-black"
+                className="from-night-2 relative h-10 w-10 shrink-0 overflow-hidden rounded-md bg-gradient-to-b to-black"
             >
-                <span className="absolute bottom-0 left-1/2 h-5 w-10 -translate-x-1/2 rounded-t-full bg-gradient-to-t from-ember to-ember/40" />
+                <span className="from-ember to-ember/40 absolute bottom-0 left-1/2 h-5 w-10 -translate-x-1/2 rounded-t-full bg-gradient-to-t" />
             </span>
             <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-ink">Relax &amp; Recharge</p>
-                <p className="truncate text-xs text-ink-dim">UnioMystica</p>
+                <p className="text-ink truncate text-sm font-medium">Relax &amp; Recharge</p>
+                <p className="text-ink-dim truncate text-xs">UnioMystica</p>
             </div>
-            <div className="ml-auto flex items-center gap-2 text-ink-mid">
+            <div className="text-ink-mid ml-auto flex items-center gap-2">
                 <Heart className="h-3.5 w-3.5" />
                 <SkipBack className="h-3.5 w-3.5" />
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15 text-ink">
+                <span className="text-ink flex h-8 w-8 items-center justify-center rounded-full bg-white/15">
                     {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="ml-0.5 h-3.5 w-3.5" />}
                 </span>
                 <SkipForward className="h-3.5 w-3.5" />
                 <Repeat className="h-3.5 w-3.5" />
             </div>
             <div className="hidden items-center gap-2 xl:flex">
-                <Volume2 className="h-3.5 w-3.5 text-ink-dim" />
+                <Volume2 className="text-ink-dim h-3.5 w-3.5" />
                 <span className="h-1 w-16 rounded-full bg-white/15">
-                    <span className="block h-1 w-10 rounded-full bg-ink-mid" />
+                    <span className="bg-ink-mid block h-1 w-10 rounded-full" />
                 </span>
             </div>
         </div>
@@ -314,9 +318,9 @@ function MiniPlayer({ playing }: { playing: boolean }) {
 function MiniSummary() {
     return (
         <div className="py-4 text-center">
-            <p className="text-xs tracking-[0.25em] text-ink-dim uppercase">This week</p>
-            <p className="mt-3 text-3xl font-medium text-ink">184 minutes focused</p>
-            <p className="mt-2 text-sm text-ink-mid">
+            <p className="text-ink-dim text-xs tracking-[0.25em] uppercase">This week</p>
+            <p className="text-ink mt-3 text-3xl font-medium">184 minutes focused</p>
+            <p className="text-ink-mid mt-2 text-sm">
                 7 sessions completed. Counted only while the timer ran — nothing padded.
             </p>
         </div>

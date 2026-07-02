@@ -125,7 +125,7 @@ export function TasksPanel() {
                 </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-4 pb-4">
+            <div className="scrollbar-custom flex-1 overflow-y-auto px-4 pb-4">
                 <TaskComposer />
 
                 <ul className="space-y-0.5">

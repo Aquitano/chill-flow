@@ -8,6 +8,40 @@ export const ORIGINALS_DIR = path.join(ROOT, 'scripts', 'audio', 'originals');
 export const PUBLIC_AUDIO_DIR = path.join(ROOT, 'public', 'audio');
 export const MANIFEST_PATH = path.join(ROOT, 'scripts', 'audio', 'manifest.json');
 
+export const AMBIENT_MANIFEST_PATH = path.join(ROOT, 'scripts', 'audio', 'ambient-manifest.json');
+export const AMBIENT_ORIGINALS_DIR = path.join(ORIGINALS_DIR, 'ambient');
+
+/** One ambient catalog row; `source` documents provenance and license for attribution. */
+export type AmbientManifestEntry = {
+    id: string;
+    label: string;
+    category: string;
+    storageKey: string;
+    gainPercent?: number;
+    sortIndex?: number;
+    /** Seconds to skip from the start of the source before the loop window (default 2). */
+    trimStartSec?: number;
+    /** Loop window length in seconds (default 75). */
+    loopSec?: number;
+    source: {
+        url: string;
+        page?: string;
+        author?: string;
+        license?: string;
+    };
+};
+
+export function readAmbientManifest(): AmbientManifestEntry[] {
+    if (!existsSync(AMBIENT_MANIFEST_PATH)) return [];
+    const raw = readFileSync(AMBIENT_MANIFEST_PATH, 'utf8').trim();
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+        throw new Error('ambient-manifest.json must be a JSON array of ambient sound entries.');
+    }
+    return parsed as AmbientManifestEntry[];
+}
+
 /** One catalog row as authored by hand (durationSec is filled by `audio:build`). */
 export type ManifestEntry = {
     id: string;

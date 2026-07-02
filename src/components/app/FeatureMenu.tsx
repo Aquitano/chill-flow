@@ -38,7 +38,7 @@ export const FeatureMenu: React.FC = () => {
                 role="dialog"
                 aria-label="Workspace settings"
                 aria-hidden={!isMenuOpen}
-                className="fixed top-0 right-0 z-40 h-full w-[min(20rem,90vw)] overflow-y-auto border-l border-white/10 bg-black/85 backdrop-blur-md"
+                className="scrollbar-custom fixed top-0 right-0 z-40 h-full w-[min(20rem,90vw)] overflow-y-auto border-l border-white/10 bg-black/85 backdrop-blur-md"
                 initial={{ x: '100%' }}
                 animate={{ x: isMenuOpen ? 0 : '100%' }}
                 transition={{ duration: 0.3, ease: 'easeInOut' }}

@@ -61,7 +61,7 @@ export function LibraryPanel() {
         >
             {scenes.length > 0 && (
                 <div
-                    className="flex items-center gap-1.5 overflow-x-auto px-3 pt-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                    className="scrollbar-custom flex items-center gap-1.5 overflow-x-auto px-3 pt-3 pb-1.5"
                     role="group"
                     aria-label="Scenes"
                 >
@@ -88,7 +88,7 @@ export function LibraryPanel() {
                     <p className="text-xs text-ink-dim">New soundtracks appear here as they land in the catalog.</p>
                 </div>
             ) : (
-                <div role="listbox" aria-label="Tracks" className="max-h-[38vh] space-y-0.5 overflow-y-auto p-2">
+                <div role="listbox" aria-label="Tracks" className="scrollbar-custom max-h-[38vh] space-y-0.5 overflow-y-auto p-2">
                     {visibleTracks.map((track) => {
                         const active = currentTrack?.id === track.id;
                         return (
