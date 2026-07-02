@@ -325,6 +325,8 @@ function BoardSlot({
                     ariaLabel="Add a sound"
                     placeholder="Search sounds…"
                     emptyText="No sounds left"
+                    side="top"
+                    avoidCollisions={false}
                     items={available.map((option) => ({
                         id: option.id,
                         label: option.label,

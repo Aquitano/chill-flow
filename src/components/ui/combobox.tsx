@@ -33,6 +33,7 @@ export function Combobox({
     ariaLabel = 'Search',
     align = 'center',
     side = 'bottom',
+    avoidCollisions = true,
     contentClassName,
 }: {
     items: ComboboxItem[];
@@ -43,6 +44,7 @@ export function Combobox({
     ariaLabel?: string;
     align?: 'start' | 'center' | 'end';
     side?: 'top' | 'right' | 'bottom' | 'left';
+    avoidCollisions?: boolean;
     contentClassName?: string;
 }) {
     const [open, setOpen] = useState(false);
@@ -100,16 +102,20 @@ export function Combobox({
                     align={align}
                     side={side}
                     sideOffset={6}
+                    avoidCollisions={avoidCollisions}
+                    collisionPadding={8}
                     onOpenAutoFocus={(event) => {
                         event.preventDefault();
                         inputRef.current?.focus();
                     }}
                     className={cn(
-                        'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 z-50 w-52 overflow-hidden rounded-xl border border-white/10 bg-black/90 shadow-[0_24px_60px_-24px_rgba(0,0,0,0.85)] backdrop-blur-md duration-150 motion-reduce:animate-none',
+                        // flex-col-reverse when opening upward keeps the search field pinned
+                        // against the trigger, so filtering grows/shrinks the list, not its position.
+                        'group data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 z-50 flex w-52 flex-col overflow-hidden rounded-xl border border-white/10 bg-black/90 shadow-[0_24px_60px_-24px_rgba(0,0,0,0.85)] backdrop-blur-md duration-150 data-[side=top]:flex-col-reverse motion-reduce:animate-none',
                         contentClassName,
                     )}
                 >
-                    <div className="flex items-center gap-2 border-b border-white/8 px-2.5 py-2">
+                    <div className="flex items-center gap-2 border-b border-white/8 px-2.5 py-2 group-data-[side=top]:border-t group-data-[side=top]:border-b-0">
                         <Search size={13} className="text-ink-dim shrink-0" aria-hidden />
                         <input
                             ref={inputRef}
