@@ -33,12 +33,17 @@ const SHORTCUTS = [
 
 type SectionId = 'mode' | 'sound' | 'scene' | 'progress' | 'shortcuts';
 
-const SECTIONS: { id: SectionId; label: string; icon: LucideIcon }[] = [
-    { id: 'mode', label: 'Mode', icon: Sparkles },
-    { id: 'sound', label: 'Sound', icon: Music },
-    { id: 'scene', label: 'Scene', icon: ImageIcon },
-    { id: 'progress', label: 'Progress', icon: BarChart3 },
-    { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
+const SECTIONS: { id: SectionId; label: string; description: string; icon: LucideIcon }[] = [
+    { id: 'mode', label: 'Mode', description: 'Shapes what the workspace shows while you work.', icon: Sparkles },
+    { id: 'sound', label: 'Sound', description: 'The track playing under your session.', icon: Music },
+    { id: 'scene', label: 'Scene', description: 'The backdrop behind your session.', icon: ImageIcon },
+    { id: 'progress', label: 'Progress', description: 'Your focus, in plain numbers.', icon: BarChart3 },
+    {
+        id: 'shortcuts',
+        label: 'Shortcuts',
+        description: 'The whole workspace works from the keyboard.',
+        icon: Keyboard,
+    },
 ];
 
 export function SettingsDialog() {
@@ -57,6 +62,9 @@ export function SettingsDialog() {
     const setSelectedBackgroundId = useAppStore((state) => state.setSelectedBackgroundId);
 
     const backgroundApplies = modes[currentMode]?.showBackground ?? false;
+    const backgroundModeLabels = Object.values(modes)
+        .filter((mode) => mode.showBackground)
+        .map((mode) => mode.label);
 
     const [activeSection, setActiveSection] = useState<SectionId>('mode');
     const [soundQuery, setSoundQuery] = useState('');
@@ -66,10 +74,13 @@ export function SettingsDialog() {
     const soundTokens = soundQuery.toLowerCase().split(/\s+/).filter(Boolean);
     const filteredTracks = showSoundSearch
         ? tracks.filter((track) => {
-              const haystack = `${track.title} ${track.artist}`.toLowerCase();
+              const haystack =
+                  `${track.title} ${track.artist} ${track.tags.join(' ')} ${track.category ?? ''}`.toLowerCase();
               return soundTokens.every((token) => haystack.includes(token));
           })
         : tracks;
+
+    const activeMeta = SECTIONS.find((section) => section.id === activeSection) ?? SECTIONS[0]!;
 
     const handleRailKeyDown = (event: React.KeyboardEvent) => {
         const forward = event.key === 'ArrowDown' || event.key === 'ArrowRight';
@@ -156,6 +167,11 @@ export function SettingsDialog() {
                             aria-labelledby={`settings-tab-${activeSection}`}
                             className="scrollbar-custom min-h-0 flex-1 overflow-y-auto p-5"
                         >
+                            <header className="mb-4">
+                                <h3 className="text-ink text-sm font-medium">{activeMeta.label}</h3>
+                                <p className="text-ink-dim mt-0.5 text-xs">{activeMeta.description}</p>
+                            </header>
+
                             {activeSection === 'mode' && (
                                 <div className="space-y-1">
                                     {Object.keys(modes).map((modeKey) => {
@@ -315,28 +331,33 @@ export function SettingsDialog() {
                                             );
                                         })}
                                     </div>
-                                    {!backgroundApplies && (
+                                    {!backgroundApplies && backgroundModeLabels.length > 0 && (
                                         <p className="text-ink-dim mt-2 text-xs">
-                                            The scene appears in modes that show a background (LearnFlow,
-                                            CreativeSpark).
+                                            The scene appears in modes that show a background (
+                                            {backgroundModeLabels.join(', ')}).
                                         </p>
                                     )}
                                 </>
                             )}
 
                             {activeSection === 'progress' && (
-                                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                                    <h4 className="text-ink-dim text-xs tracking-wider uppercase">Progress</h4>
-                                    <p className="text-ink mt-2 text-sm">
-                                        {sessionSummary.totalMinutes} minutes focused · {sessionSummary.totalSessions}{' '}
-                                        sessions
-                                    </p>
-                                    {sessionSummary.currentStreak > 0 && (
-                                        <p className="text-ink-dim mt-1 text-xs">
-                                            {sessionSummary.currentStreak}-day streak
-                                        </p>
-                                    )}
-                                </div>
+                                <dl className="grid grid-cols-3 gap-2">
+                                    {[
+                                        { value: sessionSummary.totalMinutes, label: 'minutes focused' },
+                                        { value: sessionSummary.totalSessions, label: 'sessions' },
+                                        { value: sessionSummary.currentStreak, label: 'day streak' },
+                                    ].map((stat) => (
+                                        <div
+                                            key={stat.label}
+                                            className="rounded-xl border border-white/10 bg-white/5 px-3 py-3.5 text-center"
+                                        >
+                                            <dd className="text-ink text-xl font-semibold tabular-nums">
+                                                {stat.value}
+                                            </dd>
+                                            <dt className="text-ink-dim mt-0.5 text-xs">{stat.label}</dt>
+                                        </div>
+                                    ))}
+                                </dl>
                             )}
 
                             {activeSection === 'shortcuts' && (
