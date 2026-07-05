@@ -24,10 +24,19 @@ const nullableBackgroundIdSchema = z
 
 export const taskIdSchema = z.uuid();
 
-export const createTaskInputSchema = z.object({
-    text: z.string().trim().min(1).max(120),
-    priority: z.enum(['low', 'medium', 'high']).default('medium'),
-});
+// superjson revives Date instances on the wire (jstack parses each body value with
+// superjson before validation), so a plain z.date() is the right type for due dates.
+const dueAtSchema = z.date().nullable();
+
+export const createTaskInputSchema = z
+    .object({
+        text: z.string().trim().min(1).max(120),
+        priority: z.enum(['low', 'medium', 'high']).default('medium'),
+        dueAt: dueAtSchema.optional(),
+        dueHasTime: z.boolean().optional(),
+    })
+    // A missing or cleared due date can never carry a time, so drop a stray dueHasTime.
+    .transform((input) => (input.dueAt == null ? { ...input, dueHasTime: false } : input));
 
 export const updateTaskInputSchema = z
     .object({
@@ -35,10 +44,21 @@ export const updateTaskInputSchema = z
         text: z.string().trim().min(1).max(120).optional(),
         priority: z.enum(['low', 'medium', 'high']).optional(),
         isCompleted: z.boolean().optional(),
+        dueAt: dueAtSchema.optional(),
+        dueHasTime: z.boolean().optional(),
     })
-    .refine((input) => input.text !== undefined || input.priority !== undefined || input.isCompleted !== undefined, {
-        message: 'Provide at least one task field to update.',
-    });
+    .refine(
+        (input) =>
+            input.text !== undefined ||
+            input.priority !== undefined ||
+            input.isCompleted !== undefined ||
+            input.dueAt !== undefined ||
+            input.dueHasTime !== undefined,
+        { message: 'Provide at least one task field to update.' },
+    )
+    // Clearing the due date (dueAt: null) also resets dueHasTime so a task can't keep a
+    // time with no date behind it.
+    .transform((input) => (input.dueAt === null ? { ...input, dueHasTime: false } : input));
 
 export const deleteTaskInputSchema = z.object({
     id: taskIdSchema,

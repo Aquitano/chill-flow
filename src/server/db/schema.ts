@@ -39,6 +39,10 @@ export const tasks = pgTable(
         text: text('text').notNull(),
         priority: text('priority').notNull(),
         isCompleted: boolean('isCompleted').notNull().default(false),
+        dueAt: timestamp('dueAt'),
+        // Distinguishes a date-only due ("tomorrow") from one with a time ("tomorrow 5pm")
+        // so the UI knows whether to render a clock alongside the date.
+        dueHasTime: boolean('dueHasTime').notNull().default(false),
         createdAt: timestamp('createdAt').defaultNow().notNull(),
         updatedAt: timestamp('updatedAt').defaultNow().notNull(),
     },
