@@ -3,8 +3,8 @@
 import { AppHeader } from '@/components/app/AppHeader';
 import { CenterContent } from '@/components/app/CenterContent';
 import { CommandPalette } from '@/components/app/CommandPalette';
-import { FeatureMenu } from '@/components/app/FeatureMenu';
 import { PlayerDock } from '@/components/app/PlayerDock';
+import { SettingsDialog } from '@/components/app/SettingsDialog';
 import {
     usePreferencesQuery,
     useSessionsQuery,
@@ -108,7 +108,9 @@ export function AppShell() {
         };
 
         const selectedTrack = tracksQuery.data?.length
-            ? (tracksQuery.data.find((track) => track.id === preferences.selectedTrackId) ?? tracksQuery.data[0] ?? null)
+            ? (tracksQuery.data.find((track) => track.id === preferences.selectedTrackId) ??
+              tracksQuery.data[0] ??
+              null)
             : null;
 
         // Seed the persist baseline with the exact shape we later write, so hydration
@@ -231,7 +233,7 @@ export function AppShell() {
 
     if (tracksQuery.isLoading || tasksQuery.isLoading || preferencesQuery.isLoading || sessionsQuery.isLoading) {
         return (
-            <main className="relative flex min-h-screen items-center justify-center bg-night text-ink">
+            <main className="bg-night text-ink relative flex min-h-screen items-center justify-center">
                 {/* Skeleton mirrors the workspace layout: dial in the center, player strip below. */}
                 <div
                     className="aspect-square w-[min(560px,calc(100vw-2rem),calc(100vh-16rem))] animate-pulse rounded-full border border-white/10"
@@ -265,7 +267,7 @@ export function AppShell() {
 
     return (
         <main
-            className={`relative min-h-screen w-screen overflow-hidden text-ink ${
+            className={`text-ink relative min-h-screen w-screen overflow-hidden ${
                 showBackground ? 'bg-cover bg-center bg-no-repeat' : 'bg-night'
             }`}
             style={showBackground && activeBackground?.url ? { backgroundImage: `url('${activeBackground.url}')` } : {}}
@@ -288,7 +290,7 @@ export function AppShell() {
             </AnimatePresence>
 
             <AppHeader />
-            <FeatureMenu />
+            <SettingsDialog />
             <CenterContent />
             <PlayerDock />
             <CommandPalette />
