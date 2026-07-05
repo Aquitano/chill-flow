@@ -44,7 +44,10 @@ export interface Task {
     text: string;
     isCompleted: boolean;
     priority: 'low' | 'medium' | 'high';
-    date?: Date;
+    /** When the task is due, or null when it has no due date. */
+    dueAt: Date | null;
+    /** True when dueAt carries a meaningful time of day; false for date-only dues. */
+    dueHasTime: boolean;
 }
 
 export interface Background {

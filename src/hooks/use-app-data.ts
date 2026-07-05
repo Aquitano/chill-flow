@@ -86,7 +86,8 @@ export function useCreateTaskMutation() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: (input: { text: string; priority: Task['priority'] }) => api.tasks.create(input),
+        mutationFn: (input: { text: string; priority: Task['priority']; dueAt?: Date | null; dueHasTime?: boolean }) =>
+            api.tasks.create(input),
         onMutate: async (input): Promise<TaskListContext> => {
             await queryClient.cancelQueries({ queryKey: queryKeys.tasks });
             const previous = queryClient.getQueryData<Task[]>(queryKeys.tasks);
@@ -96,6 +97,8 @@ export function useCreateTaskMutation() {
                 text: input.text,
                 priority: input.priority,
                 isCompleted: false,
+                dueAt: input.dueAt ?? null,
+                dueHasTime: input.dueAt == null ? false : (input.dueHasTime ?? false),
             };
             queryClient.setQueryData<Task[]>(queryKeys.tasks, (old = []) => [optimisticTask, ...old]);
             return { previous };
@@ -115,13 +118,21 @@ export function useUpdateTaskMutation() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: (input: { id: string; text?: string; priority?: Task['priority']; isCompleted?: boolean }) =>
-            api.tasks.update(input),
+        mutationFn: (input: {
+            id: string;
+            text?: string;
+            priority?: Task['priority'];
+            isCompleted?: boolean;
+            dueAt?: Date | null;
+            dueHasTime?: boolean;
+        }) => api.tasks.update(input),
         onMutate: async (input): Promise<TaskListContext> => {
             await queryClient.cancelQueries({ queryKey: queryKeys.tasks });
             const previous = queryClient.getQueryData<Task[]>(queryKeys.tasks);
+            // Clearing the due date drops any time with it, mirroring the server transform.
+            const patch = input.dueAt === null ? { ...input, dueHasTime: false } : input;
             queryClient.setQueryData<Task[]>(queryKeys.tasks, (old = []) =>
-                old.map((task) => (task.id === input.id ? { ...task, ...input } : task)),
+                old.map((task) => (task.id === input.id ? { ...task, ...patch } : task)),
             );
             return { previous };
         },

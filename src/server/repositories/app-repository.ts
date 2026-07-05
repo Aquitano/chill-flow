@@ -70,9 +70,30 @@ type TrackWriteInput = {
 };
 
 export const defaultTasks: Task[] = [
-    { id: crypto.randomUUID(), text: 'Review notes', isCompleted: false, priority: 'medium' },
-    { id: crypto.randomUUID(), text: 'Practice coding', isCompleted: false, priority: 'high' },
-    { id: crypto.randomUUID(), text: 'Write summary', isCompleted: false, priority: 'low' },
+    {
+        id: crypto.randomUUID(),
+        text: 'Review notes',
+        isCompleted: false,
+        priority: 'medium',
+        dueAt: null,
+        dueHasTime: false,
+    },
+    {
+        id: crypto.randomUUID(),
+        text: 'Practice coding',
+        isCompleted: false,
+        priority: 'high',
+        dueAt: null,
+        dueHasTime: false,
+    },
+    {
+        id: crypto.randomUUID(),
+        text: 'Write summary',
+        isCompleted: false,
+        priority: 'low',
+        dueAt: null,
+        dueHasTime: false,
+    },
 ];
 
 const defaultPreferences: UserPreferences = {
@@ -112,7 +133,8 @@ function mapTask(row: typeof tasks.$inferSelect): Task {
         text: row.text,
         priority: row.priority as Task['priority'],
         isCompleted: row.isCompleted,
-        date: row.createdAt,
+        dueAt: row.dueAt,
+        dueHasTime: row.dueHasTime,
     };
 }
 
@@ -351,7 +373,11 @@ export const appRepository = {
         return storedTasks.map(mapTask);
     },
 
-    async createTask(database: Database, userId: string, input: Pick<Task, 'text' | 'priority'>) {
+    async createTask(
+        database: Database,
+        userId: string,
+        input: Pick<Task, 'text' | 'priority'> & Partial<Pick<Task, 'dueAt' | 'dueHasTime'>>,
+    ) {
         const [createdTask] = await database
             .insert(tasks)
             .values({
@@ -360,6 +386,8 @@ export const appRepository = {
                 text: input.text,
                 priority: input.priority,
                 isCompleted: false,
+                dueAt: input.dueAt ?? null,
+                dueHasTime: input.dueHasTime ?? false,
             })
             .returning();
 
@@ -374,7 +402,7 @@ export const appRepository = {
         database: Database,
         userId: string,
         taskId: string,
-        input: Partial<Pick<Task, 'text' | 'priority' | 'isCompleted'>>,
+        input: Partial<Pick<Task, 'text' | 'priority' | 'isCompleted' | 'dueAt' | 'dueHasTime'>>,
     ) {
         const [updatedTask] = await database
             .update(tasks)
