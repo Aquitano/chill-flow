@@ -122,6 +122,44 @@ export function AmbiencePanel() {
 
     const boardHasSound = board.some((slot) => slot && !slot.muted);
 
+    // Built-ins come first in `presets`; the divider marks where the user's own mixes begin.
+    const builtinVisible = visiblePresets.filter((mix) => mix.id.startsWith('builtin-'));
+    const savedVisible = visiblePresets.filter((mix) => !mix.id.startsWith('builtin-'));
+
+    const renderPresetChip = (mix: AmbientMix) => {
+        const isActive = activeMixId === mix.id;
+        const deletable = !mix.id.startsWith('builtin-');
+        return (
+            <span key={mix.id} className="group relative shrink-0">
+                <button
+                    type="button"
+                    role="option"
+                    aria-selected={isActive}
+                    onClick={() => applyMix(mix)}
+                    className={cn(
+                        'focus-visible:outline-ember rounded-full border px-3 py-1 text-xs whitespace-nowrap transition-colors focus-visible:outline-2',
+                        deletable && 'pr-7',
+                        isActive
+                            ? 'border-ember/50 bg-ember/15 text-ember'
+                            : 'text-ink-mid hover:text-ink border-white/10 bg-white/5 hover:bg-white/10',
+                    )}
+                >
+                    {mix.name}
+                </button>
+                {deletable && (
+                    <button
+                        type="button"
+                        aria-label={`Delete mix ${mix.name}`}
+                        onClick={() => handleDeleteMix(mix)}
+                        className="text-ink-dim hover:text-ink focus-visible:outline-ember absolute top-1/2 right-1.5 -translate-y-1/2 rounded-full p-0.5 transition-colors focus-visible:outline-2"
+                    >
+                        <X size={11} aria-hidden />
+                    </button>
+                )}
+            </span>
+        );
+    };
+
     return (
         <motion.section
             id="dock-panel-ambience"
@@ -173,43 +211,15 @@ export function AmbiencePanel() {
                         <p className="text-ink-dim px-1 pb-1 text-xs">No presets match “{presetQuery}”</p>
                     ) : (
                         <div
-                            className="scrollbar-custom flex gap-1.5 overflow-x-auto pb-1.5"
+                            className="scrollbar-custom flex gap-1.5 overflow-x-auto [mask-image:linear-gradient(to_right,black,black_calc(100%-1.5rem),transparent)] pb-1.5"
                             role="listbox"
                             aria-label="Presets"
                         >
-                            {visiblePresets.map((mix) => {
-                                const isActive = activeMixId === mix.id;
-                                const deletable = !mix.id.startsWith('builtin-');
-                                return (
-                                    <span key={mix.id} className="group relative shrink-0">
-                                        <button
-                                            type="button"
-                                            role="option"
-                                            aria-selected={isActive}
-                                            onClick={() => applyMix(mix)}
-                                            className={cn(
-                                                'focus-visible:outline-ember rounded-full border px-3 py-1 text-xs whitespace-nowrap transition-colors focus-visible:outline-2',
-                                                deletable && 'pr-7',
-                                                isActive
-                                                    ? 'border-ember/50 bg-ember/15 text-ember'
-                                                    : 'text-ink-mid hover:text-ink border-white/10 bg-white/5 hover:bg-white/10',
-                                            )}
-                                        >
-                                            {mix.name}
-                                        </button>
-                                        {deletable && (
-                                            <button
-                                                type="button"
-                                                aria-label={`Delete mix ${mix.name}`}
-                                                onClick={() => handleDeleteMix(mix)}
-                                                className="text-ink-dim hover:text-ink focus-visible:outline-ember absolute top-1/2 right-1.5 -translate-y-1/2 rounded-full p-0.5 transition-colors focus-visible:outline-2"
-                                            >
-                                                <X size={11} aria-hidden />
-                                            </button>
-                                        )}
-                                    </span>
-                                );
-                            })}
+                            {builtinVisible.map(renderPresetChip)}
+                            {builtinVisible.length > 0 && savedVisible.length > 0 && (
+                                <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 self-center bg-white/15" />
+                            )}
+                            {savedVisible.map(renderPresetChip)}
                         </div>
                     )}
                 </div>
@@ -299,6 +309,10 @@ function AmbientOptionIcon({ category }: { category: string }) {
     return <Icon size={14} aria-hidden />;
 }
 
+function categoryLabel(category: string): string {
+    return category.charAt(0).toUpperCase() + category.slice(1);
+}
+
 function BoardSlot({
     slot,
     sound,
@@ -327,12 +341,15 @@ function BoardSlot({
                     emptyText="No sounds left"
                     side="top"
                     avoidCollisions={false}
-                    items={available.map((option) => ({
-                        id: option.id,
-                        label: option.label,
-                        keywords: option.category,
-                        icon: <AmbientOptionIcon category={option.category} />,
-                    }))}
+                    items={[...available]
+                        .sort((a, b) => a.category.localeCompare(b.category) || a.label.localeCompare(b.label))
+                        .map((option) => ({
+                            id: option.id,
+                            label: option.label,
+                            keywords: option.category,
+                            group: categoryLabel(option.category),
+                            icon: <AmbientOptionIcon category={option.category} />,
+                        }))}
                     onSelect={onAdd}
                     trigger={
                         <button

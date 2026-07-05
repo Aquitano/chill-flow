@@ -10,6 +10,9 @@ export type ComboboxItem = {
     label: string;
     /** Extra text folded into the search haystack (category, tags, artist…). */
     keywords?: string;
+    /** Optional heading rendered above the item when it differs from the previous
+     *  item's group — pass items already clustered by group. */
+    group?: string;
     icon?: ReactNode;
 };
 
@@ -148,31 +151,41 @@ export function Combobox({
                         ) : (
                             filtered.map((item, index) => {
                                 const active = index === clampedIndex;
+                                const showGroup = Boolean(item.group) && item.group !== filtered[index - 1]?.group;
                                 return (
-                                    <button
-                                        key={item.id}
-                                        type="button"
-                                        id={`combobox-item-${item.id}`}
-                                        data-item-id={item.id}
-                                        role="option"
-                                        aria-selected={active}
-                                        onClick={() => choose(item.id)}
-                                        onPointerMove={() => setActiveIndex(index)}
-                                        className={cn(
-                                            'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors',
-                                            active ? 'text-ink bg-white/8' : 'text-ink-mid',
-                                        )}
-                                    >
-                                        {item.icon && (
-                                            <span
-                                                className={cn('shrink-0', active ? 'text-ember' : 'text-ink-dim')}
+                                    <div key={item.id}>
+                                        {showGroup && (
+                                            <p
                                                 aria-hidden
+                                                className="text-ink-dim px-2.5 pt-2 pb-1 text-[10px] font-medium tracking-wide uppercase"
                                             >
-                                                {item.icon}
-                                            </span>
+                                                {item.group}
+                                            </p>
                                         )}
-                                        <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                                    </button>
+                                        <button
+                                            type="button"
+                                            id={`combobox-item-${item.id}`}
+                                            data-item-id={item.id}
+                                            role="option"
+                                            aria-selected={active}
+                                            onClick={() => choose(item.id)}
+                                            onPointerMove={() => setActiveIndex(index)}
+                                            className={cn(
+                                                'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors',
+                                                active ? 'text-ink bg-white/8' : 'text-ink-mid',
+                                            )}
+                                        >
+                                            {item.icon && (
+                                                <span
+                                                    className={cn('shrink-0', active ? 'text-ember' : 'text-ink-dim')}
+                                                    aria-hidden
+                                                >
+                                                    {item.icon}
+                                                </span>
+                                            )}
+                                            <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                                        </button>
+                                    </div>
                                 );
                             })
                         )}
