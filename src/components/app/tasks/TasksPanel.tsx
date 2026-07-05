@@ -36,15 +36,24 @@ function TaskRow({ task }: { task: Task }) {
                 onClick={() => updateTask.mutate({ id: task.id, isCompleted: !task.isCompleted })}
                 className={cn(
                     'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition',
-                    task.isCompleted ? 'border-emerald-500 bg-emerald-500 text-black' : cn(meta.ring, 'hover:bg-white/10'),
+                    task.isCompleted
+                        ? 'border-emerald-500 bg-emerald-500 text-black'
+                        : cn(meta.ring, 'hover:bg-white/10'),
                 )}
                 aria-pressed={task.isCompleted}
                 aria-label={task.isCompleted ? 'Mark task incomplete' : 'Mark task complete'}
             >
-                <Check className={cn('h-3 w-3 transition', task.isCompleted ? 'opacity-100' : 'opacity-0 group-hover:opacity-40')} />
+                <Check
+                    className={cn(
+                        'h-3 w-3 transition',
+                        task.isCompleted ? 'opacity-100' : 'opacity-0 group-hover:opacity-40',
+                    )}
+                />
             </button>
 
-            <span className={cn('flex-1 text-sm', task.isCompleted ? 'text-neutral-500 line-through' : 'text-stone-100')}>
+            <span
+                className={cn('flex-1 text-sm', task.isCompleted ? 'text-neutral-500 line-through' : 'text-stone-100')}
+            >
                 {task.text}
             </span>
 
@@ -63,7 +72,9 @@ function TaskRow({ task }: { task: Task }) {
                         {PRIORITY_OPTIONS.map((option) => (
                             <DropdownMenuItem
                                 key={option.value}
-                                onSelect={() => updateTask.mutate({ id: task.id, priority: option.value as TaskPriority })}
+                                onSelect={() =>
+                                    updateTask.mutate({ id: task.id, priority: option.value as TaskPriority })
+                                }
                                 className={task.priority === option.value ? 'bg-white/10' : ''}
                             >
                                 <Flag className={cn('h-3.5 w-3.5', option.accent)} />
