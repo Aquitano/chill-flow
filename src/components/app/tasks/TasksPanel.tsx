@@ -4,15 +4,18 @@ import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
+    DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useDeleteTaskMutation, useUpdateTaskMutation } from '@/hooks/use-app-data';
+import { dueState, formatDue, quickDueOptions, type DueState } from '@/lib/task-dates';
 import type { TaskPriority } from '@/lib/task-parser';
 import { cn } from '@/lib/utils';
 import type { Task } from '@/models/app';
 import { useAppStore } from '@/store/app-store';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, Flag, Trash2, X } from 'lucide-react';
+import { CalendarDays, Check, Flag, Trash2, X } from 'lucide-react';
+import { DUE_TEXT } from './due-meta';
 import { PRIORITY_META, PRIORITY_OPTIONS } from './priority-meta';
 import { TaskComposer } from './TaskComposer';
 import { useResizablePanel } from './use-resizable-panel';
@@ -21,6 +24,29 @@ function TaskRow({ task }: { task: Task }) {
     const updateTask = useUpdateTaskMutation();
     const deleteTask = useDeleteTaskMutation();
     const meta = PRIORITY_META[task.priority];
+
+    const dueMenuItems = (
+        <>
+            {quickDueOptions().map((option) => (
+                <DropdownMenuItem
+                    key={option.id}
+                    onSelect={() => updateTask.mutate({ id: task.id, dueAt: option.dueAt, dueHasTime: false })}
+                >
+                    <CalendarDays className="h-3.5 w-3.5 text-neutral-400" />
+                    {option.label}
+                </DropdownMenuItem>
+            ))}
+            {task.dueAt && (
+                <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={() => updateTask.mutate({ id: task.id, dueAt: null })}>
+                        <X className="h-3.5 w-3.5 text-neutral-400" />
+                        No date
+                    </DropdownMenuItem>
+                </>
+            )}
+        </>
+    );
 
     return (
         <motion.li
@@ -51,13 +77,56 @@ function TaskRow({ task }: { task: Task }) {
                 />
             </button>
 
-            <span
-                className={cn('flex-1 text-sm', task.isCompleted ? 'text-neutral-500 line-through' : 'text-stone-100')}
-            >
-                {task.text}
+            <span className="min-w-0 flex-1">
+                <span
+                    className={cn(
+                        'block text-sm',
+                        task.isCompleted ? 'text-neutral-500 line-through' : 'text-stone-100',
+                    )}
+                >
+                    {task.text}
+                </span>
+                {task.dueAt && (
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <button
+                                type="button"
+                                className={cn(
+                                    'mt-0.5 flex items-center gap-1 text-[11px] transition hover:underline',
+                                    task.isCompleted
+                                        ? 'text-neutral-600'
+                                        : DUE_TEXT[dueState(task.dueAt, task.dueHasTime)],
+                                )}
+                                aria-label={`Due ${formatDue(task.dueAt, task.dueHasTime)} — change due date`}
+                            >
+                                <CalendarDays className="h-3 w-3" aria-hidden />
+                                {formatDue(task.dueAt, task.dueHasTime)}
+                            </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="bg-black/90 backdrop-blur-md">
+                            {dueMenuItems}
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                )}
             </span>
 
             <div className="flex items-center gap-1 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+                {!task.dueAt && (
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <button
+                                type="button"
+                                className="rounded p-1 text-neutral-500 transition hover:bg-white/10 hover:text-neutral-200"
+                                aria-label="Set due date"
+                            >
+                                <CalendarDays className="h-3.5 w-3.5" />
+                            </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="bg-black/90 backdrop-blur-md">
+                            {dueMenuItems}
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                )}
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <button
@@ -96,11 +165,58 @@ function TaskRow({ task }: { task: Task }) {
     );
 }
 
+const PRIORITY_RANK: Record<Task['priority'], number> = { high: 0, medium: 1, low: 2 };
+
+const DUE_GROUPS: { id: DueState; label: string }[] = [
+    { id: 'overdue', label: 'Overdue' },
+    { id: 'today', label: 'Today' },
+    { id: 'upcoming', label: 'Upcoming' },
+];
+
+interface TaskGroup {
+    id: string;
+    label: string | null;
+    tasks: Task[];
+}
+
+/**
+ * Todoist-style date grouping, but only once it earns its keep: with no due dates in
+ * play the list stays flat. Completed tasks always sink to a Done group so the open
+ * list reads as the actual plan.
+ */
+function groupTasks(tasks: Task[]): TaskGroup[] {
+    const open = tasks.filter((task) => !task.isCompleted);
+    const done = tasks.filter((task) => task.isCompleted);
+    const groups: TaskGroup[] = [];
+
+    if (open.some((task) => task.dueAt)) {
+        const byState: Record<DueState, Task[]> = { overdue: [], today: [], upcoming: [] };
+        const undated: Task[] = [];
+        for (const task of open) {
+            if (task.dueAt) byState[dueState(task.dueAt, task.dueHasTime)].push(task);
+            else undated.push(task);
+        }
+        const byDueThenPriority = (a: Task, b: Task) =>
+            (a.dueAt?.getTime() ?? 0) - (b.dueAt?.getTime() ?? 0) ||
+            PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
+        for (const { id, label } of DUE_GROUPS) {
+            if (byState[id].length > 0) groups.push({ id, label, tasks: byState[id].sort(byDueThenPriority) });
+        }
+        if (undated.length > 0) groups.push({ id: 'undated', label: 'No date', tasks: undated });
+    } else if (open.length > 0) {
+        groups.push({ id: 'open', label: null, tasks: open });
+    }
+
+    if (done.length > 0) groups.push({ id: 'done', label: 'Done', tasks: done });
+    return groups;
+}
+
 export function TasksPanel() {
     const tasks = useAppStore((state) => state.tasks);
     const setTasksOpen = useAppStore((state) => state.setTasksOpen);
     const openCount = tasks.filter((task) => !task.isCompleted).length;
     const { enabled: resizable, size, resizing, onResizeStart } = useResizablePanel();
+    const groups = groupTasks(tasks);
 
     return (
         <motion.aside
@@ -149,9 +265,28 @@ export function TasksPanel() {
                         </li>
                     )}
                     <AnimatePresence initial={false}>
-                        {tasks.map((task) => (
-                            <TaskRow key={task.id} task={task} />
-                        ))}
+                        {groups.flatMap((group) => [
+                            ...(group.label
+                                ? [
+                                      <motion.li
+                                          key={`heading-${group.id}`}
+                                          layout
+                                          role="presentation"
+                                          initial={{ opacity: 0 }}
+                                          animate={{ opacity: 1 }}
+                                          exit={{ opacity: 0 }}
+                                          transition={{ duration: 0.15 }}
+                                          className={cn(
+                                              'px-2 pt-3 pb-1 text-[10px] font-medium tracking-wide uppercase first:pt-0',
+                                              group.id === 'overdue' ? 'text-rose-300/90' : 'text-neutral-500',
+                                          )}
+                                      >
+                                          {group.label}
+                                      </motion.li>,
+                                  ]
+                                : []),
+                            ...group.tasks.map((task) => <TaskRow key={task.id} task={task} />),
+                        ])}
                     </AnimatePresence>
                 </ul>
             </div>
