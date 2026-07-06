@@ -307,7 +307,8 @@ const relativeIn = sticky(String.raw`in\s+(\d+|an?)\s+(hours?|days?|weeks?)(?![A
 const nextWeek = sticky(String.raw`next\s+week(?![A-Za-z0-9])`, 'i');
 const nextWeekday = sticky(String.raw`next\s+(${WEEKDAY_SOURCE})(?![A-Za-z0-9])`, 'i');
 const weekday = sticky(String.raw`(${WEEKDAY_SOURCE})(?![A-Za-z0-9])`, 'i');
-const keywordDay = sticky(String.raw`(today|tod|tomorrow|tmr|tom|tonight)(?![A-Za-z0-9])`, 'i');
+// No `tom` abbreviation: it would swallow the name Tom in "email Tom".
+const keywordDay = sticky(String.raw`(today|tod|tomorrow|tmr|tonight)(?![A-Za-z0-9])`, 'i');
 
 /** A calendar day is valid only if the Date round-trips to the same month and day. */
 function validDay(year: number, month: number, day: number): boolean {
@@ -469,7 +470,7 @@ function matchKeywordDay(input: string, i: number, now: Date, today: Date): Date
         };
     }
 
-    const offset = keyword === 'tomorrow' || keyword === 'tmr' || keyword === 'tom' ? 1 : 0;
+    const offset = keyword === 'tomorrow' || keyword === 'tmr' ? 1 : 0;
     return {
         end,
         build: makeDueBuilder(new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset), now),

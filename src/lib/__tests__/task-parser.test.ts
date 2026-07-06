@@ -92,7 +92,8 @@ describe('parseTaskInput due dates', () => {
         expect(at('ship it tod').dueAt).toEqual(new Date(2024, 0, 3));
         expect(at('ship it tomorrow').dueAt).toEqual(new Date(2024, 0, 4));
         expect(at('ship it tmr').dueAt).toEqual(new Date(2024, 0, 4));
-        expect(at('ship it tom').dueAt).toEqual(new Date(2024, 0, 4));
+        // `tom` is deliberately not an abbreviation — it would swallow the name Tom.
+        expect(at('email Tom').dueAt).toBeNull();
         const parsed = at('ship it today');
         expect(parsed.dueHasTime).toBe(false);
         expect(parsed.text).toBe('ship it');
