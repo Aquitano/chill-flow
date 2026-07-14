@@ -41,7 +41,7 @@ export function deriveScenes(tracks: Track[]): Scene[] {
 
 export function tracksInScene(tracks: Track[], scene: string | null): Track[] {
     if (!scene) return tracks;
-    return tracks.filter((track) => track.category === scene);
+    return tracks.filter((track) => track.category?.trim() === scene);
 }
 
 /** Deterministic fallback art for tracks without a cover — varies by track id. */

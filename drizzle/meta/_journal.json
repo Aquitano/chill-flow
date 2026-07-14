@@ -50,6 +50,13 @@
       "when": 1783021048274,
       "tag": "0006_complex_moondragon",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1783288627570,
+      "tag": "0007_fantastic_abomination",
+      "breakpoints": true
     }
   ]
 }

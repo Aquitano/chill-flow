@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     cancelSessionInputSchema,
     completeSessionInputSchema,
+    createTaskInputSchema,
     startSessionInputSchema,
     trackLookupInputSchema,
     updatePreferencesInputSchema,
@@ -15,6 +16,45 @@ describe('backend validation', () => {
         });
 
         expect(result.success).toBe(false);
+    });
+
+    it('accepts a due date and time flag on task creation', () => {
+        const dueAt = new Date(2026, 6, 10, 17, 0);
+        const result = createTaskInputSchema.parse({
+            text: 'submit report',
+            dueAt,
+            dueHasTime: true,
+        });
+
+        expect(result.dueAt).toEqual(dueAt);
+        expect(result.dueHasTime).toBe(true);
+        expect(result.priority).toBe('medium');
+    });
+
+    it('drops a stray time flag on creation when no due date is given', () => {
+        const result = createTaskInputSchema.parse({ text: 'submit report', dueHasTime: true });
+        expect(result.dueAt).toBeUndefined();
+        expect(result.dueHasTime).toBe(false);
+    });
+
+    it('accepts a due date update and rejects a non-date dueAt', () => {
+        const dueAt = new Date(2026, 0, 5);
+        expect(updateTaskInputSchema.parse({ id: crypto.randomUUID(), dueAt })).toMatchObject({ dueAt });
+        expect(updateTaskInputSchema.safeParse({ id: crypto.randomUUID(), dueAt: '2026-01-05' }).success).toBe(false);
+    });
+
+    it('clears the time flag when a task update nulls the due date', () => {
+        const result = updateTaskInputSchema.parse({
+            id: crypto.randomUUID(),
+            dueAt: null,
+            dueHasTime: true,
+        });
+
+        expect(result).toMatchObject({ dueAt: null, dueHasTime: false });
+    });
+
+    it('accepts clearing the due date as the only updated field', () => {
+        expect(updateTaskInputSchema.safeParse({ id: crypto.randomUUID(), dueAt: null }).success).toBe(true);
     });
 
     it('rejects out-of-range preference updates', () => {

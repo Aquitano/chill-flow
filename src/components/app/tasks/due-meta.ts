@@ -1,0 +1,18 @@
+import type { DueState } from '@/lib/task-dates';
+
+/** Chip classes (border + tinted fill + text) for the composer's due-date pill. */
+export const DUE_CHIP: Record<DueState, string> = {
+    overdue: 'border-rose-400/30 bg-rose-400/10 text-rose-200',
+    today: 'border-ember/40 bg-ember/10 text-ember',
+    upcoming: 'border-white/15 bg-white/5 text-neutral-200',
+};
+
+/** Text colour only, for the inline due label on list rows. */
+export const DUE_TEXT: Record<DueState, string> = {
+    overdue: 'text-rose-300',
+    today: 'text-ember',
+    upcoming: 'text-neutral-400',
+};
+
+/** Inline highlight for a recognized date token in the composer input. */
+export const DUE_TOKEN_HIGHLIGHT = 'bg-emerald-500/30 text-emerald-50';

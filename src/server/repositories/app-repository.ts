@@ -11,7 +11,7 @@ import {
     Track,
     UserPreferences,
 } from '@/models/app';
-import { and, asc, desc, eq, isNotNull, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, ne, sql } from 'drizzle-orm';
 import { Database } from '../db/client';
 import {
     DEFAULT_POMODORO_SETTINGS,
@@ -70,9 +70,30 @@ type TrackWriteInput = {
 };
 
 export const defaultTasks: Task[] = [
-    { id: crypto.randomUUID(), text: 'Review notes', isCompleted: false, priority: 'medium' },
-    { id: crypto.randomUUID(), text: 'Practice coding', isCompleted: false, priority: 'high' },
-    { id: crypto.randomUUID(), text: 'Write summary', isCompleted: false, priority: 'low' },
+    {
+        id: crypto.randomUUID(),
+        text: 'Review notes',
+        isCompleted: false,
+        priority: 'medium',
+        dueAt: null,
+        dueHasTime: false,
+    },
+    {
+        id: crypto.randomUUID(),
+        text: 'Practice coding',
+        isCompleted: false,
+        priority: 'high',
+        dueAt: null,
+        dueHasTime: false,
+    },
+    {
+        id: crypto.randomUUID(),
+        text: 'Write summary',
+        isCompleted: false,
+        priority: 'low',
+        dueAt: null,
+        dueHasTime: false,
+    },
 ];
 
 const defaultPreferences: UserPreferences = {
@@ -112,7 +133,8 @@ function mapTask(row: typeof tasks.$inferSelect): Task {
         text: row.text,
         priority: row.priority as Task['priority'],
         isCompleted: row.isCompleted,
-        date: row.createdAt,
+        dueAt: row.dueAt,
+        dueHasTime: row.dueHasTime,
     };
 }
 
@@ -351,7 +373,11 @@ export const appRepository = {
         return storedTasks.map(mapTask);
     },
 
-    async createTask(database: Database, userId: string, input: Pick<Task, 'text' | 'priority'>) {
+    async createTask(
+        database: Database,
+        userId: string,
+        input: Pick<Task, 'text' | 'priority'> & Partial<Pick<Task, 'dueAt' | 'dueHasTime'>>,
+    ) {
         const [createdTask] = await database
             .insert(tasks)
             .values({
@@ -360,6 +386,8 @@ export const appRepository = {
                 text: input.text,
                 priority: input.priority,
                 isCompleted: false,
+                dueAt: input.dueAt ?? null,
+                dueHasTime: input.dueAt == null ? false : (input.dueHasTime ?? false),
             })
             .returning();
 
@@ -374,12 +402,17 @@ export const appRepository = {
         database: Database,
         userId: string,
         taskId: string,
-        input: Partial<Pick<Task, 'text' | 'priority' | 'isCompleted'>>,
+        input: Partial<Pick<Task, 'text' | 'priority' | 'isCompleted' | 'dueAt' | 'dueHasTime'>>,
     ) {
         const [updatedTask] = await database
             .update(tasks)
             .set({
                 ...input,
+                ...(input.dueAt === null
+                    ? { dueHasTime: false }
+                    : input.dueAt === undefined && input.dueHasTime === true
+                      ? { dueHasTime: sql<boolean>`case when ${tasks.dueAt} is null then false else true end` }
+                      : {}),
                 updatedAt: new Date(),
             })
             .where(and(eq(tasks.userId, userId), eq(tasks.id, taskId)))

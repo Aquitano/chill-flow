@@ -5,21 +5,25 @@ import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
+    DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useCreateTaskMutation } from '@/hooks/use-app-data';
-import { parseTaskInput, resolvePriority, stripPriorityTokens, type TaskPriority } from '@/lib/task-parser';
+import { dueState, formatDue, quickDueOptions } from '@/lib/task-dates';
+import { parseTaskInput, resolvePriority, stripSpans, stripPriorityTokens, type TaskPriority } from '@/lib/task-parser';
 import { cn } from '@/lib/utils';
-import { Check, CornerDownLeft, Flag, Plus, X } from 'lucide-react';
+import { CalendarDays, Check, CornerDownLeft, Flag, Plus, X } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
+import { DUE_CHIP, DUE_TOKEN_HIGHLIGHT } from './due-meta';
 import { PRIORITY_META, PRIORITY_OPTIONS } from './priority-meta';
-import { PriorityHighlightInput } from './PriorityHighlightInput';
+import { TokenHighlightInput } from './TokenHighlightInput';
 
 export function TaskComposer() {
     const createTask = useCreateTaskMutation();
 
     const [value, setValue] = useState('');
     const [manualPriority, setManualPriority] = useState<TaskPriority>('medium');
+    const [manualDue, setManualDue] = useState<{ dueAt: Date; hasTime: boolean } | null>(null);
     const [expanded, setExpanded] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
     const hintId = useId();
@@ -40,11 +44,22 @@ export function TaskComposer() {
     // highlight, and the created row all agree on the colour.
     const isReset = tokenActive && parsed.priority === null;
 
+    // A typed date wins over a manual pick, mirroring how priority tokens behave.
+    const dateToken = parsed.tokens.filter((token) => token.type === 'date').at(-1) ?? null;
+    const effectiveDue = parsed.dueAt ? { dueAt: parsed.dueAt, hasTime: parsed.dueHasTime } : manualDue;
+
+    const highlights = parsed.tokens.map((token) => ({
+        start: token.start,
+        end: token.end,
+        className: token.type === 'priority' ? effectiveMeta.token : DUE_TOKEN_HIGHLIGHT,
+    }));
+
     const canSubmit = parsed.text.length > 0 && !createTask.isPending;
 
     const reset = () => {
         setValue('');
         setManualPriority('medium');
+        setManualDue(null);
     };
 
     const handleAdd = () => {
@@ -52,7 +67,12 @@ export function TaskComposer() {
             return;
         }
         createTask.mutate(
-            { text: parsed.text, priority: resolvePriority(parsed, manualPriority) },
+            {
+                text: parsed.text,
+                priority: effectivePriority,
+                dueAt: effectiveDue?.dueAt ?? null,
+                dueHasTime: effectiveDue?.hasTime ?? false,
+            },
             {
                 // Keep the card open and focused after a successful add so the next task
                 // can be typed immediately; only clear the draft once it resolves so a
@@ -81,6 +101,21 @@ export function TaskComposer() {
         inputRef.current?.focus();
     };
 
+    // Same rule for dates: a manual pick strips typed date tokens so they can't re-take
+    // control, and "No date" clears both sources.
+    const selectDue = (dueAt: Date | null) => {
+        setManualDue(dueAt ? { dueAt, hasTime: false } : null);
+        if (parsed.dueAt) {
+            setValue(
+                stripSpans(
+                    value,
+                    parsed.tokens.filter((token) => token.type === 'date'),
+                ),
+            );
+        }
+        inputRef.current?.focus();
+    };
+
     if (!expanded) {
         return (
             <button
@@ -96,20 +131,27 @@ export function TaskComposer() {
         );
     }
 
-    const chipLabel = tokenActive
+    const priorityChipLabel = tokenActive
         ? `P${parsed.token?.level} · ${isReset ? 'Default' : effectiveMeta.label}`
         : effectiveMeta.label;
-    const hintText = tokenActive
-        ? isReset
-            ? `${parsed.token?.raw} sets default priority`
-            : `${parsed.token?.raw} → ${effectiveMeta.label} priority`
-        : 'Type p1–p4 to set priority';
+
+    const confirmations: string[] = [];
+    if (tokenActive) {
+        confirmations.push(
+            isReset
+                ? `${parsed.token?.raw} sets default priority`
+                : `${parsed.token?.raw} → ${effectiveMeta.label} priority`,
+        );
+    }
+    if (dateToken && parsed.dueAt) {
+        confirmations.push(`${dateToken.raw} → ${formatDue(parsed.dueAt, parsed.dueHasTime)}`);
+    }
 
     return (
         <div
             className="mb-4 rounded-xl border border-white/15 bg-neutral-900/80 p-3 shadow-lg"
             // Escape closes the card from anywhere inside it (input, chip, footer). The
-            // priority menu lives in a portal, so its own Escape-to-close doesn't reach here.
+            // chip menus live in portals, so their own Escape-to-close doesn't reach here.
             onKeyDown={(event) => {
                 if (event.key === 'Escape') {
                     event.preventDefault();
@@ -117,11 +159,10 @@ export function TaskComposer() {
                 }
             }}
         >
-            <PriorityHighlightInput
+            <TokenHighlightInput
                 value={value}
                 onChange={setValue}
-                token={parsed.token}
-                tokenClassName={parsed.token ? effectiveMeta.token : undefined}
+                highlights={highlights}
                 placeholder="Task name"
                 inputRef={inputRef}
                 ariaLabel="Task name"
@@ -144,11 +185,11 @@ export function TaskComposer() {
                                     'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition',
                                     effectiveMeta.chip,
                                 )}
-                                aria-label={`Priority: ${chipLabel}`}
+                                aria-label={`Priority: ${priorityChipLabel}`}
                                 aria-describedby={hintId}
                             >
                                 <Flag className="h-3.5 w-3.5" />
-                                {chipLabel}
+                                {priorityChipLabel}
                             </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent
@@ -177,19 +218,70 @@ export function TaskComposer() {
                     <span
                         id={hintId}
                         role="tooltip"
-                        className="pointer-events-none absolute bottom-full left-0 z-40 mb-1.5 whitespace-nowrap rounded-md border border-white/10 bg-neutral-800 px-2 py-1 text-[11px] text-neutral-200 opacity-0 shadow-md transition-opacity duration-150 group-hover/hint:opacity-100 group-focus-within/hint:opacity-100"
+                        className="pointer-events-none absolute bottom-full left-0 z-40 mb-1.5 rounded-md border border-white/10 bg-neutral-800 px-2 py-1 text-[11px] whitespace-nowrap text-neutral-200 opacity-0 shadow-md transition-opacity duration-150 group-focus-within/hint:opacity-100 group-hover/hint:opacity-100"
                     >
-                        Type <span className="font-mono">p1</span>–<span className="font-mono">p4</span> to set priority
+                        Type <span className="font-mono">p1</span>–<span className="font-mono">p4</span> or a date like{' '}
+                        <span className="font-mono">tomorrow 5pm</span>
                     </span>
                 </div>
 
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <button
+                            type="button"
+                            className={cn(
+                                'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition',
+                                effectiveDue
+                                    ? DUE_CHIP[dueState(effectiveDue.dueAt, effectiveDue.hasTime)]
+                                    : 'border-white/15 bg-white/5 text-neutral-400 hover:text-neutral-200',
+                            )}
+                            aria-label={
+                                effectiveDue
+                                    ? `Due date: ${formatDue(effectiveDue.dueAt, effectiveDue.hasTime)}`
+                                    : 'Set due date'
+                            }
+                        >
+                            <CalendarDays className="h-3.5 w-3.5" />
+                            {effectiveDue ? formatDue(effectiveDue.dueAt, effectiveDue.hasTime) : 'Date'}
+                        </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                        align="start"
+                        className="bg-black/90 backdrop-blur-md"
+                        onCloseAutoFocus={(event) => {
+                            event.preventDefault();
+                            inputRef.current?.focus();
+                        }}
+                    >
+                        {quickDueOptions().map((option) => (
+                            <DropdownMenuItem key={option.id} onSelect={() => selectDue(option.dueAt)}>
+                                <CalendarDays className="h-3.5 w-3.5 text-neutral-400" />
+                                {option.label}
+                            </DropdownMenuItem>
+                        ))}
+                        {effectiveDue && (
+                            <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onSelect={() => selectDue(null)}>
+                                    <X className="h-3.5 w-3.5 text-neutral-400" />
+                                    No date
+                                </DropdownMenuItem>
+                            </>
+                        )}
+                    </DropdownMenuContent>
+                </DropdownMenu>
+
                 {/* Always-mounted live region: text only appears once a token is recognized,
                     so screen readers announce the confirmation as a mutation in a stable node. */}
-                <span role="status" aria-live="polite" className="inline-flex items-center gap-1 text-xs text-neutral-200">
-                    {tokenActive && (
+                <span
+                    role="status"
+                    aria-live="polite"
+                    className="inline-flex items-center gap-1 text-xs text-neutral-200"
+                >
+                    {confirmations.length > 0 && (
                         <>
                             <Check className="h-3 w-3 text-emerald-400" />
-                            {hintText}
+                            {confirmations.join(' · ')}
                         </>
                     )}
                 </span>

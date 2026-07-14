@@ -3,6 +3,7 @@
 import { TrackArt } from '@/components/app/TrackArt';
 import { deriveScenes, formatDuration, tracksInScene } from '@/lib/tracks';
 import { cn } from '@/lib/utils';
+import type { Track } from '@/models/app';
 import { useAppStore } from '@/store/app-store';
 import { motion } from 'framer-motion';
 import { Music, Search } from 'lucide-react';
@@ -51,6 +52,71 @@ export function LibraryPanel() {
                   return tokens.every((token) => haystack.includes(token));
               });
 
+    // Unfiltered "All" gets scene groups so a large catalog stays scannable;
+    // any chip or search collapses back to the flat list.
+    const uncategorized = tracks.filter((track) => !track.category?.trim());
+    const groupedTracks =
+        activeScene === null && tokens.length === 0 && scenes.length > 1
+            ? [
+                  ...scenes.map((scene, index) => ({
+                      key: `scene:${scene.id}`,
+                      headingId: `library-group-scene-${index}`,
+                      label: scene.label,
+                      tracks: tracksInScene(tracks, scene.id),
+                  })),
+                  ...(uncategorized.length > 0
+                      ? [
+                            {
+                                key: 'uncategorized',
+                                headingId: 'library-group-uncategorized',
+                                label: 'Other',
+                                tracks: uncategorized,
+                            },
+                        ]
+                      : []),
+              ]
+            : null;
+
+    const renderTrack = (track: Track) => {
+        const active = currentTrack?.id === track.id;
+        return (
+            <button
+                key={track.id}
+                type="button"
+                role="option"
+                aria-selected={active}
+                onClick={() => {
+                    setCurrentTrack(track);
+                    setIsPlaying(true);
+                }}
+                className={cn(
+                    'focus-visible:outline-ember flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2',
+                    active ? 'bg-white/8' : 'hover:bg-white/5',
+                )}
+            >
+                <TrackArt track={track} className="h-10 w-10" />
+                <span className="min-w-0 flex-1">
+                    <span className={cn('block truncate text-sm font-medium', active ? 'text-ember' : 'text-ink')}>
+                        {track.title}
+                    </span>
+                    <span className="text-ink-dim block truncate text-xs">{track.artist}</span>
+                </span>
+                {active && isPlaying && (
+                    <span className="eq-playing flex shrink-0 items-end gap-[2px]" aria-hidden>
+                        {[0, 0.2, 0.1].map((delay, index) => (
+                            <span
+                                key={index}
+                                className="eq-bar bg-ember h-3 w-[2px] rounded-full"
+                                style={{ animationDelay: `${delay}s` }}
+                            />
+                        ))}
+                    </span>
+                )}
+                <span className="text-ink-dim shrink-0 text-xs tabular-nums">{formatDuration(track.duration)}</span>
+            </button>
+        );
+    };
+
     return (
         <motion.section
             id="dock-panel-library"
@@ -64,7 +130,7 @@ export function LibraryPanel() {
         >
             {scenes.length > 0 && (
                 <div
-                    className="scrollbar-custom flex items-center gap-1.5 overflow-x-auto px-3 pt-3 pb-1.5"
+                    className="scrollbar-custom flex items-center gap-1.5 overflow-x-auto [mask-image:linear-gradient(to_right,black,black_calc(100%-1.5rem),transparent)] px-3 pt-3 pb-1.5"
                     role="group"
                     aria-label="Scenes"
                 >
@@ -114,54 +180,29 @@ export function LibraryPanel() {
                         <div
                             role="listbox"
                             aria-label="Tracks"
-                            className="scrollbar-custom max-h-[38vh] space-y-0.5 overflow-y-auto p-2"
+                            className="scrollbar-custom max-h-[38vh] space-y-0.5 overflow-y-auto px-2 pb-2"
                         >
-                            {filteredTracks.map((track) => {
-                                const active = currentTrack?.id === track.id;
-                                return (
-                                    <button
-                                        key={track.id}
-                                        type="button"
-                                        role="option"
-                                        aria-selected={active}
-                                        onClick={() => {
-                                            setCurrentTrack(track);
-                                            setIsPlaying(true);
-                                        }}
-                                        className={cn(
-                                            'focus-visible:outline-ember flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2',
-                                            active ? 'bg-white/8' : 'hover:bg-white/5',
-                                        )}
-                                    >
-                                        <TrackArt track={track} className="h-10 w-10" />
-                                        <span className="min-w-0 flex-1">
-                                            <span
-                                                className={cn(
-                                                    'block truncate text-sm font-medium',
-                                                    active ? 'text-ember' : 'text-ink',
-                                                )}
-                                            >
-                                                {track.title}
-                                            </span>
-                                            <span className="text-ink-dim block truncate text-xs">{track.artist}</span>
-                                        </span>
-                                        {active && isPlaying && (
-                                            <span className="eq-playing flex shrink-0 items-end gap-[2px]" aria-hidden>
-                                                {[0, 0.2, 0.1].map((delay, index) => (
-                                                    <span
-                                                        key={index}
-                                                        className="eq-bar bg-ember h-3 w-[2px] rounded-full"
-                                                        style={{ animationDelay: `${delay}s` }}
-                                                    />
-                                                ))}
-                                            </span>
-                                        )}
-                                        <span className="text-ink-dim shrink-0 text-xs tabular-nums">
-                                            {formatDuration(track.duration)}
-                                        </span>
-                                    </button>
-                                );
-                            })}
+                            {groupedTracks
+                                ? groupedTracks.map((group) => (
+                                      <div
+                                          key={group.key}
+                                          role="group"
+                                          aria-labelledby={group.headingId}
+                                          className="space-y-0.5"
+                                      >
+                                          <p
+                                              id={group.headingId}
+                                              className="text-ink-dim sticky top-0 z-10 bg-black/70 px-2.5 pt-2 pb-1 text-[10px] font-medium tracking-wide uppercase backdrop-blur-md"
+                                          >
+                                              {group.label}
+                                              <span className="ml-1.5 normal-case opacity-60">
+                                                  {group.tracks.length}
+                                              </span>
+                                          </p>
+                                          {group.tracks.map(renderTrack)}
+                                      </div>
+                                  ))
+                                : filteredTracks.map(renderTrack)}
                         </div>
                     )}
                 </>
