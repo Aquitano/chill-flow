@@ -14,7 +14,9 @@ import { describeApiError } from '@/lib/api';
 import {
     BUILTIN_MIXES,
     deleteLocalMix,
+    dismissMixImport,
     playableMixes,
+    readImportDismissedIds,
     readLocalMixes,
     saveLocalMix,
     updateLocalMix,
@@ -26,7 +28,7 @@ import { AmbientMix, AmbientSound } from '@/models/app';
 import { useUser } from '@clerk/nextjs';
 import { motion } from 'framer-motion';
 import { Check, Plus, Power, Search, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 // Below this the chips are easy to scan by eye; a search field would be clutter.
@@ -58,6 +60,71 @@ export function AmbiencePanel() {
     useEffect(() => {
         if (soundsQuery.data) mixer.setSounds(soundsQuery.data);
     }, [mixer, soundsQuery.data]);
+
+    // Signed in with mixes from a signed-out session on this device: offer (once per
+    // panel open, and never again for ids the user declined) to move them to the account.
+    const importOfferedRef = useRef(false);
+    const importLocalMixes = async () => {
+        const accountMixes = mixesQuery.data ?? [];
+        const takenNames = new Set(accountMixes.map((mix) => mix.name.toLowerCase()));
+        const imported: string[] = [];
+        let failureMessage: string | null = null;
+
+        for (const mix of readLocalMixes()) {
+            if (takenNames.has(mix.name.toLowerCase())) continue;
+            try {
+                await saveMix.mutateAsync({ name: mix.name, levels: mix.levels });
+                takenNames.add(mix.name.toLowerCase());
+                imported.push(mix.id);
+            } catch (error) {
+                // Typically the account mix cap; either way the rest would fail too.
+                failureMessage = describeApiError(error);
+                break;
+            }
+        }
+
+        imported.forEach((id) => deleteLocalMix(id));
+        const remaining = readLocalMixes();
+        setLocalMixes(remaining);
+        // Whatever stayed local (name duplicates, cap overflow) shouldn't prompt again.
+        dismissMixImport(remaining.map((mix) => mix.id));
+
+        if (failureMessage) {
+            toast.error(
+                imported.length > 0
+                    ? `Imported ${imported.length} of your mixes, then hit a snag`
+                    : "Couldn't import your mixes",
+                { description: failureMessage },
+            );
+            return;
+        }
+        toast.success(
+            imported.length === 1 ? 'Imported 1 mix to your account' : `Imported ${imported.length} mixes to your account`,
+            remaining.length > 0
+                ? { description: `${remaining.length} stayed on this device (a mix with the same name already exists).` }
+                : undefined,
+        );
+    };
+
+    useEffect(() => {
+        if (importOfferedRef.current || !isSignedIn || !mixesQuery.data) return;
+        const localOnly = readLocalMixes();
+        if (localOnly.length === 0) return;
+        const dismissed = new Set(readImportDismissedIds());
+        if (localOnly.every((mix) => dismissed.has(mix.id))) return;
+
+        importOfferedRef.current = true;
+        const count = localOnly.length;
+        toast(count === 1 ? 'You have 1 mix saved on this device' : `You have ${count} mixes saved on this device`, {
+            id: 'ambient-import',
+            description: 'Add them to your account so they follow you everywhere?',
+            duration: 10_000,
+            action: { label: 'Import', onClick: () => void importLocalMixes() },
+            cancel: { label: 'Not now', onClick: () => dismissMixImport(localOnly.map((mix) => mix.id)) },
+        });
+        // importLocalMixes is deliberately not a dep: it changes identity each render and
+        // the offer must fire once per panel open, which importOfferedRef already guards.
+    }, [isSignedIn, mixesQuery.data]);
 
     // Buffer fetch/decode failures surface as engine events, not query errors.
     useEffect(() => {
