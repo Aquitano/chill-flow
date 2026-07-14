@@ -8,6 +8,7 @@ import {
     useAmbientSoundsQuery,
     useDeleteAmbientMixMutation,
     useSaveAmbientMixMutation,
+    useUpdateAmbientMixMutation,
 } from '@/hooks/use-app-data';
 import { describeApiError } from '@/lib/api';
 import {
@@ -16,6 +17,7 @@ import {
     playableMixes,
     readLocalMixes,
     saveLocalMix,
+    updateLocalMix,
 } from '@/lib/audio/ambient-presets';
 import { AmbientSlot } from '@/lib/audio/ambient';
 import { useAmbient } from '@/lib/audio/useAmbient';
@@ -41,10 +43,14 @@ export function AmbiencePanel() {
     const { isSignedIn } = useUser();
     const mixesQuery = useAmbientMixesQuery(Boolean(isSignedIn));
     const saveMix = useSaveAmbientMixMutation();
+    const updateMix = useUpdateAmbientMixMutation();
     const deleteMix = useDeleteAmbientMixMutation();
 
     const [localMixes, setLocalMixes] = useState<AmbientMix[]>(() => readLocalMixes());
     const [activeMixId, setActiveMixId] = useState<string | null>(null);
+    // The applied mix stays highlighted after board tweaks; this flags it as edited so
+    // the user can tell an unsaved variation from the mix as saved.
+    const [mixEdited, setMixEdited] = useState(false);
     const [mixName, setMixName] = useState('');
     const [presetQuery, setPresetQuery] = useState('');
 
@@ -77,17 +83,51 @@ export function AmbiencePanel() {
     const applyMix = (mix: AmbientMix) => {
         mixer.applyMix(mix.levels);
         setActiveMixId(mix.id);
+        setMixEdited(false);
+    };
+
+    // Board edits no longer deselect the applied mix — they mark it edited instead,
+    // which unlocks the "Update" path in the footer for the user's own mixes.
+    const markBoardEdited = () => {
+        if (activeMixId) setMixEdited(true);
     };
 
     const handleDeleteMix = (mix: AmbientMix) => {
-        if (activeMixId === mix.id) setActiveMixId(null);
+        if (activeMixId === mix.id) {
+            setActiveMixId(null);
+            setMixEdited(false);
+        }
+
+        // Deletion is one mis-click away from "apply", so it always offers an undo
+        // (which re-saves the mix under a fresh id) instead of a blocking confirm.
+        const undoDelete = () => {
+            if (mix.id.startsWith('local-')) {
+                saveLocalMix(mix.name, mix.levels);
+                setLocalMixes(readLocalMixes());
+                return;
+            }
+            saveMix.mutate(
+                { name: mix.name, levels: mix.levels },
+                {
+                    onError: (error) =>
+                        toast.error("Couldn't restore the mix", { description: describeApiError(error) }),
+                },
+            );
+        };
+        const offerUndo = () =>
+            toast(`Deleted “${mix.name}”`, { action: { label: 'Undo', onClick: undoDelete } });
+
         if (mix.id.startsWith('local-')) {
             setLocalMixes(deleteLocalMix(mix.id));
+            offerUndo();
             return;
         }
         deleteMix.mutate(
             { id: mix.id },
-            { onError: (error) => toast.error("Couldn't delete the mix", { description: describeApiError(error) }) },
+            {
+                onSuccess: offerUndo,
+                onError: (error) => toast.error("Couldn't delete the mix", { description: describeApiError(error) }),
+            },
         );
     };
 
@@ -102,6 +142,7 @@ export function AmbiencePanel() {
                 {
                     onSuccess: (mix) => {
                         setActiveMixId(mix.id);
+                        setMixEdited(false);
                         setMixName('');
                     },
                     onError: (error) => toast.error("Couldn't save the mix", { description: describeApiError(error) }),
@@ -117,10 +158,48 @@ export function AmbiencePanel() {
         }
         setLocalMixes(readLocalMixes());
         setActiveMixId(mix.id);
+        setMixEdited(false);
         setMixName('');
     };
 
+    const handleUpdateMix = (mix: AmbientMix) => {
+        const levels = mixer.currentLevels();
+        if (Object.keys(levels).length === 0) return;
+
+        if (mix.id.startsWith('local-')) {
+            const updated = updateLocalMix(mix.id, mix.name, levels);
+            if (!updated) {
+                toast.error("Couldn't update the mix", { description: 'Local mix storage is unavailable.' });
+                return;
+            }
+            setLocalMixes(readLocalMixes());
+            setMixEdited(false);
+            return;
+        }
+
+        updateMix.mutate(
+            { id: mix.id, name: mix.name, levels },
+            {
+                onSuccess: (updated) => {
+                    if (!updated) {
+                        toast.error("Couldn't update the mix", {
+                            description: 'It may have been deleted on another device.',
+                        });
+                        return;
+                    }
+                    setMixEdited(false);
+                },
+                onError: (error) => toast.error("Couldn't update the mix", { description: describeApiError(error) }),
+            },
+        );
+    };
+
     const boardHasSound = board.some((slot) => slot && !slot.muted);
+    const appliedMix = activeMixId ? presets.find((mix) => mix.id === activeMixId) : undefined;
+    // Typing a name always saves a new mix; an empty input on an edited own mix updates it.
+    const updateTarget = mixEdited && appliedMix && !appliedMix.id.startsWith('builtin-') ? appliedMix : undefined;
+    const updateMode = Boolean(updateTarget) && !mixName.trim();
+    const savePending = saveMix.isPending || updateMix.isPending;
 
     // Built-ins come first in `presets`; the divider marks where the user's own mixes begin.
     const builtinVisible = visiblePresets.filter((mix) => mix.id.startsWith('builtin-'));
@@ -128,13 +207,14 @@ export function AmbiencePanel() {
 
     const renderPresetChip = (mix: AmbientMix) => {
         const isActive = activeMixId === mix.id;
+        const isEdited = isActive && mixEdited;
         const deletable = !mix.id.startsWith('builtin-');
         return (
             <span key={mix.id} className="group relative shrink-0">
                 <button
                     type="button"
-                    role="option"
-                    aria-selected={isActive}
+                    aria-pressed={isActive}
+                    aria-label={isEdited ? `${mix.name} (edited)` : undefined}
                     onClick={() => applyMix(mix)}
                     className={cn(
                         'focus-visible:outline-ember rounded-full border px-3 py-1 text-xs whitespace-nowrap transition-colors focus-visible:outline-2',
@@ -142,9 +222,13 @@ export function AmbiencePanel() {
                         isActive
                             ? 'border-ember/50 bg-ember/15 text-ember'
                             : 'text-ink-mid hover:text-ink border-white/10 bg-white/5 hover:bg-white/10',
+                        isEdited && 'border-dashed',
                     )}
                 >
-                    {mix.name}
+                    <span className="flex items-center gap-1.5">
+                        {mix.name}
+                        {isEdited && <span aria-hidden className="bg-ember h-1 w-1 rounded-full" />}
+                    </span>
                 </button>
                 {deletable && (
                     <button
@@ -197,6 +281,7 @@ export function AmbiencePanel() {
                             <Search size={13} className="text-ink-dim shrink-0" aria-hidden />
                             <input
                                 type="text"
+                                name="preset-search"
                                 value={presetQuery}
                                 onChange={(event) => setPresetQuery(event.target.value)}
                                 placeholder="Search presets…"
@@ -212,8 +297,15 @@ export function AmbiencePanel() {
                     ) : (
                         <div
                             className="scrollbar-custom flex gap-1.5 overflow-x-auto [mask-image:linear-gradient(to_right,black,black_calc(100%-1.5rem),transparent)] pb-1.5"
-                            role="listbox"
+                            role="group"
                             aria-label="Presets"
+                            // Plain vertical wheel input scrolls the strip; trackpads and
+                            // touch already pan horizontally natively.
+                            onWheel={(event) => {
+                                if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
+                                    event.currentTarget.scrollLeft += event.deltaY;
+                                }
+                            }}
                         >
                             {builtinVisible.map(renderPresetChip)}
                             {builtinVisible.length > 0 && savedVisible.length > 0 && (
@@ -241,7 +333,7 @@ export function AmbiencePanel() {
                         : 'No ambient sounds are available yet.'}
                 </p>
             ) : (
-                <ul className="flex justify-between gap-1 px-4 py-4">
+                <ul className="scrollbar-custom flex justify-between gap-1 overflow-x-auto px-4 py-4">
                     {board.map((slot, index) => (
                         <BoardSlot
                             key={slot ? slot.soundId : `empty-${index}`}
@@ -250,21 +342,27 @@ export function AmbiencePanel() {
                             powered={powered}
                             available={available}
                             onAdd={(soundId) => {
-                                setActiveMixId(null);
+                                markBoardEdited();
                                 mixer.addSound(soundId);
                             }}
                             onRemove={() => {
-                                setActiveMixId(null);
+                                markBoardEdited();
                                 mixer.removeSlot(index);
                             }}
                             onToggleMute={() => {
-                                setActiveMixId(null);
+                                markBoardEdited();
                                 // Waking a single layer while the bus is off should make sound.
                                 if (!powered && slot?.muted) mixer.setPowered(true);
                                 mixer.toggleSlotMute(index);
                             }}
                             onVolume={(volume) => {
-                                setActiveMixId(null);
+                                markBoardEdited();
+                                // A fader move expresses "I want to hear this" — wake the
+                                // bus and the layer instead of adjusting silence. Read the
+                                // mixer directly: drag events can outpace the render cycle,
+                                // and a stale closure would double-toggle the mute.
+                                if (!mixer.isPowered()) mixer.setPowered(true);
+                                if (mixer.getBoard()[index]?.muted) mixer.toggleSlotMute(index);
                                 mixer.setSlotVolume(index, volume);
                             }}
                         />
@@ -277,14 +375,20 @@ export function AmbiencePanel() {
                     className="flex items-center gap-2 border-t border-white/5 px-4 py-2.5"
                     onSubmit={(event) => {
                         event.preventDefault();
-                        handleSaveMix();
+                        if (updateMode && updateTarget) {
+                            handleUpdateMix(updateTarget);
+                        } else {
+                            handleSaveMix();
+                        }
                     }}
                 >
                     <input
                         type="text"
+                        name="mix-name"
+                        autoComplete="off"
                         value={mixName}
                         onChange={(event) => setMixName(event.target.value)}
-                        placeholder="Name this mix"
+                        placeholder={updateMode ? 'Or save as a new mix…' : 'Name this mix'}
                         maxLength={40}
                         disabled={!boardHasSound}
                         aria-label="Mix name"
@@ -292,11 +396,19 @@ export function AmbiencePanel() {
                     />
                     <button
                         type="submit"
-                        disabled={!boardHasSound || !mixName.trim() || saveMix.isPending}
-                        className="border-ember/40 bg-ember/15 text-ember hover:bg-ember/25 focus-visible:outline-ember flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-colors focus-visible:outline-2 disabled:pointer-events-none disabled:opacity-40"
+                        disabled={!boardHasSound || savePending || (!updateMode && !mixName.trim())}
+                        className="border-ember/40 bg-ember/15 text-ember hover:bg-ember/25 focus-visible:outline-ember flex max-w-[55%] items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-colors focus-visible:outline-2 disabled:pointer-events-none disabled:opacity-40"
                     >
-                        <Check size={12} aria-hidden />
-                        Save mix
+                        <Check size={12} className="shrink-0" aria-hidden />
+                        <span className="truncate">
+                            {savePending
+                                ? updateMode
+                                    ? 'Updating…'
+                                    : 'Saving…'
+                                : updateMode && updateTarget
+                                  ? `Update “${updateTarget.name}”`
+                                  : 'Save mix'}
+                        </span>
                     </button>
                 </form>
             )}
@@ -375,7 +487,7 @@ function BoardSlot({
                 type="button"
                 aria-label={`Remove ${sound.label}`}
                 onClick={onRemove}
-                className="bg-night-2 text-ink-dim hover:text-ink focus-visible:outline-ember absolute -top-1.5 -right-0.5 z-10 rounded-full p-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2"
+                className="bg-night-2 text-ink-dim hover:text-ink focus-visible:outline-ember pointer-coarse:opacity-100 absolute -top-1.5 -right-0.5 z-10 rounded-full p-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2"
             >
                 <X size={11} aria-hidden />
             </button>

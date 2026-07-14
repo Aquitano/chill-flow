@@ -75,6 +75,21 @@ export function saveLocalMix(name: string, levels: Record<string, number>): Ambi
     }
 }
 
+export function updateLocalMix(id: string, name: string, levels: Record<string, number>): AmbientMix | null {
+    const mixes = readLocalMixes();
+    const index = mixes.findIndex((mix) => mix.id === id);
+    if (index === -1) return null;
+    const updated: AmbientMix = { id, name, levels };
+    const next = [...mixes];
+    next[index] = updated;
+    try {
+        localStorage.setItem(LOCAL_MIXES_KEY, JSON.stringify(next));
+        return updated;
+    } catch {
+        return null;
+    }
+}
+
 export function deleteLocalMix(id: string): AmbientMix[] {
     const remaining = readLocalMixes().filter((mix) => mix.id !== id);
     try {

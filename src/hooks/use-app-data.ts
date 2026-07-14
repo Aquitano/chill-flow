@@ -55,6 +55,18 @@ export function useSaveAmbientMixMutation() {
     });
 }
 
+export function useUpdateAmbientMixMutation() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (input: { id: string; name: string; levels: Record<string, number> }) =>
+            api.ambient.updateMix(input),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: queryKeys.ambientMixes });
+        },
+    });
+}
+
 export function useDeleteAmbientMixMutation() {
     const queryClient = useQueryClient();
 

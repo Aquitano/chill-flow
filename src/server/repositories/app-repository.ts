@@ -349,6 +349,21 @@ export const appRepository = {
         return mapAmbientMix(created);
     },
 
+    async updateAmbientMix(
+        database: Database,
+        userId: string,
+        mixId: string,
+        input: Pick<AmbientMix, 'name' | 'levels'>,
+    ): Promise<AmbientMix | null> {
+        const [updated] = await database
+            .update(ambientMixes)
+            .set({ name: input.name, levels: input.levels })
+            .where(and(eq(ambientMixes.userId, userId), eq(ambientMixes.id, mixId)))
+            .returning();
+
+        return updated ? mapAmbientMix(updated) : null;
+    },
+
     async deleteAmbientMix(database: Database, userId: string, mixId: string) {
         const deleted = await database
             .delete(ambientMixes)

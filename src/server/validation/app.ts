@@ -137,6 +137,10 @@ export const saveAmbientMixInputSchema = z.object({
     levels: ambientLevelsSchema,
 });
 
+export const updateAmbientMixInputSchema = saveAmbientMixInputSchema.extend({
+    id: z.uuid(),
+});
+
 export const deleteAmbientMixInputSchema = z.object({
     id: z.uuid(),
 });

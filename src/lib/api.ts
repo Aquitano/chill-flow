@@ -141,6 +141,8 @@ export const api = {
         listMixes: () => unwrap<AmbientMix[]>(client.ambient.listMixes.$get()),
         saveMix: (input: { name: string; levels: Record<string, number> }) =>
             unwrap<AmbientMix>(client.ambient.saveMix.$post(input)),
+        updateMix: (input: { id: string; name: string; levels: Record<string, number> }) =>
+            unwrap<AmbientMix | null>(client.ambient.updateMix.$post(input)),
         deleteMix: (input: { id: string }) => unwrap<{ success: boolean }>(client.ambient.deleteMix.$post(input)),
     },
     preferences: {
