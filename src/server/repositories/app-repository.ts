@@ -11,7 +11,7 @@ import {
     Track,
     UserPreferences,
 } from '@/models/app';
-import { and, asc, desc, eq, isNotNull, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, ne, sql } from 'drizzle-orm';
 import { Database } from '../db/client';
 import {
     DEFAULT_POMODORO_SETTINGS,
@@ -387,7 +387,7 @@ export const appRepository = {
                 priority: input.priority,
                 isCompleted: false,
                 dueAt: input.dueAt ?? null,
-                dueHasTime: input.dueHasTime ?? false,
+                dueHasTime: input.dueAt == null ? false : (input.dueHasTime ?? false),
             })
             .returning();
 
@@ -408,6 +408,11 @@ export const appRepository = {
             .update(tasks)
             .set({
                 ...input,
+                ...(input.dueAt === null
+                    ? { dueHasTime: false }
+                    : input.dueAt === undefined && input.dueHasTime === true
+                      ? { dueHasTime: sql<boolean>`case when ${tasks.dueAt} is null then false else true end` }
+                      : {}),
                 updatedAt: new Date(),
             })
             .where(and(eq(tasks.userId, userId), eq(tasks.id, taskId)))

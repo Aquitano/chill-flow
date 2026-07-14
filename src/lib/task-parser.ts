@@ -419,9 +419,9 @@ function matchNextWeekday(input: string, i: number, now: Date, today: Date): Dat
     if (!match) return null;
     const target = WEEKDAYS[match[1]!.toLowerCase()];
     if (target === undefined) return null;
-    const bareBuild = weekdayBuilder(target, now, today);
-    // "next <weekday>" is the bare-weekday resolution shifted a full week forward.
-    return { end: i + match[0].length, build: (time) => shiftWeek(bareBuild(time)) };
+    const delta = (target - today.getDay() + 7) % 7;
+    const baseDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + delta + 7);
+    return { end: i + match[0].length, build: makeDueBuilder(baseDay, now) };
 }
 
 function matchWeekday(input: string, i: number, now: Date, today: Date): DateMatch | null {
@@ -441,10 +441,6 @@ function weekdayBuilder(target: number, now: Date, today: Date): DateMatch['buil
     const delta = (target - today.getDay() + 7) % 7;
     const baseDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + delta);
     return makeDueBuilder(baseDay, now, 7);
-}
-
-function shiftWeek(resolution: DueResolution): DueResolution {
-    return { dueAt: addDaysKeepTime(resolution.dueAt, 7), dueHasTime: resolution.dueHasTime };
 }
 
 function matchKeywordDay(input: string, i: number, now: Date, today: Date): DateMatch | null {
@@ -543,7 +539,7 @@ function matchClock(input: string, at: number): TimeMatch | null {
 }
 
 /** Remove the given spans from the input and collapse the whitespace they leave behind. */
-function stripSpans(input: string, spans: ParsedToken[]): string {
+export function stripSpans(input: string, spans: ParsedToken[]): string {
     if (spans.length === 0) {
         return input.trim();
     }

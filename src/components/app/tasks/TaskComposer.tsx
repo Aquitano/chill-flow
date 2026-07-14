@@ -10,30 +10,13 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useCreateTaskMutation } from '@/hooks/use-app-data';
 import { dueState, formatDue, quickDueOptions } from '@/lib/task-dates';
-import {
-    parseTaskInput,
-    resolvePriority,
-    stripPriorityTokens,
-    type ParsedToken,
-    type TaskPriority,
-} from '@/lib/task-parser';
+import { parseTaskInput, resolvePriority, stripSpans, stripPriorityTokens, type TaskPriority } from '@/lib/task-parser';
 import { cn } from '@/lib/utils';
 import { CalendarDays, Check, CornerDownLeft, Flag, Plus, X } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { DUE_CHIP, DUE_TOKEN_HIGHLIGHT } from './due-meta';
 import { PRIORITY_META, PRIORITY_OPTIONS } from './priority-meta';
 import { TokenHighlightInput } from './TokenHighlightInput';
-
-/** Remove the given parser spans from the input, collapsing the whitespace they leave. */
-function stripSpans(raw: string, spans: ParsedToken[]): string {
-    let result = '';
-    let cursor = 0;
-    for (const span of spans) {
-        result += raw.slice(cursor, span.start);
-        cursor = span.end;
-    }
-    return (result + raw.slice(cursor)).replace(/\s{2,}/g, ' ').trim();
-}
 
 export function TaskComposer() {
     const createTask = useCreateTaskMutation();

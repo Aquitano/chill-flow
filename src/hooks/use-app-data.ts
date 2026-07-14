@@ -129,10 +129,18 @@ export function useUpdateTaskMutation() {
         onMutate: async (input): Promise<TaskListContext> => {
             await queryClient.cancelQueries({ queryKey: queryKeys.tasks });
             const previous = queryClient.getQueryData<Task[]>(queryKeys.tasks);
-            // Clearing the due date drops any time with it, mirroring the server transform.
-            const patch = input.dueAt === null ? { ...input, dueHasTime: false } : input;
             queryClient.setQueryData<Task[]>(queryKeys.tasks, (old = []) =>
-                old.map((task) => (task.id === input.id ? { ...task, ...patch } : task)),
+                old.map((task) => {
+                    if (task.id !== input.id) return task;
+                    const dueAt = input.dueAt === undefined ? task.dueAt : input.dueAt;
+                    const dueHasTime =
+                        dueAt === null
+                            ? false
+                            : input.dueAt !== undefined
+                              ? (input.dueHasTime ?? false)
+                              : (input.dueHasTime ?? task.dueHasTime);
+                    return { ...task, ...input, dueHasTime };
+                }),
             );
             return { previous };
         },

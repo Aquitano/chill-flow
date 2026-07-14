@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PRIORITY, parseTaskInput, resolvePriority, stripPriorityTokens } from '../task-parser';
+import { DEFAULT_PRIORITY, parseTaskInput, resolvePriority, stripPriorityTokens, stripSpans } from '../task-parser';
 
 describe('parseTaskInput', () => {
     it('returns trimmed text and no token when nothing is typed', () => {
@@ -131,6 +131,10 @@ describe('parseTaskInput due dates', () => {
         expect(at('review next friday').dueAt).toEqual(new Date(2024, 0, 12));
     });
 
+    it("does not double-roll next weekday when today's attached time has passed", () => {
+        expect(at('call next wednesday 8am').dueAt).toEqual(new Date(2024, 0, 10, 8, 0));
+    });
+
     it('resolves next week to the following Monday', () => {
         const parsed = at('plan next week');
         expect(parsed.dueAt).toEqual(new Date(2024, 0, 8));
@@ -237,5 +241,17 @@ describe('parseTaskInput due dates', () => {
         const parsed = parseTaskInput('ship it tomorrow');
         expect(parsed.dueAt).not.toBeNull();
         expect(parsed.dueHasTime).toBe(false);
+    });
+});
+
+describe('stripSpans', () => {
+    it('removes parser spans and collapses the whitespace they leave', () => {
+        expect(stripSpans('call tomorrow at noon', [{ type: 'date', raw: 'tomorrow', start: 5, end: 13 }])).toBe(
+            'call at noon',
+        );
+    });
+
+    it('only trims when no spans are provided', () => {
+        expect(stripSpans('  keep  internal  spacing  ', [])).toBe('keep  internal  spacing');
     });
 });
