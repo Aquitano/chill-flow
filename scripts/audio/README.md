@@ -1,9 +1,9 @@
 # Audio pipeline
 
-The ChillFlow catalog is a set of MP3s stored in **Cloudflare R2** and described by the
-checked-in `manifest.json`. At runtime the **`tracks` DB table is the source of truth**
-(seeded from the manifest); the app resolves each track's `storageKey` against
-`AUDIO_BASE_URL` to a playable URL.
+ChillFlow stores MP3s in **Cloudflare R2**. At runtime the **`tracks` DB table is the
+source of truth**, and the app resolves each track's `storageKey` against `AUDIO_BASE_URL`
+to produce a playable URL. The checked-in `manifest.json` describes tracks published
+through this script pipeline; tracks imported through `/admin` can exist only in the database.
 
 - **Dev** serves audio same-origin from `public/audio/` (`AUDIO_BASE_URL=/audio`) — no CORS, offline, free.
 - **Prod** serves from the public R2 bucket (`AUDIO_BASE_URL=https://pub-….r2.dev`) — CORS required.
@@ -22,8 +22,9 @@ manifest is the only checked-in record; the binaries live in R2.
 
 ## Publish a catalog (first time / when tracks change)
 
-1. Drop your master files in `scripts/audio/originals/`, named as the storage key you want
-   (e.g. `deep-focus-01.mp3`). Masters can be WAV/FLAC/MP3/etc.
+1. Drop WAV, FLAC, MP3, or other master files in `scripts/audio/originals/`. The source
+   filename stem becomes the storage key and the normalizer always emits an MP3
+   (for example, `deep-focus-01.wav` becomes `deep-focus-01.mp3`).
 2. Normalize loudness and emit MP3s to `public/audio/`:
    ```bash
    bun run audio:normalize
