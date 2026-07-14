@@ -10,8 +10,8 @@ export type ComboboxItem = {
     label: string;
     /** Extra text folded into the search haystack (category, tags, artist…). */
     keywords?: string;
-    /** Optional heading rendered above the item when it differs from the previous
-     *  item's group — pass items already clustered by group. */
+    /** Optional heading for a contiguous group of items. Callers must sort or cluster
+     *  identical group labels together before passing items. */
     group?: string;
     icon?: ReactNode;
 };
