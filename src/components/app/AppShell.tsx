@@ -18,7 +18,6 @@ import { PomodoroCadence, TimerMode, useAppStore } from '@/store/app-store';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, useRef } from 'react';
 
-/** How long workspace-preference changes settle before a single persist fires. */
 const PREFERENCES_PERSIST_DEBOUNCE_MS = 800;
 
 type WorkspacePersistPayload = {

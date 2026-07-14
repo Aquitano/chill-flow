@@ -117,7 +117,6 @@ const WEEKDAY_SOURCE = 'sunday|saturday|thursday|tuesday|wednesday|monday|friday
 const MONTH_SOURCE =
     'january|february|september|november|december|october|august|march|april|june|july|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec';
 
-/** A resolved due date plus whether it carries a meaningful time of day. */
 interface DueResolution {
     dueAt: Date;
     dueHasTime: boolean;

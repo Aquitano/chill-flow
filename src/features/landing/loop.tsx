@@ -76,10 +76,6 @@ export function LoopSection() {
     );
 }
 
-/* ------------------------------------------------------------------ */
-/* Pinned desktop tour                                                 */
-/* ------------------------------------------------------------------ */
-
 function LoopPinned() {
     const containerRef = useRef<HTMLDivElement>(null);
     const { scrollYProgress } = useScroll({
@@ -145,7 +141,6 @@ function WorkspaceMock({ progress }: { progress: MotionValue<number> }) {
 
     return (
         <div className="bg-night-2 relative aspect-[16/10] w-full overflow-hidden rounded-2xl border border-white/10 shadow-[0_40px_120px_-40px_rgba(0,0,0,0.9)]">
-            {/* Mode bar */}
             <div className="text-ink-dim flex items-center justify-between px-5 py-3 text-xs">
                 <span className="rounded-full border border-white/10 px-2.5 py-1">LearnFlow</span>
                 <motion.span
@@ -156,12 +151,10 @@ function WorkspaceMock({ progress }: { progress: MotionValue<number> }) {
                 </motion.span>
             </div>
 
-            {/* Tasks panel */}
             <motion.div style={{ opacity: tasksEmphasis }} className="absolute top-14 left-5 w-56">
                 <MiniTasks checkProgress={checkProgress} />
             </motion.div>
 
-            {/* Timer dial */}
             <motion.div
                 style={{ opacity: timerEmphasis }}
                 className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[58%]"
@@ -169,17 +162,12 @@ function WorkspaceMock({ progress }: { progress: MotionValue<number> }) {
                 <MiniDial ringProgress={ringProgress} />
             </motion.div>
 
-            {/* Player bar */}
             <motion.div style={{ opacity: soundEmphasis }} className="absolute inset-x-0 bottom-0">
                 <MiniPlayer playing />
             </motion.div>
         </div>
     );
 }
-
-/* ------------------------------------------------------------------ */
-/* Stacked fallback (mobile / reduced motion)                          */
-/* ------------------------------------------------------------------ */
 
 function LoopStacked() {
     return (
@@ -203,10 +191,6 @@ function LoopStacked() {
         </div>
     );
 }
-
-/* ------------------------------------------------------------------ */
-/* Vignettes — small, truthful recreations of real product surfaces    */
-/* ------------------------------------------------------------------ */
 
 function MiniDial({ ringProgress }: { ringProgress?: MotionValue<number> }) {
     const circumference = 2 * Math.PI * 56;

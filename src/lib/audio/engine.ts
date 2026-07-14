@@ -27,7 +27,6 @@ class AudioEngineImpl {
     private loopEnabled = false;
     private loadToken = 0;
 
-    // Debug (dev-only no-op in production)
     private debugLogger = getAudioDebugLogger();
 
     private ensureContext(): void {
@@ -55,7 +54,6 @@ class AudioEngineImpl {
                 outputLatency: this.audioContext?.outputLatency,
             });
 
-            // Load persisted volume
             try {
                 const saved = localStorage.getItem('audio.masterVolume');
                 if (saved != null) {
@@ -70,7 +68,6 @@ class AudioEngineImpl {
                 this.debugLogger.warn('Volume', 'Failed to restore volume from localStorage', err);
             }
 
-            // Create gain node
             this.masterGainNode = this.audioContext?.createGain() ?? null;
             if (this.masterGainNode && this.audioContext) {
                 const gainValue = this.perceptual(this.volumeNormalized);
@@ -101,9 +98,6 @@ class AudioEngineImpl {
         return v * v;
     }
 
-    /**
-     * Create and configure the HTMLAudioElement once, with persistent listeners.
-     */
     private ensureMediaElement(): HTMLAudioElement {
         if (this.mediaElement) return this.mediaElement;
 
@@ -138,9 +132,6 @@ class AudioEngineImpl {
         return el;
     }
 
-    /**
-     * Connect media element to gain node if needed.
-     */
     private connectGraphIfNeeded(): void {
         if (!this.audioContext || !this.masterGainNode || !this.mediaElement) return;
         if (this.mediaSourceNode) return;
@@ -148,9 +139,6 @@ class AudioEngineImpl {
         this.mediaSourceNode.connect(this.masterGainNode);
     }
 
-    /**
-     * Await until media element is ready to play or errors.
-     */
     private waitUntilReady(loadToken: number): Promise<void> {
         return new Promise((resolve, reject) => {
             if (!this.mediaElement) return reject(new Error('Media element not initialized'));
@@ -545,9 +533,6 @@ class AudioEngineImpl {
         }
     }
 
-    /**
-     * Cleanup method for development debugging
-     */
     destroy(): void {
         this.debugLogger.info('Engine', 'Destroying audio engine');
 
@@ -568,9 +553,6 @@ class AudioEngineImpl {
         this.debugLogger.info('Engine', 'Audio engine destroyed');
     }
 
-    /**
-     * Debug method to get current engine state
-     */
     getDebugState(): Record<string, unknown> {
         return {
             hasAudioContext: !!this.audioContext,

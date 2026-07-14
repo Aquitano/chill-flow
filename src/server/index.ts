@@ -8,12 +8,6 @@ import { tasksRouter } from './routers/tasks-router';
 import { tracksRouter } from './routers/tracks-router';
 import { isTrustedOrigin } from './security/origin';
 
-/**
- * This is your base API.
- * Here, you can handle errors, not-found responses, cors and more.
- *
- * @see https://jstack.app/docs/backend/app-router
- */
 const api = j
     .router()
     .basePath('/api')
@@ -35,10 +29,6 @@ const api = j
     )
     .onError(j.defaults.errorHandler);
 
-/**
- * This is the main router for your server.
- * All routers in /server/routers should be added here manually.
- */
 const appRouter = j.mergeRouters(api, {
     ambient: ambientRouter,
     preferences: preferencesRouter,

@@ -30,14 +30,12 @@ export function MobileNav() {
             <SheetContent side="right" className="w-[300px] border-white/20 bg-black/95 p-0 sm:w-[400px]">
                 <div className="flex h-full flex-col justify-between">
                     <div>
-                        {/* Header with logo */}
                         <div className="border-b border-white/10 p-6">
                             <Link href="/" className="text-xl font-bold" onClick={() => setOpen(false)}>
                                 ChillFlow
                             </Link>
                         </div>
 
-                        {/* Profile section for signed in users */}
                         <SignedIn>
                             <div className="mt-6 flex items-center justify-between border-b border-white/10 px-6 pb-6">
                                 <div className="flex items-center gap-4">
@@ -60,7 +58,6 @@ export function MobileNav() {
                             </div>
                         </SignedIn>
 
-                        {/* Navigation links */}
                         <nav className="space-y-1 px-3 py-6">
                             <Link
                                 href="#inside"
@@ -95,7 +92,6 @@ export function MobileNav() {
                         </nav>
                     </div>
 
-                    {/* Authentication buttons for signed out users */}
                     <SignedOut>
                         <div className="border-t border-white/10 p-6">
                             <div className="flex flex-col gap-3">
@@ -121,7 +117,6 @@ export function MobileNav() {
                         </div>
                     </SignedOut>
 
-                    {/* Additional menu options for signed in users */}
                     <SignedIn>
                         <div className="border-t border-white/10 p-6">
                             <Link

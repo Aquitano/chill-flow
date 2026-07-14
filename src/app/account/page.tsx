@@ -43,7 +43,6 @@ export default async function AccountPage() {
     const isWorkspaceReady = appEnv.isClerkConfigured && appEnv.isDatabaseConfigured;
     const authState = await getServerAuthState();
 
-    // Configured + signed in → the real settings page.
     if (isWorkspaceReady && authState.isAuthenticated) {
         const isAdmin = authState.userId ? await isAdminUser(authState.userId) : false;
 
@@ -73,7 +72,6 @@ export default async function AccountPage() {
         );
     }
 
-    // Configured but signed out → prompt sign-in.
     if (isWorkspaceReady && !authState.isAuthenticated) {
         return (
             <main className="min-h-screen bg-[#070807] px-6 py-10 text-white">

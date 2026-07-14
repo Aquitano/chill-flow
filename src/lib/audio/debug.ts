@@ -79,7 +79,6 @@ class AudioDebugLogger {
         this.events = [];
     }
 
-    // Performance timing helper
     time(category: string, label: string): () => void {
         if (!this.enabled) return () => { };
 
@@ -95,7 +94,6 @@ class AudioDebugLogger {
         };
     }
 
-    // Audio context state helper
     logAudioContextState(context: AudioContext | null): void {
         if (!context) {
             this.warn('AudioContext', 'Audio context is null');
@@ -111,7 +109,6 @@ class AudioDebugLogger {
         });
     }
 
-    // Media element state helper
     logMediaElementState(element: HTMLAudioElement | null): void {
         if (!element) {
             this.warn('MediaElement', 'Media element is null');
@@ -176,7 +173,6 @@ export function getAudioDebugLogger(): AudioDebugLogger {
     return debugLogger;
 }
 
-// Global access for dev tools
 declare global {
     interface Window {
         __audioDebugLogger?: AudioDebugLogger;

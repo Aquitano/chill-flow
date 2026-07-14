@@ -32,7 +32,6 @@ import { toast } from 'sonner';
 // failure replaces the old toast instead of stacking.
 const AUDIO_ERROR_TOAST_ID = 'audio-error';
 
-/** Format a number of seconds as m:ss (or h:mm:ss past an hour). */
 function formatClock(totalSeconds: number): string {
     if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return '0:00';
     const seconds = Math.floor(totalSeconds);
@@ -190,8 +189,6 @@ export const PlayerDock: React.FC = () => {
         };
     }, [currentTrack?.audioUrl, engine, reportAudioFailure]);
 
-    // Drive the engine from playback intent. play() must run inside the user gesture
-    // that flipped `isPlaying` (button click / timer start), which this effect does.
     useEffect(() => {
         if (isPlayingStore) {
             if (!engine.hasMainTrack()) return; // the load effect resumes once ready

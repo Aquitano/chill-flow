@@ -33,9 +33,6 @@ const MODE_QUOTE_TAGS: Record<string, string[]> = {
  * Pick a quote for the given mode. Prefers a quote whose tags overlap the mode's
  * preferred tags; otherwise falls back to a deterministic-by-mode choice so each mode
  * still shows a stable, varied quote instead of always quotes[0].
- *
- * The previous logic compared `quote.tags` against `mode.toLowerCase()` (e.g. "deepwork"),
- * which never matched any tag — so every mode showed the same first quote.
  */
 export function selectQuoteForMode(availableQuotes: Quote[], mode: string): Quote | null {
     if (availableQuotes.length === 0) {
