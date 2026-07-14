@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     cancelSessionInputSchema,
+    completeCycleInputSchema,
     completeSessionInputSchema,
     createTaskInputSchema,
     startSessionInputSchema,
@@ -138,5 +139,18 @@ describe('backend validation', () => {
     it('validates session cancellation payloads', () => {
         expect(cancelSessionInputSchema.safeParse({ id: crypto.randomUUID() }).success).toBe(true);
         expect(cancelSessionInputSchema.safeParse({ id: 'not-a-uuid' }).success).toBe(false);
+    });
+
+    it('defaults the timer kind on session start and rejects unknown kinds', () => {
+        const base = { mode: 'DeepWork', plannedDurationSeconds: 25 * 60, trackId: null };
+
+        expect(startSessionInputSchema.parse(base).timerKind).toBe('focus');
+        expect(startSessionInputSchema.parse({ ...base, timerKind: 'pomodoro' }).timerKind).toBe('pomodoro');
+        expect(startSessionInputSchema.safeParse({ ...base, timerKind: 'break' }).success).toBe(false);
+    });
+
+    it('validates cycle completion payloads', () => {
+        expect(completeCycleInputSchema.safeParse({ id: crypto.randomUUID() }).success).toBe(true);
+        expect(completeCycleInputSchema.safeParse({ id: 'not-a-uuid' }).success).toBe(false);
     });
 });

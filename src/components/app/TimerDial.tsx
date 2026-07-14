@@ -8,6 +8,7 @@ import {
     usePreferencesQuery,
     useSessionCancelMutation,
     useSessionCompleteMutation,
+    useSessionCycleCompleteMutation,
     useSessionStartMutation,
 } from '@/hooks/use-app-data';
 import {
@@ -106,6 +107,9 @@ export const TimerDial: React.FC = () => {
 
     const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const activeSessionIdRef = useRef<string | null>(null);
+    // A completed Pomodoro focus block waiting for its break to finish; once it does,
+    // the block is marked as a full focus-plus-break cycle.
+    const pendingCycleSessionIdRef = useRef<string | null>(null);
     const sessionStateRef = useRef<FocusSessionState>(initialFocusSessionState);
     const prevFocusRunningRef = useRef(false);
     const prevTimerSecondsRef = useRef(timerSeconds);
@@ -117,14 +121,21 @@ export const TimerDial: React.FC = () => {
 
     const startSession = useSessionStartMutation();
     const completeSession = useSessionCompleteMutation();
+    const completeCycle = useSessionCycleCompleteMutation();
     const cancelSession = useSessionCancelMutation();
 
     // Mutations and contextual values change identity each render; mirror them through
     // refs so the session dispatcher can stay stable and avoid stale closures.
-    const mutationsRef = useRef({ start: startSession, complete: completeSession, cancel: cancelSession });
-    mutationsRef.current = { start: startSession, complete: completeSession, cancel: cancelSession };
-    const contextRef = useRef({ mode: currentMode, trackId: currentTrack?.id ?? null });
-    contextRef.current = { mode: currentMode, trackId: currentTrack?.id ?? null };
+    const mutationsRef = useRef({
+        start: startSession,
+        complete: completeSession,
+        completeCycle,
+        cancel: cancelSession,
+    });
+    mutationsRef.current = { start: startSession, complete: completeSession, completeCycle, cancel: cancelSession };
+    const timerKind = timerMode === 'pomodoro' ? ('pomodoro' as const) : ('focus' as const);
+    const contextRef = useRef({ mode: currentMode, timerKind, trackId: currentTrack?.id ?? null });
+    contextRef.current = { mode: currentMode, timerKind, trackId: currentTrack?.id ?? null };
 
     // Single entry point for the focus-session lifecycle: feed an event to the pure
     // reducer, persist the next state, and execute the resulting API command.
@@ -138,6 +149,7 @@ export const TimerDial: React.FC = () => {
                 start.mutate(
                     {
                         mode: contextRef.current.mode,
+                        timerKind: contextRef.current.timerKind,
                         plannedDurationSeconds: command.plannedSeconds,
                         trackId: contextRef.current.trackId,
                     },
@@ -207,6 +219,12 @@ export const TimerDial: React.FC = () => {
         const now = Date.now();
 
         if (!wasRunning && focusRunning) {
+            // Re-entering a Pomodoro focus phase only happens when the break countdown
+            // finished, so a block waiting on its break is now a full completed cycle.
+            if (timerMode === 'pomodoro' && pendingCycleSessionIdRef.current) {
+                mutationsRef.current.completeCycle.mutate({ id: pendingCycleSessionIdRef.current });
+                pendingCycleSessionIdRef.current = null;
+            }
             if (sessionStateRef.current.status === 'paused') {
                 dispatchSession({ type: 'RESUME', atMs: now });
             } else {
@@ -218,7 +236,8 @@ export const TimerDial: React.FC = () => {
         } else if (wasRunning && !focusRunning) {
             if (timerActive) {
                 // Still active but no longer a focus phase → Pomodoro focus rolled into a
-                // break: the focus block finished.
+                // break: the focus block finished. Its cycle completes when the break does.
+                pendingCycleSessionIdRef.current = activeSessionIdRef.current;
                 dispatchSession({ type: 'COMPLETE', atMs: now });
             } else if (timerMode === 'focus' && timerSeconds === 0) {
                 // Finite focus countdown reached zero.
@@ -302,8 +321,10 @@ export const TimerDial: React.FC = () => {
         if (timerActive) {
             pauseTimer();
         }
-        // Switching timer modes abandons any in-flight focus block (focus or Pomodoro).
+        // Switching timer modes abandons any in-flight focus block (focus or Pomodoro)
+        // and any Pomodoro cycle still waiting on its break.
         dispatchSession({ type: 'CANCEL' });
+        pendingCycleSessionIdRef.current = null;
         setTimerMode(mode);
     };
 

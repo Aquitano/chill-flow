@@ -97,6 +97,7 @@ export const updatePreferencesInputSchema = z.object({
 
 export const startSessionInputSchema = z.object({
     mode: modeSchema,
+    timerKind: z.enum(['focus', 'pomodoro']).default('focus'),
     plannedDurationSeconds: z
         .number()
         .int()
@@ -115,6 +116,10 @@ export const completeSessionInputSchema = z.object({
 });
 
 export const cancelSessionInputSchema = z.object({
+    id: taskIdSchema,
+});
+
+export const completeCycleInputSchema = z.object({
     id: taskIdSchema,
 });
 

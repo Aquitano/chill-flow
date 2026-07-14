@@ -81,6 +81,7 @@ interface AppState {
     sessionSummary: {
         totalSessions: number;
         totalMinutes: number;
+        completedCycles: number;
         currentStreak: number;
     };
 
@@ -195,6 +196,7 @@ export const useAppStore = create<AppState>()(
         sessionSummary: {
             totalSessions: 0,
             totalMinutes: 0,
+            completedCycles: 0,
             currentStreak: 0,
         },
         timerMode: 'focus',

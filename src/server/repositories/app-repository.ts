@@ -11,7 +11,7 @@ import {
     Track,
     UserPreferences,
 } from '@/models/app';
-import { and, asc, desc, eq, isNotNull, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import { Database } from '../db/client';
 import {
     DEFAULT_POMODORO_SETTINGS,
@@ -142,11 +142,13 @@ function mapSession(row: typeof focusSessions.$inferSelect): FocusSession {
     return {
         id: row.id,
         mode: row.mode,
+        timerKind: row.timerKind as FocusSession['timerKind'],
         status: row.status as FocusSession['status'],
         plannedDurationSeconds: row.plannedDurationSeconds,
         elapsedSeconds: row.elapsedSeconds,
         trackId: row.trackId,
         completedAt: asIsoString(row.completedAt ?? row.startedAt),
+        cycleCompletedAt: row.cycleCompletedAt ? asIsoString(row.cycleCompletedAt) : null,
     };
 }
 
@@ -478,7 +480,7 @@ export const appRepository = {
     async startSession(
         database: Database,
         userId: string,
-        input: Pick<FocusSession, 'mode' | 'plannedDurationSeconds' | 'trackId'>,
+        input: Pick<FocusSession, 'mode' | 'timerKind' | 'plannedDurationSeconds' | 'trackId'>,
     ) {
         const now = new Date();
 
@@ -499,6 +501,7 @@ export const appRepository = {
                 id: crypto.randomUUID(),
                 userId,
                 mode: input.mode,
+                timerKind: input.timerKind,
                 status: 'active',
                 plannedDurationSeconds: input.plannedDurationSeconds,
                 elapsedSeconds: 0,
@@ -541,6 +544,26 @@ export const appRepository = {
         return completedSession ? mapSession(completedSession) : null;
     },
 
+    async completeSessionCycle(database: Database, userId: string, sessionId: string) {
+        // Only a *completed* Pomodoro focus block can gain a cycle mark, and only once —
+        // a stale or duplicate call (e.g. after the block was superseded) matches no row.
+        const [markedSession] = await database
+            .update(focusSessions)
+            .set({ cycleCompletedAt: new Date() })
+            .where(
+                and(
+                    eq(focusSessions.userId, userId),
+                    eq(focusSessions.id, sessionId),
+                    eq(focusSessions.timerKind, 'pomodoro'),
+                    eq(focusSessions.status, 'completed'),
+                    isNull(focusSessions.cycleCompletedAt),
+                ),
+            )
+            .returning();
+
+        return markedSession ? mapSession(markedSession) : null;
+    },
+
     async cancelSession(database: Database, userId: string, sessionId: string) {
         const [canceledSession] = await database
             .update(focusSessions)
@@ -565,6 +588,7 @@ export const appRepository = {
             .select({
                 elapsedSeconds: focusSessions.elapsedSeconds,
                 completedAt: focusSessions.completedAt,
+                cycleCompletedAt: focusSessions.cycleCompletedAt,
             })
             .from(focusSessions)
             .where(
@@ -577,11 +601,13 @@ export const appRepository = {
 
         const totalSessions = storedSessions.length;
         const totalMinutes = Math.round(storedSessions.reduce((sum, session) => sum + session.elapsedSeconds, 0) / 60);
+        const completedCycles = storedSessions.filter((session) => session.cycleCompletedAt !== null).length;
         const distinctDays = storedSessions.map((session) => asIsoString(session.completedAt).slice(0, 10));
 
         return {
             totalSessions,
             totalMinutes,
+            completedCycles,
             currentStreak: calculateCurrentStreak(distinctDays),
         };
     },
