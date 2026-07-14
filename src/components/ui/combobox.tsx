@@ -3,7 +3,7 @@
 import { cn } from '@/lib/utils';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { Search } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 
 export type ComboboxItem = {
     id: string;
@@ -55,6 +55,7 @@ export function Combobox({
     const [activeIndex, setActiveIndex] = useState(0);
     const inputRef = useRef<HTMLInputElement>(null);
     const listRef = useRef<HTMLDivElement>(null);
+    const listId = useId();
 
     const filtered = useMemo(() => {
         const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -63,6 +64,18 @@ export function Combobox({
 
     const clampedIndex = Math.min(activeIndex, Math.max(0, filtered.length - 1));
     const activeItem = filtered[clampedIndex];
+    const itemGroups = useMemo(() => {
+        const groups: { label?: string; items: { item: ComboboxItem; index: number }[] }[] = [];
+        filtered.forEach((item, index) => {
+            const previous = groups.at(-1);
+            if (!previous || previous.label !== item.group) {
+                groups.push({ label: item.group, items: [{ item, index }] });
+            } else {
+                previous.items.push({ item, index });
+            }
+        });
+        return groups;
+    }, [filtered]);
 
     useEffect(() => {
         if (!open || !activeItem) return;
@@ -130,8 +143,8 @@ export function Combobox({
                             onKeyDown={handleKeyDown}
                             role="combobox"
                             aria-expanded="true"
-                            aria-controls="combobox-list"
-                            aria-activedescendant={activeItem ? `combobox-item-${activeItem.id}` : undefined}
+                            aria-controls={listId}
+                            aria-activedescendant={activeItem ? `${listId}-item-${activeItem.id}` : undefined}
                             aria-label={ariaLabel}
                             placeholder={placeholder}
                             autoComplete="off"
@@ -141,7 +154,7 @@ export function Combobox({
                     </div>
                     <div
                         ref={listRef}
-                        id="combobox-list"
+                        id={listId}
                         role="listbox"
                         aria-label={ariaLabel}
                         className="scrollbar-custom max-h-56 overflow-y-auto p-1"
@@ -149,42 +162,54 @@ export function Combobox({
                         {filtered.length === 0 ? (
                             <p className="text-ink-dim px-2.5 py-4 text-center text-xs">{emptyText}</p>
                         ) : (
-                            filtered.map((item, index) => {
-                                const active = index === clampedIndex;
-                                const showGroup = Boolean(item.group) && item.group !== filtered[index - 1]?.group;
+                            itemGroups.map((group, groupIndex) => {
+                                const headingId = `${listId}-group-${groupIndex}`;
                                 return (
-                                    <div key={item.id}>
-                                        {showGroup && (
+                                    <div
+                                        key={`${group.label ?? 'ungrouped'}:${group.items[0]?.item.id}`}
+                                        role={group.label ? 'group' : undefined}
+                                        aria-labelledby={group.label ? headingId : undefined}
+                                    >
+                                        {group.label && (
                                             <p
-                                                aria-hidden
+                                                id={headingId}
                                                 className="text-ink-dim px-2.5 pt-2 pb-1 text-[10px] font-medium tracking-wide uppercase"
                                             >
-                                                {item.group}
+                                                {group.label}
                                             </p>
                                         )}
-                                        <button
-                                            type="button"
-                                            id={`combobox-item-${item.id}`}
-                                            data-item-id={item.id}
-                                            role="option"
-                                            aria-selected={active}
-                                            onClick={() => choose(item.id)}
-                                            onPointerMove={() => setActiveIndex(index)}
-                                            className={cn(
-                                                'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors',
-                                                active ? 'text-ink bg-white/8' : 'text-ink-mid',
-                                            )}
-                                        >
-                                            {item.icon && (
-                                                <span
-                                                    className={cn('shrink-0', active ? 'text-ember' : 'text-ink-dim')}
-                                                    aria-hidden
+                                        {group.items.map(({ item, index }) => {
+                                            const active = index === clampedIndex;
+                                            return (
+                                                <button
+                                                    key={item.id}
+                                                    type="button"
+                                                    id={`${listId}-item-${item.id}`}
+                                                    data-item-id={item.id}
+                                                    role="option"
+                                                    aria-selected={active}
+                                                    onClick={() => choose(item.id)}
+                                                    onPointerMove={() => setActiveIndex(index)}
+                                                    className={cn(
+                                                        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors',
+                                                        active ? 'text-ink bg-white/8' : 'text-ink-mid',
+                                                    )}
                                                 >
-                                                    {item.icon}
-                                                </span>
-                                            )}
-                                            <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                                        </button>
+                                                    {item.icon && (
+                                                        <span
+                                                            className={cn(
+                                                                'shrink-0',
+                                                                active ? 'text-ember' : 'text-ink-dim',
+                                                            )}
+                                                            aria-hidden
+                                                        >
+                                                            {item.icon}
+                                                        </span>
+                                                    )}
+                                                    <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                                                </button>
+                                            );
+                                        })}
                                     </div>
                                 );
                             })

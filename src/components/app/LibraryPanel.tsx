@@ -58,12 +58,22 @@ export function LibraryPanel() {
     const groupedTracks =
         activeScene === null && tokens.length === 0 && scenes.length > 1
             ? [
-                  ...scenes.map((scene) => ({
-                      id: scene.id,
+                  ...scenes.map((scene, index) => ({
+                      key: `scene:${scene.id}`,
+                      headingId: `library-group-scene-${index}`,
                       label: scene.label,
                       tracks: tracksInScene(tracks, scene.id),
                   })),
-                  ...(uncategorized.length > 0 ? [{ id: 'other', label: 'Other', tracks: uncategorized }] : []),
+                  ...(uncategorized.length > 0
+                      ? [
+                            {
+                                key: 'uncategorized',
+                                headingId: 'library-group-uncategorized',
+                                label: 'Other',
+                                tracks: uncategorized,
+                            },
+                        ]
+                      : []),
               ]
             : null;
 
@@ -175,13 +185,13 @@ export function LibraryPanel() {
                             {groupedTracks
                                 ? groupedTracks.map((group) => (
                                       <div
-                                          key={group.id}
+                                          key={group.key}
                                           role="group"
-                                          aria-labelledby={`library-group-${group.id}`}
+                                          aria-labelledby={group.headingId}
                                           className="space-y-0.5"
                                       >
                                           <p
-                                              id={`library-group-${group.id}`}
+                                              id={group.headingId}
                                               className="text-ink-dim sticky top-0 z-10 bg-black/70 px-2.5 pt-2 pb-1 text-[10px] font-medium tracking-wide uppercase backdrop-blur-md"
                                           >
                                               {group.label}

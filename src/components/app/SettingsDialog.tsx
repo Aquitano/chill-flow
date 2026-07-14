@@ -16,7 +16,7 @@ import {
     type LucideIcon,
 } from 'lucide-react';
 import Image from 'next/image';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 // Below this the track list is short enough to scan without a filter.
 const SOUND_SEARCH_THRESHOLD = 6;
@@ -68,7 +68,16 @@ export function SettingsDialog() {
 
     const [activeSection, setActiveSection] = useState<SectionId>('mode');
     const [soundQuery, setSoundQuery] = useState('');
+    const [railOrientation, setRailOrientation] = useState<'horizontal' | 'vertical'>('horizontal');
     const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+    useEffect(() => {
+        const mediaQuery = window.matchMedia('(min-width: 640px)');
+        const updateOrientation = () => setRailOrientation(mediaQuery.matches ? 'vertical' : 'horizontal');
+        updateOrientation();
+        mediaQuery.addEventListener('change', updateOrientation);
+        return () => mediaQuery.removeEventListener('change', updateOrientation);
+    }, []);
 
     const showSoundSearch = tracks.length > SOUND_SEARCH_THRESHOLD;
     const soundTokens = soundQuery.toLowerCase().split(/\s+/).filter(Boolean);
@@ -124,7 +133,7 @@ export function SettingsDialog() {
                     <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
                         <nav
                             aria-label="Settings sections"
-                            aria-orientation="horizontal"
+                            aria-orientation={railOrientation}
                             role="tablist"
                             onKeyDown={handleRailKeyDown}
                             className="scrollbar-custom flex shrink-0 gap-1 overflow-x-auto border-b border-white/8 p-2 sm:w-48 sm:flex-col sm:overflow-x-visible sm:border-r sm:border-b-0 sm:p-3"
