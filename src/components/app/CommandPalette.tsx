@@ -8,13 +8,16 @@ import { useAppStore } from '@/store/app-store';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import {
     Heart,
+    Keyboard,
     ListMusic,
     Music,
     Pause,
     Play,
+    Repeat,
     Search,
     SkipBack,
     SkipForward,
+    Sparkles,
     SquareCheckBig,
     Timer,
     Waves,
@@ -108,6 +111,7 @@ export function CommandPalette() {
                 id: 'action-play',
                 group: 'Actions',
                 label: snapshot.isPlaying ? 'Pause music' : 'Play music',
+                sub: 'Space',
                 icon: snapshot.isPlaying ? Pause : Play,
                 run: () => {
                     store().togglePlay();
@@ -118,6 +122,7 @@ export function CommandPalette() {
                 id: 'action-next',
                 group: 'Actions',
                 label: 'Next track',
+                sub: 'N',
                 icon: SkipForward,
                 run: () => {
                     store().nextTrack();
@@ -128,9 +133,22 @@ export function CommandPalette() {
                 id: 'action-previous',
                 group: 'Actions',
                 label: 'Previous track',
+                sub: 'P',
                 icon: SkipBack,
                 run: () => {
                     store().previousTrack();
+                    close();
+                },
+            },
+            {
+                id: 'action-repeat',
+                group: 'Actions',
+                label: snapshot.repeatEnabled ? 'Turn repeat off' : 'Turn repeat on',
+                sub: 'R',
+                icon: Repeat,
+                keywords: 'loop repeat',
+                run: () => {
+                    store().toggleRepeat();
                     close();
                 },
             },
@@ -142,6 +160,7 @@ export function CommandPalette() {
                           label: snapshot.likedTrackIds.includes(snapshot.currentTrack.id)
                               ? 'Unlike current track'
                               : 'Like current track',
+                          sub: 'H',
                           icon: Heart,
                           run: () => {
                               const s = store();
@@ -157,11 +176,24 @@ export function CommandPalette() {
                           id: 'action-timer',
                           group: 'Actions' as const,
                           label: snapshot.timerActive ? 'Pause timer' : 'Start timer',
+                          sub: 'S',
                           icon: Timer,
                           run: () => {
                               const s = store();
                               if (s.timerActive) s.pauseTimer();
                               else s.startTimer();
+                              close();
+                          },
+                      },
+                      {
+                          id: 'action-timer-reset',
+                          group: 'Actions' as const,
+                          label: 'Reset timer',
+                          sub: '⇧S',
+                          icon: Timer,
+                          keywords: 'timer restart',
+                          run: () => {
+                              store().resetTimer();
                               close();
                           },
                       },
@@ -171,6 +203,7 @@ export function CommandPalette() {
                 id: 'action-tasks',
                 group: 'Actions',
                 label: 'Toggle tasks',
+                sub: 'T',
                 icon: SquareCheckBig,
                 run: () => {
                     store().toggleTasks();
@@ -199,12 +232,34 @@ export function CommandPalette() {
                 id: 'action-ambience-power',
                 group: 'Actions' as const,
                 label: powered ? 'Turn ambience off' : 'Turn ambience on',
+                sub: '⇧A',
                 icon: Waves,
                 keywords: 'ambience ambient noise power mute',
                 run: () => {
                     mixer.setPowered(!powered);
                     close();
                 },
+            },
+            ...Object.entries(snapshot.modes).map(([name, mode], index) => ({
+                id: `action-mode-${name}`,
+                group: 'Actions' as const,
+                label: `Switch to ${mode.label}`,
+                sub: index < 4 ? `${index + 1}` : undefined,
+                icon: Sparkles,
+                keywords: `mode workspace ${mode.description}`,
+                run: () => {
+                    store().setMode(name);
+                    close();
+                },
+            })),
+            {
+                id: 'action-shortcuts',
+                group: 'Actions' as const,
+                label: 'Keyboard shortcuts',
+                sub: '?',
+                icon: Keyboard,
+                keywords: 'help hotkeys keys reference',
+                run: () => store().openMenuSection('shortcuts'),
             },
             ...board.flatMap((slot, index) => {
                 const sound = slot ? ambientSounds.find((entry) => entry.id === slot.soundId) : undefined;

@@ -74,6 +74,8 @@ interface AppState {
     activeOverlay: WorkspaceOverlay | null;
 
     isMenuOpen: boolean;
+    /** Settings section to land on when the dialog opens via a shortcut; null keeps the last one. */
+    menuSection: string | null;
     isTasksOpen: boolean;
 
     currentMode: string;
@@ -104,6 +106,7 @@ interface AppState {
     setVolume: (volume: number[]) => void;
     toggleMenu: () => void;
     setMenuOpen: (open: boolean) => void;
+    openMenuSection: (section: string) => void;
     toggleTasks: () => void;
     setTasksOpen: (open: boolean) => void;
     setMode: (mode: string) => void;
@@ -190,6 +193,7 @@ export const useAppStore = create<AppState>()(
         activeScene: null,
         activeOverlay: null,
         isMenuOpen: false,
+        menuSection: null,
         isTasksOpen: false,
         currentMode: 'DeepWork',
         modes: defaultModes,
@@ -222,8 +226,10 @@ export const useAppStore = create<AppState>()(
         togglePlay: () => set((state) => ({ isPlaying: !state.isPlaying }), false, 'togglePlay'),
         setIsPlaying: (playing) => set({ isPlaying: playing }, false, 'setIsPlaying'),
         setVolume: (volume) => set({ volume }, false, 'setVolume'),
-        toggleMenu: () => set((state) => ({ isMenuOpen: !state.isMenuOpen }), false, 'toggleMenu'),
-        setMenuOpen: (open) => set({ isMenuOpen: open }, false, 'setMenuOpen'),
+        toggleMenu: () =>
+            set((state) => ({ isMenuOpen: !state.isMenuOpen, menuSection: null }), false, 'toggleMenu'),
+        setMenuOpen: (open) => set({ isMenuOpen: open, menuSection: null }, false, 'setMenuOpen'),
+        openMenuSection: (section) => set({ isMenuOpen: true, menuSection: section }, false, 'openMenuSection'),
         toggleTasks: () => set((state) => ({ isTasksOpen: !state.isTasksOpen }), false, 'toggleTasks'),
         setTasksOpen: (open) => set({ isTasksOpen: open }, false, 'setTasksOpen'),
         setMode: (mode) =>
