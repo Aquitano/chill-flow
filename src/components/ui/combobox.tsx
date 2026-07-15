@@ -2,7 +2,7 @@
 
 import { cn } from '@/lib/utils';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
-import { Search } from 'lucide-react';
+import { Check, Search, X } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 
 export type ComboboxItem = {
@@ -14,6 +14,10 @@ export type ComboboxItem = {
      *  identical group labels together before passing items. */
     group?: string;
     icon?: ReactNode;
+    /** Trailing decoration on the right edge of the row (never part of the search haystack). */
+    hint?: ReactNode;
+    /** Shows a delete button on the row; requires `onItemDelete` on the Combobox. */
+    deletable?: boolean;
 };
 
 function matches(item: ComboboxItem, tokens: string[]): boolean {
@@ -38,6 +42,8 @@ export function Combobox({
     side = 'bottom',
     avoidCollisions = true,
     contentClassName,
+    selectedId,
+    onItemDelete,
 }: {
     items: ComboboxItem[];
     onSelect: (id: string) => void;
@@ -49,6 +55,9 @@ export function Combobox({
     side?: 'top' | 'right' | 'bottom' | 'left';
     avoidCollisions?: boolean;
     contentClassName?: string;
+    /** Marks the currently applied item with a check without closing over highlight state. */
+    selectedId?: string | null;
+    onItemDelete?: (id: string) => void;
 }) {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState('');
@@ -180,10 +189,13 @@ export function Combobox({
                                         )}
                                         {group.items.map(({ item, index }) => {
                                             const active = index === clampedIndex;
+                                            const selected = selectedId != null && item.id === selectedId;
+                                            // A div, not a button: deletable rows nest a real delete
+                                            // button and buttons can't contain buttons. Keyboard
+                                            // selection stays on the input via aria-activedescendant.
                                             return (
-                                                <button
+                                                <div
                                                     key={item.id}
-                                                    type="button"
                                                     id={`${listId}-item-${item.id}`}
                                                     data-item-id={item.id}
                                                     role="option"
@@ -191,7 +203,7 @@ export function Combobox({
                                                     onClick={() => choose(item.id)}
                                                     onPointerMove={() => setActiveIndex(index)}
                                                     className={cn(
-                                                        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors',
+                                                        'group/option flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors',
                                                         active ? 'text-ink bg-white/8' : 'text-ink-mid',
                                                     )}
                                                 >
@@ -207,7 +219,34 @@ export function Combobox({
                                                         </span>
                                                     )}
                                                     <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                                                </button>
+                                                    {item.hint && (
+                                                        <span
+                                                            className="text-ink-dim flex shrink-0 items-center gap-1"
+                                                            aria-hidden
+                                                        >
+                                                            {item.hint}
+                                                        </span>
+                                                    )}
+                                                    {selected && (
+                                                        <>
+                                                            <Check size={12} className="text-ember shrink-0" aria-hidden />
+                                                            <span className="sr-only">(currently applied)</span>
+                                                        </>
+                                                    )}
+                                                    {item.deletable && onItemDelete && (
+                                                        <button
+                                                            type="button"
+                                                            aria-label={`Delete ${item.label}`}
+                                                            onClick={(event) => {
+                                                                event.stopPropagation();
+                                                                onItemDelete(item.id);
+                                                            }}
+                                                            className="text-ink-dim hover:text-ink focus-visible:outline-ember -mr-1 shrink-0 rounded-full p-0.5 opacity-0 transition-opacity group-hover/option:opacity-100 focus-visible:opacity-100 focus-visible:outline-2"
+                                                        >
+                                                            <X size={11} aria-hidden />
+                                                        </button>
+                                                    )}
+                                                </div>
                                             );
                                         })}
                                     </div>
