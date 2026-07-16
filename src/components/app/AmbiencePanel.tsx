@@ -23,12 +23,9 @@ import { cn } from '@/lib/utils';
 import { AmbientMix, AmbientSound } from '@/models/app';
 import { useUser } from '@clerk/nextjs';
 import { motion } from 'framer-motion';
-import { Check, Plus, Power, Search, X } from 'lucide-react';
+import { Check, ChevronsUpDown, Plus, Power, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-
-// Below this the chips are easy to scan by eye; a search field would be clutter.
-const PRESET_SEARCH_THRESHOLD = 6;
 
 /**
  * myNoise-style board: eight slots filled from the sound library, one vertical
@@ -46,7 +43,6 @@ export function AmbiencePanel() {
     const [localMixes, setLocalMixes] = useState<AmbientMix[]>(() => readLocalMixes());
     const [activeMixId, setActiveMixId] = useState<string | null>(null);
     const [mixName, setMixName] = useState('');
-    const [presetQuery, setPresetQuery] = useState('');
 
     // The mixer singleton owns board state; the query only feeds it the library.
     useEffect(() => {
@@ -65,11 +61,6 @@ export function AmbiencePanel() {
 
     const savedMixes = isSignedIn ? (mixesQuery.data ?? []) : localMixes;
     const presets = [...playableMixes(BUILTIN_MIXES, sounds), ...savedMixes];
-    const showPresetSearch = presets.length > PRESET_SEARCH_THRESHOLD;
-    const presetTokens = presetQuery.toLowerCase().split(/\s+/).filter(Boolean);
-    const visiblePresets = showPresetSearch
-        ? presets.filter((mix) => presetTokens.every((token) => mix.name.toLowerCase().includes(token)))
-        : presets;
     const soundById = new Map(sounds.map((sound) => [sound.id, sound]));
     const onBoard = new Set(board.flatMap((slot) => (slot ? [slot.soundId] : [])));
     const available = sounds.filter((sound) => !onBoard.has(sound.id));
@@ -121,44 +112,29 @@ export function AmbiencePanel() {
     };
 
     const boardHasSound = board.some((slot) => slot && !slot.muted);
+    const boardHasLayer = board.some(Boolean);
+    const activeMix = presets.find((mix) => mix.id === activeMixId) ?? null;
 
-    // Built-ins come first in `presets`; the divider marks where the user's own mixes begin.
-    const builtinVisible = visiblePresets.filter((mix) => mix.id.startsWith('builtin-'));
-    const savedVisible = visiblePresets.filter((mix) => !mix.id.startsWith('builtin-'));
+    // Up to four category icons so a mix is recognizable without loading it.
+    const mixCategoryIcons = (mix: AmbientMix) =>
+        [
+            ...new Set(
+                Object.keys(mix.levels).flatMap((id) => {
+                    const sound = soundById.get(id);
+                    return sound ? [sound.category] : [];
+                }),
+            ),
+        ]
+            .slice(0, 4)
+            .map((category) => <AmbientOptionIcon key={category} category={category} size={12} />);
 
-    const renderPresetChip = (mix: AmbientMix) => {
-        const isActive = activeMixId === mix.id;
-        const deletable = !mix.id.startsWith('builtin-');
-        return (
-            <span key={mix.id} className="group relative shrink-0">
-                <button
-                    type="button"
-                    role="option"
-                    aria-selected={isActive}
-                    onClick={() => applyMix(mix)}
-                    className={cn(
-                        'focus-visible:outline-ember rounded-full border px-3 py-1 text-xs whitespace-nowrap transition-colors focus-visible:outline-2',
-                        deletable && 'pr-7',
-                        isActive
-                            ? 'border-ember/50 bg-ember/15 text-ember'
-                            : 'text-ink-mid hover:text-ink border-white/10 bg-white/5 hover:bg-white/10',
-                    )}
-                >
-                    {mix.name}
-                </button>
-                {deletable && (
-                    <button
-                        type="button"
-                        aria-label={`Delete mix ${mix.name}`}
-                        onClick={() => handleDeleteMix(mix)}
-                        className="text-ink-dim hover:text-ink focus-visible:outline-ember absolute top-1/2 right-1.5 -translate-y-1/2 rounded-full p-0.5 transition-colors focus-visible:outline-2"
-                    >
-                        <X size={11} aria-hidden />
-                    </button>
-                )}
-            </span>
-        );
-    };
+    const presetItems = presets.map((mix) => ({
+        id: mix.id,
+        label: mix.name,
+        group: mix.id.startsWith('builtin-') ? 'Built-in' : 'Your mixes',
+        deletable: !mix.id.startsWith('builtin-'),
+        hint: mixCategoryIcons(mix),
+    }));
 
     return (
         <motion.section
@@ -192,36 +168,40 @@ export function AmbiencePanel() {
 
             {presets.length > 0 && (
                 <div className="px-4 pt-3">
-                    {showPresetSearch && (
-                        <div className="mb-2 flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5">
-                            <Search size={13} className="text-ink-dim shrink-0" aria-hidden />
-                            <input
-                                type="text"
-                                value={presetQuery}
-                                onChange={(event) => setPresetQuery(event.target.value)}
-                                placeholder="Search presets…"
-                                aria-label="Search presets"
-                                autoComplete="off"
-                                spellCheck={false}
-                                className="text-ink placeholder:text-ink-dim min-w-0 flex-1 bg-transparent text-xs outline-none"
-                            />
-                        </div>
-                    )}
-                    {visiblePresets.length === 0 ? (
-                        <p className="text-ink-dim px-1 pb-1 text-xs">No presets match “{presetQuery}”</p>
-                    ) : (
-                        <div
-                            className="scrollbar-custom flex gap-1.5 overflow-x-auto [mask-image:linear-gradient(to_right,black,black_calc(100%-1.5rem),transparent)] pb-1.5"
-                            role="listbox"
-                            aria-label="Presets"
-                        >
-                            {builtinVisible.map(renderPresetChip)}
-                            {builtinVisible.length > 0 && savedVisible.length > 0 && (
-                                <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 self-center bg-white/15" />
-                            )}
-                            {savedVisible.map(renderPresetChip)}
-                        </div>
-                    )}
+                    <Combobox
+                        ariaLabel="Preset mixes"
+                        placeholder="Search mixes…"
+                        emptyText="No mixes match"
+                        align="start"
+                        selectedId={activeMixId}
+                        items={presetItems}
+                        onSelect={(id) => {
+                            const mix = presets.find((entry) => entry.id === id);
+                            if (mix) applyMix(mix);
+                        }}
+                        onItemDelete={(id) => {
+                            const mix = presets.find((entry) => entry.id === id);
+                            if (mix) handleDeleteMix(mix);
+                        }}
+                        contentClassName="w-[var(--radix-popover-trigger-width)]"
+                        trigger={
+                            <button
+                                type="button"
+                                aria-label="Choose a preset mix"
+                                className="text-ink focus-visible:outline-ember flex w-full items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs transition-colors hover:bg-white/10 focus-visible:outline-2"
+                            >
+                                <span className={cn('min-w-0 flex-1 truncate text-left', !activeMix && 'text-ink-mid')}>
+                                    {activeMix ? activeMix.name : boardHasLayer ? 'Custom mix' : 'Choose a mix'}
+                                </span>
+                                {activeMix && (
+                                    <span className="text-ink-dim flex shrink-0 items-center gap-1" aria-hidden>
+                                        {mixCategoryIcons(activeMix)}
+                                    </span>
+                                )}
+                                <ChevronsUpDown size={13} className="text-ink-dim shrink-0" aria-hidden />
+                            </button>
+                        }
+                    />
                 </div>
             )}
 
@@ -304,9 +284,9 @@ export function AmbiencePanel() {
     );
 }
 
-function AmbientOptionIcon({ category }: { category: string }) {
+function AmbientOptionIcon({ category, size = 14 }: { category: string; size?: number }) {
     const Icon = ambientCategoryIcon(category);
-    return <Icon size={14} aria-hidden />;
+    return <Icon size={size} aria-hidden />;
 }
 
 function categoryLabel(category: string): string {
