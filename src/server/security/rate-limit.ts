@@ -2,31 +2,13 @@ import { j } from '@/server/jstack';
 import { HTTPException } from 'hono/http-exception';
 
 type RateLimitOptions = {
-    /**
-     * A unique identifier for the rate limit rule, e.g. "preferences:update".
-     */
     key: string;
-
-    /**
-     * The maximum number of requests allowed within the window before throttling.
-     */
     limit: number;
-
-    /**
-     * The length of the rate limit window in milliseconds.
-     */
     windowMs: number;
 };
 
 type RateLimitEntry = {
-    /**
-     * The number of requests seen in the current window.
-     */
     count: number;
-
-    /**
-     * The timestamp when the current window expires and the bucket can be reset.
-     */
     resetAt: number;
 };
 

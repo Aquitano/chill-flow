@@ -19,7 +19,6 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
-/** How long workspace-preference changes settle before a single persist fires. */
 const PREFERENCES_PERSIST_DEBOUNCE_MS = 800;
 
 type WorkspacePersistPayload = {

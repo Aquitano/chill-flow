@@ -23,12 +23,40 @@ const SOUND_SEARCH_THRESHOLD = 6;
 
 // `M` opens the dialog; once focus is trapped inside, Radix owns Escape to close
 // it, and the workspace hotkey hook deliberately ignores keys within [role=dialog].
-const SHORTCUTS = [
-    { keys: 'Space', action: 'Play / pause music' },
-    { keys: 'S', action: 'Start / pause timer' },
-    { keys: 'T', action: 'Toggle tasks' },
-    { keys: 'M', action: 'Open settings' },
-    { keys: 'Esc', action: 'Close panels' },
+// Keep in sync with use-workspace-hotkeys.ts.
+const SHORTCUT_GROUPS = [
+    {
+        label: 'Playback',
+        shortcuts: [
+            { keys: 'Space', action: 'Play / pause music' },
+            { keys: 'N', action: 'Next track' },
+            { keys: 'P', action: 'Previous track' },
+            { keys: 'H', action: 'Like / unlike track' },
+            { keys: 'R', action: 'Toggle repeat' },
+            { keys: '↑ / ↓', action: 'Volume up / down' },
+        ],
+    },
+    {
+        label: 'Timer',
+        shortcuts: [
+            { keys: 'S', action: 'Start / pause timer' },
+            { keys: '⇧ S', action: 'Reset timer' },
+        ],
+    },
+    {
+        label: 'Workspace',
+        shortcuts: [
+            { keys: 'Ctrl/⌘ K', action: 'Command palette' },
+            { keys: 'T', action: 'Toggle tasks' },
+            { keys: 'L', action: 'Toggle library' },
+            { keys: 'A', action: 'Toggle ambience mixer' },
+            { keys: '⇧ A', action: 'Ambience power on / off' },
+            { keys: 'M', action: 'Open settings' },
+            { keys: '1–4', action: 'Switch workspace mode' },
+            { keys: '?', action: 'Show shortcuts' },
+            { keys: 'Esc', action: 'Close panels' },
+        ],
+    },
 ];
 
 type SectionId = 'mode' | 'sound' | 'scene' | 'progress' | 'shortcuts';
@@ -48,6 +76,7 @@ const SECTIONS: { id: SectionId; label: string; description: string; icon: Lucid
 
 export function SettingsDialog() {
     const isMenuOpen = useAppStore((state) => state.isMenuOpen);
+    const menuSection = useAppStore((state) => state.menuSection);
     const setMenuOpen = useAppStore((state) => state.setMenuOpen);
     const modes = useAppStore((state) => state.modes);
     const currentMode = useAppStore((state) => state.currentMode);
@@ -68,6 +97,14 @@ export function SettingsDialog() {
 
     const [activeSection, setActiveSection] = useState<SectionId>('mode');
     const [soundQuery, setSoundQuery] = useState('');
+
+    // Shortcut-driven opens (e.g. `?`) request a specific section; plain opens keep the last one.
+    useEffect(() => {
+        if (isMenuOpen && menuSection && SECTIONS.some((section) => section.id === menuSection)) {
+            setActiveSection(menuSection as SectionId);
+        }
+    }, [isMenuOpen, menuSection]);
+
     const [railOrientation, setRailOrientation] = useState<'horizontal' | 'vertical'>('horizontal');
     const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
@@ -371,16 +408,28 @@ export function SettingsDialog() {
                             )}
 
                             {activeSection === 'shortcuts' && (
-                                <ul className="space-y-1.5">
-                                    {SHORTCUTS.map((shortcut) => (
-                                        <li key={shortcut.keys} className="flex items-center justify-between text-sm">
-                                            <span className="text-ink-mid">{shortcut.action}</span>
-                                            <kbd className="text-ink-dim rounded border border-white/15 bg-black/40 px-1.5 py-0.5 font-sans text-[11px]">
-                                                {shortcut.keys}
-                                            </kbd>
-                                        </li>
+                                <div className="space-y-5">
+                                    {SHORTCUT_GROUPS.map((group) => (
+                                        <div key={group.label}>
+                                            <p className="text-ink-dim pb-1.5 text-[10px] font-medium tracking-wide uppercase">
+                                                {group.label}
+                                            </p>
+                                            <ul className="space-y-1.5">
+                                                {group.shortcuts.map((shortcut) => (
+                                                    <li
+                                                        key={shortcut.keys}
+                                                        className="flex items-center justify-between text-sm"
+                                                    >
+                                                        <span className="text-ink-mid">{shortcut.action}</span>
+                                                        <kbd className="text-ink-dim rounded border border-white/15 bg-black/40 px-1.5 py-0.5 font-sans text-[11px]">
+                                                            {shortcut.keys}
+                                                        </kbd>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
                                     ))}
-                                </ul>
+                                </div>
                             )}
                         </div>
                     </div>

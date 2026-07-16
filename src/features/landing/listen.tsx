@@ -7,7 +7,6 @@ import { Music, Pause, Play } from 'lucide-react';
 import Image from 'next/image';
 import { useEffect, useRef, useState } from 'react';
 
-/** Format seconds as m:ss for the preview scrubber. */
 function formatClock(totalSeconds: number): string {
     if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return '0:00';
     const minutes = Math.floor(totalSeconds / 60);
@@ -175,7 +174,6 @@ export function ListenSection() {
                     </motion.div>
                 </div>
 
-                {/* The scenes that actually ship as workspace backgrounds */}
                 <div className="mt-20">
                     <p className="text-sm text-ink-dim">
                         Set the scene — the three backgrounds the workspace ships with today.

@@ -37,7 +37,6 @@ export function Header() {
                 ChillFlow
             </Link>
 
-            {/* Desktop navigation */}
             <nav className="hidden items-center gap-6 md:flex">
                 <SignedOut>
                     {NAV_LINKS.map((link) => (
@@ -94,7 +93,6 @@ export function Header() {
                 </Suspense>
             </nav>
 
-            {/* Mobile navigation */}
             <div className="flex md:hidden">
                 <MobileNav />
             </div>

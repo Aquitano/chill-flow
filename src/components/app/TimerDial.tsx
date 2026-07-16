@@ -45,7 +45,6 @@ const FOCUS_PRESETS: { label: string; icon: LucideIcon }[] = [
     { label: '∞', icon: InfinityIcon },
 ];
 
-/** Tick marks around the dial — lit up to the current progress. */
 const TICK_COUNT = 72;
 const TICKS = Array.from({ length: TICK_COUNT }, (_, index) => {
     const angle = (index / TICK_COUNT) * 2 * Math.PI - Math.PI / 2;
@@ -68,11 +67,6 @@ function formatTime(seconds: number): string {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
-/**
- * The timer as the centerpiece of the workspace: a progress ring hugging the central
- * circle with the countdown and controls inside it. Owns the full focus-session
- * lifecycle (start/pause/complete/cancel recording) exactly as the old side panel did.
- */
 export const TimerDial: React.FC = () => {
     const currentMode = useAppStore((state) => state.currentMode);
 
@@ -331,7 +325,6 @@ export const TimerDial: React.FC = () => {
     const isInfinite = timerMode === 'focus' && selectedPreset === '∞';
     const isBreak = timerMode === 'pomodoro' && pomodoroSettings.isBreak;
 
-    // The full duration of the current phase, for the progress ring.
     const totalSeconds = (() => {
         if (timerMode === 'focus') {
             const minutes = presetToMinutes(selectedPreset, customMinutes);
@@ -356,7 +349,6 @@ export const TimerDial: React.FC = () => {
 
     return (
         <div className="relative z-20 flex h-full w-full flex-col items-center justify-center rounded-full">
-            {/* Tick ring hugging the circle's border — lit ticks mark elapsed progress. */}
             <svg viewBox="0 0 100 100" className="pointer-events-none absolute inset-1" aria-hidden>
                 {TICKS.map((tick, index) => {
                     const lit = isInfinite || index / TICK_COUNT < ringProgress;

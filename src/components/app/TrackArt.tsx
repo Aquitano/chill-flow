@@ -5,7 +5,6 @@ import { cn } from '@/lib/utils';
 import { Track } from '@/models/app';
 import { Music } from 'lucide-react';
 
-/** Track cover with a deterministic warm-toned fallback for coverless tracks. */
 export function TrackArt({ track, className }: { track: Track; className?: string }) {
     if (track.thumbnailUrl) {
         return (
