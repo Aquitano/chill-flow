@@ -16,7 +16,8 @@ import { selectQuoteForMode } from '@/lib/quotes';
 import { useWorkspaceHotkeys } from '@/hooks/use-workspace-hotkeys';
 import { PomodoroCadence, TimerMode, useAppStore } from '@/store/app-store';
 import { AnimatePresence, motion } from 'framer-motion';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 
 const PREFERENCES_PERSIST_DEBOUNCE_MS = 800;
 
@@ -229,6 +230,42 @@ export function AppShell() {
 
     const showBackground = modes[currentMode]?.showBackground || false;
     const activeBackground = backgrounds.find((background) => background.id === selectedBackgroundId);
+    const backgroundUrl = (showBackground && activeBackground?.url) || null;
+
+    // CSS background images emit no load/error events, so preload the scene through an
+    // Image element and only paint it once it arrives. A blocked or offline image then
+    // degrades to the plain night backdrop with a retry toast instead of a black screen.
+    const [loadedBackgroundUrl, setLoadedBackgroundUrl] = useState<string | null>(null);
+    const [backgroundRetry, setBackgroundRetry] = useState(0);
+
+    useEffect(() => {
+        if (!backgroundUrl) {
+            setLoadedBackgroundUrl(null);
+            return;
+        }
+
+        let cancelled = false;
+        const image = new Image();
+        image.onload = () => {
+            if (cancelled) return;
+            toast.dismiss('background-load');
+            setLoadedBackgroundUrl(backgroundUrl);
+        };
+        image.onerror = () => {
+            if (cancelled) return;
+            setLoadedBackgroundUrl(null);
+            toast.error("Couldn't load the background scene", {
+                id: 'background-load',
+                description: 'Showing the plain backdrop instead. Check your connection.',
+                action: { label: 'Retry', onClick: () => setBackgroundRetry((attempt) => attempt + 1) },
+            });
+        };
+        image.src = backgroundUrl;
+
+        return () => {
+            cancelled = true;
+        };
+    }, [backgroundUrl, backgroundRetry]);
 
     if (tracksQuery.isLoading || tasksQuery.isLoading || preferencesQuery.isLoading || sessionsQuery.isLoading) {
         return (
@@ -266,15 +303,15 @@ export function AppShell() {
 
     return (
         <main
-            className={`text-ink relative min-h-screen w-screen overflow-hidden ${
-                showBackground ? 'bg-cover bg-center bg-no-repeat' : 'bg-night'
+            className={`bg-night text-ink relative min-h-screen w-screen overflow-hidden ${
+                loadedBackgroundUrl ? 'bg-cover bg-center bg-no-repeat' : ''
             }`}
-            style={showBackground && activeBackground?.url ? { backgroundImage: `url('${activeBackground.url}')` } : {}}
+            style={loadedBackgroundUrl ? { backgroundImage: `url('${loadedBackgroundUrl}')` } : {}}
         >
-            {showBackground && <div className="absolute inset-0 bg-black/60" />}
+            {loadedBackgroundUrl && <div className="absolute inset-0 bg-black/60" />}
 
             <AnimatePresence>
-                {showBackground && (
+                {loadedBackgroundUrl && (
                     <motion.div
                         className="absolute inset-0"
                         initial={{ opacity: 0 }}

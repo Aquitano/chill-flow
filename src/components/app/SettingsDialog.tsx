@@ -387,10 +387,11 @@ export function SettingsDialog() {
                             )}
 
                             {activeSection === 'progress' && (
-                                <dl className="grid grid-cols-3 gap-2">
+                                <dl className="grid grid-cols-2 gap-2">
                                     {[
                                         { value: sessionSummary.totalMinutes, label: 'minutes focused' },
                                         { value: sessionSummary.totalSessions, label: 'sessions' },
+                                        { value: sessionSummary.completedCycles, label: 'pomodoro cycles' },
                                         { value: sessionSummary.currentStreak, label: 'day streak' },
                                     ].map((stat) => (
                                         <div

@@ -7,7 +7,7 @@ ChillFlow is a focus workspace that pairs lo-fi music and ambient sound with a t
 - **Lo-fi tracks** served from a database-backed catalog, with liked tracks and per-account selection
 - **Ambient mixer** for layering sound loops over music and saving named mixes
 - **Focus and Pomodoro timers** with presets, custom durations, open-ended focus, and configurable Pomodoro cadence
-- **Progress stats** for focused minutes, completed sessions, and day streaks
+- **Progress stats** for focused minutes, completed sessions, full Pomodoro cycles, and day streaks
 - **Tasks** with priorities and natural-language due dates
 - **Persistent preferences** for workspace mode, background, track, volume, and timer defaults
 - **Admin importer** for uploading and managing tracks at `/admin`

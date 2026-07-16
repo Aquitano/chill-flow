@@ -97,6 +97,7 @@ export const updatePreferencesInputSchema = z.object({
 
 export const startSessionInputSchema = z.object({
     mode: modeSchema,
+    timerKind: z.enum(['focus', 'pomodoro']).default('focus'),
     plannedDurationSeconds: z
         .number()
         .int()
@@ -118,6 +119,10 @@ export const cancelSessionInputSchema = z.object({
     id: taskIdSchema,
 });
 
+export const completeCycleInputSchema = z.object({
+    id: taskIdSchema,
+});
+
 export const trackLookupInputSchema = z.object({
     id: trackIdSchema,
 });
@@ -130,6 +135,10 @@ const ambientLevelsSchema = z
 export const saveAmbientMixInputSchema = z.object({
     name: z.string().trim().min(1).max(40),
     levels: ambientLevelsSchema,
+});
+
+export const updateAmbientMixInputSchema = saveAmbientMixInputSchema.extend({
+    id: z.uuid(),
 });
 
 export const deleteAmbientMixInputSchema = z.object({

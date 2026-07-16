@@ -95,6 +95,9 @@ export const focusSessions = pgTable(
         id: text('id').primaryKey(),
         userId: text('userId').notNull(),
         mode: text('mode').notNull(),
+        // Which timer produced this focus block: a plain focus countdown or a Pomodoro
+        // focus phase. Breaks are never recorded, so focused minutes stay honest either way.
+        timerKind: text('timerKind').notNull().default('focus'),
         status: text('status').notNull().default('active'),
         plannedDurationSeconds: integer('plannedDurationSeconds').notNull(),
         elapsedSeconds: integer('elapsedSeconds').notNull().default(0),
@@ -102,6 +105,9 @@ export const focusSessions = pgTable(
         startedAt: timestamp('startedAt').defaultNow().notNull(),
         completedAt: timestamp('completedAt'),
         canceledAt: timestamp('canceledAt'),
+        // Set on a completed Pomodoro focus block once its following break also finishes;
+        // a full focus-plus-break cycle is what counts as one "completed Pomodoro".
+        cycleCompletedAt: timestamp('cycleCompletedAt'),
     },
     (table) => [index('FocusSessions_userId_status_completedAt_idx').on(table.userId, table.status, table.completedAt)],
 );
