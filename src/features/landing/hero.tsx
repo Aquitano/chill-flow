@@ -72,7 +72,6 @@ export function Hero() {
         >
             <EmberDust density={40} />
 
-            {/* The lamp behind the room */}
             <motion.div
                 aria-hidden
                 style={{ x: haloX, y: haloY }}

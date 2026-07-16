@@ -44,6 +44,12 @@ export function presetToMinutes(preset: string, customMinutes: string): number |
     return Number.isFinite(custom) && custom > 0 ? custom : 25;
 }
 
+function timerDurationPatch(mode: TimerMode, seconds: number) {
+    return mode === 'focus'
+        ? { timerSeconds: seconds, focusTimerSeconds: seconds, timerActive: false }
+        : { timerSeconds: seconds, pomodoroTimerSeconds: seconds, timerActive: false };
+}
+
 export type PomodoroSettings = {
     focusMinutes: number;
     breakMinutes: number;
@@ -449,20 +455,10 @@ export const useAppStore = create<AppState>()(
 
             const minutes = parseInt(preset.replace('m', '').replace('h', ''), 10) || 25;
             const seconds = minutes * 60;
-            const nextState =
-                state.timerMode === 'focus'
-                    ? {
-                          selectedPreset: preset,
-                          timerSeconds: seconds,
-                          focusTimerSeconds: seconds,
-                          timerActive: false,
-                      }
-                    : {
-                          selectedPreset: preset,
-                          timerSeconds: seconds,
-                          pomodoroTimerSeconds: seconds,
-                          timerActive: false,
-                      };
+            const nextState = {
+                ...timerDurationPatch(state.timerMode, seconds),
+                selectedPreset: preset,
+            };
 
             set(nextState, false, 'setTimerPreset');
         },
@@ -475,22 +471,11 @@ export const useAppStore = create<AppState>()(
                 ? `${Math.floor(mins / 60)}h${mins % 60 ? ` ${mins % 60}m` : ''}`
                 : `${mins}m`;
 
-            const nextState =
-                state.timerMode === 'focus'
-                    ? {
-                          customMinutes: minutes,
-                          timerSeconds: seconds,
-                          focusTimerSeconds: seconds,
-                          selectedPreset: displayLabel,
-                          timerActive: false,
-                      }
-                    : {
-                          customMinutes: minutes,
-                          timerSeconds: seconds,
-                          pomodoroTimerSeconds: seconds,
-                          selectedPreset: displayLabel,
-                          timerActive: false,
-                      };
+            const nextState = {
+                ...timerDurationPatch(state.timerMode, seconds),
+                customMinutes: minutes,
+                selectedPreset: displayLabel,
+            };
 
             set(nextState, false, 'setCustomTime');
         },

@@ -70,7 +70,6 @@ export function AudioDebugPanel({ isOpen, onClose }: AudioDebugPanelProps) {
     return (
         <div className="bg-opacity-50 fixed inset-0 z-50 flex items-center justify-center bg-black">
             <div className="flex h-5/6 w-11/12 flex-col rounded-lg bg-white shadow-xl">
-                {/* Header */}
                 <div className="flex items-center justify-between border-b p-4">
                     <h2 className="text-xl font-bold">🎵 Audio Engine Debug Panel</h2>
                     <div className="flex items-center gap-2">
@@ -98,7 +97,6 @@ export function AudioDebugPanel({ isOpen, onClose }: AudioDebugPanelProps) {
                 </div>
 
                 <div className="flex flex-1 overflow-hidden">
-                    {/* Engine State Panel */}
                     <div className="w-1/3 overflow-y-auto border-r p-4">
                         <h3 className="mb-2 font-bold">Engine State</h3>
                         {engineState ? (
@@ -129,7 +127,6 @@ export function AudioDebugPanel({ isOpen, onClose }: AudioDebugPanelProps) {
                         )}
                     </div>
 
-                    {/* Debug Logs Panel */}
                     <div className="flex flex-1 flex-col p-4">
                         <div className="mb-4 flex items-center gap-4">
                             <h3 className="font-bold">Debug Logs ({filteredEvents.length})</h3>
@@ -206,11 +203,9 @@ export function AudioDebugPanel({ isOpen, onClose }: AudioDebugPanelProps) {
     );
 }
 
-// Debug panel trigger component
 export function AudioDebugTrigger() {
     const [isOpen, setIsOpen] = useState(false);
 
-    // Only show in development
     if (process.env.NODE_ENV !== 'development') {
         return null;
     }

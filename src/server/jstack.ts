@@ -13,11 +13,6 @@ interface Env {
 
 export const j = jstack.init<Env>();
 
-/**
- * Type-safely injects database into all procedures
- *
- * @see https://jstack.app/docs/backend/middleware
- */
 const databaseMiddleware = j.middleware(async ({ c, next }) => {
     const { DATABASE_URL } = env(c);
     const db = getDatabase(DATABASE_URL ?? appEnv.databaseUrl);
@@ -29,11 +24,6 @@ const databaseMiddleware = j.middleware(async ({ c, next }) => {
     return await next({ db });
 });
 
-/**
- * Public (unauthenticated) procedures
- *
- * This is the base piece you use to build new queries and mutations on your API.
- */
 export const publicProcedure = j.procedure.use(databaseMiddleware);
 
 const authMiddleware = j.middleware(async ({ next }) => {

@@ -44,7 +44,6 @@ const ASSET_RULES = {
     image: { extensions: IMAGE_EXTENSIONS, maxBytes: MAX_IMAGE_BYTES, fallbackExt: '.jpg', label: 'Cover image', typeLabel: 'image' },
 } as const;
 
-/** Validate an uploaded file's size + extension, returning the normalized extension or a 4xx. */
 export function validateAsset(file: File, kind: keyof typeof ASSET_RULES): { ext: string } | { response: NextResponse } {
     const rule = ASSET_RULES[kind];
     if (file.size > rule.maxBytes) {

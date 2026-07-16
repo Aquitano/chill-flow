@@ -3,13 +3,9 @@ import type { TaskPriority } from '@/lib/task-parser';
 export interface PriorityMeta {
     value: TaskPriority;
     label: string;
-    /** Pill/chip classes (border + tinted fill + text). */
     chip: string;
-    /** Text colour only, for standalone icons (e.g. the row flag button). */
     accent: string;
-    /** Checkbox ring colour for list rows. */
     ring: string;
-    /** Inline highlight classes for the recognized token in the composer. */
     token: string;
 }
 

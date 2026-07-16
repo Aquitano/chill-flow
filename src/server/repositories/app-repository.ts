@@ -241,6 +241,20 @@ function calculateCurrentStreak(sessionDates: string[]) {
     return streak;
 }
 
+function taskDueTimePatch(
+    input: Partial<Pick<Task, 'text' | 'priority' | 'isCompleted' | 'dueAt' | 'dueHasTime'>>,
+) {
+    if (input.dueAt === null) {
+        return { dueHasTime: false };
+    }
+
+    if (input.dueAt === undefined && input.dueHasTime === true) {
+        return { dueHasTime: sql<boolean>`case when ${tasks.dueAt} is null then false else true end` };
+    }
+
+    return {};
+}
+
 export const appRepository = {
     async listTracks(database: Database) {
         const storedTracks = await database.select().from(tracks).orderBy(asc(tracks.createdAt));
@@ -408,11 +422,7 @@ export const appRepository = {
             .update(tasks)
             .set({
                 ...input,
-                ...(input.dueAt === null
-                    ? { dueHasTime: false }
-                    : input.dueAt === undefined && input.dueHasTime === true
-                      ? { dueHasTime: sql<boolean>`case when ${tasks.dueAt} is null then false else true end` }
-                      : {}),
+                ...taskDueTimePatch(input),
                 updatedAt: new Date(),
             })
             .where(and(eq(tasks.userId, userId), eq(tasks.id, taskId)))

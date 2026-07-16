@@ -7,7 +7,6 @@ import { Track } from '@/models/app';
  */
 
 export type Scene = {
-    /** The raw track category this scene maps to. */
     id: string;
     label: string;
     trackCount: number;

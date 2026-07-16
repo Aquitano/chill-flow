@@ -158,7 +158,6 @@ const trackDurationSchema = z
     .min(0)
     .max(24 * 60 * 60);
 
-/** Metadata fields for an upload (the file + storage key are handled by the route). */
 export const uploadTrackMetadataSchema = z.object({
     id: trackAdminIdSchema,
     title: trackTitleSchema,
@@ -194,7 +193,6 @@ export const deleteTrackAdminInputSchema = z.object({
     id: trackAdminIdSchema,
 });
 
-/** Create a track row whose file(s) were already uploaded directly to R2 (presigned flow). */
 export const createTrackInputSchema = z.object({
     id: trackAdminIdSchema,
     storageKey: trackStorageKeySchema,
