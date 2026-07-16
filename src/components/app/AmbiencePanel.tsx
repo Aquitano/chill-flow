@@ -8,14 +8,18 @@ import {
     useAmbientSoundsQuery,
     useDeleteAmbientMixMutation,
     useSaveAmbientMixMutation,
+    useUpdateAmbientMixMutation,
 } from '@/hooks/use-app-data';
 import { describeApiError } from '@/lib/api';
 import {
     BUILTIN_MIXES,
     deleteLocalMix,
+    dismissMixImport,
     playableMixes,
+    readImportDismissedIds,
     readLocalMixes,
     saveLocalMix,
+    updateLocalMix,
 } from '@/lib/audio/ambient-presets';
 import { AmbientSlot } from '@/lib/audio/ambient';
 import { useAmbient } from '@/lib/audio/useAmbient';
@@ -24,7 +28,7 @@ import { AmbientMix, AmbientSound } from '@/models/app';
 import { useUser } from '@clerk/nextjs';
 import { motion } from 'framer-motion';
 import { Check, ChevronsUpDown, Plus, Power, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 /**
@@ -38,16 +42,85 @@ export function AmbiencePanel() {
     const { isSignedIn } = useUser();
     const mixesQuery = useAmbientMixesQuery(Boolean(isSignedIn));
     const saveMix = useSaveAmbientMixMutation();
+    const updateMix = useUpdateAmbientMixMutation();
     const deleteMix = useDeleteAmbientMixMutation();
 
     const [localMixes, setLocalMixes] = useState<AmbientMix[]>(() => readLocalMixes());
     const [activeMixId, setActiveMixId] = useState<string | null>(null);
+    // The applied mix stays highlighted after board tweaks; this flags it as edited so
+    // the user can tell an unsaved variation from the mix as saved.
+    const [mixEdited, setMixEdited] = useState(false);
     const [mixName, setMixName] = useState('');
 
     // The mixer singleton owns board state; the query only feeds it the library.
     useEffect(() => {
         if (soundsQuery.data) mixer.setSounds(soundsQuery.data);
     }, [mixer, soundsQuery.data]);
+
+    // Signed in with mixes from a signed-out session on this device: offer (once per
+    // panel open, and never again for ids the user declined) to move them to the account.
+    const importOfferedRef = useRef(false);
+    const importLocalMixes = async () => {
+        const accountMixes = mixesQuery.data ?? [];
+        const takenNames = new Set(accountMixes.map((mix) => mix.name.toLowerCase()));
+        const imported: string[] = [];
+        let failureMessage: string | null = null;
+
+        for (const mix of readLocalMixes()) {
+            if (takenNames.has(mix.name.toLowerCase())) continue;
+            try {
+                await saveMix.mutateAsync({ name: mix.name, levels: mix.levels });
+                takenNames.add(mix.name.toLowerCase());
+                imported.push(mix.id);
+            } catch (error) {
+                // Typically the account mix cap; either way the rest would fail too.
+                failureMessage = describeApiError(error);
+                break;
+            }
+        }
+
+        imported.forEach((id) => deleteLocalMix(id));
+        const remaining = readLocalMixes();
+        setLocalMixes(remaining);
+        // Whatever stayed local (name duplicates, cap overflow) shouldn't prompt again.
+        dismissMixImport(remaining.map((mix) => mix.id));
+
+        if (failureMessage) {
+            toast.error(
+                imported.length > 0
+                    ? `Imported ${imported.length} of your mixes, then hit a snag`
+                    : "Couldn't import your mixes",
+                { description: failureMessage },
+            );
+            return;
+        }
+        toast.success(
+            imported.length === 1 ? 'Imported 1 mix to your account' : `Imported ${imported.length} mixes to your account`,
+            remaining.length > 0
+                ? { description: `${remaining.length} stayed on this device (a mix with the same name already exists).` }
+                : undefined,
+        );
+    };
+
+    useEffect(() => {
+        if (importOfferedRef.current || !isSignedIn || !mixesQuery.data) return;
+        const localOnly = readLocalMixes();
+        if (localOnly.length === 0) return;
+        const dismissed = new Set(readImportDismissedIds());
+        if (localOnly.every((mix) => dismissed.has(mix.id))) return;
+
+        importOfferedRef.current = true;
+        const count = localOnly.length;
+        toast(count === 1 ? 'You have 1 mix saved on this device' : `You have ${count} mixes saved on this device`, {
+            id: 'ambient-import',
+            description: 'Add them to your account so they follow you everywhere?',
+            duration: 10_000,
+            action: { label: 'Import', onClick: () => void importLocalMixes() },
+            cancel: { label: 'Not now', onClick: () => dismissMixImport(localOnly.map((mix) => mix.id)) },
+        });
+        // importLocalMixes is deliberately not a dep: it changes identity each render and
+        // the offer must fire once per panel open, which importOfferedRef already guards.
+    }, [isSignedIn, mixesQuery.data]);
 
     // Buffer fetch/decode failures surface as engine events, not query errors.
     useEffect(() => {
@@ -68,17 +141,51 @@ export function AmbiencePanel() {
     const applyMix = (mix: AmbientMix) => {
         mixer.applyMix(mix.levels);
         setActiveMixId(mix.id);
+        setMixEdited(false);
+    };
+
+    // Board edits no longer deselect the applied mix — they mark it edited instead,
+    // which unlocks the "Update" path in the footer for the user's own mixes.
+    const markBoardEdited = () => {
+        if (activeMixId) setMixEdited(true);
     };
 
     const handleDeleteMix = (mix: AmbientMix) => {
-        if (activeMixId === mix.id) setActiveMixId(null);
+        if (activeMixId === mix.id) {
+            setActiveMixId(null);
+            setMixEdited(false);
+        }
+
+        // Deletion is one mis-click away from "apply", so it always offers an undo
+        // (which re-saves the mix under a fresh id) instead of a blocking confirm.
+        const undoDelete = () => {
+            if (mix.id.startsWith('local-')) {
+                saveLocalMix(mix.name, mix.levels);
+                setLocalMixes(readLocalMixes());
+                return;
+            }
+            saveMix.mutate(
+                { name: mix.name, levels: mix.levels },
+                {
+                    onError: (error) =>
+                        toast.error("Couldn't restore the mix", { description: describeApiError(error) }),
+                },
+            );
+        };
+        const offerUndo = () =>
+            toast(`Deleted “${mix.name}”`, { action: { label: 'Undo', onClick: undoDelete } });
+
         if (mix.id.startsWith('local-')) {
             setLocalMixes(deleteLocalMix(mix.id));
+            offerUndo();
             return;
         }
         deleteMix.mutate(
             { id: mix.id },
-            { onError: (error) => toast.error("Couldn't delete the mix", { description: describeApiError(error) }) },
+            {
+                onSuccess: offerUndo,
+                onError: (error) => toast.error("Couldn't delete the mix", { description: describeApiError(error) }),
+            },
         );
     };
 
@@ -93,6 +200,7 @@ export function AmbiencePanel() {
                 {
                     onSuccess: (mix) => {
                         setActiveMixId(mix.id);
+                        setMixEdited(false);
                         setMixName('');
                     },
                     onError: (error) => toast.error("Couldn't save the mix", { description: describeApiError(error) }),
@@ -108,12 +216,49 @@ export function AmbiencePanel() {
         }
         setLocalMixes(readLocalMixes());
         setActiveMixId(mix.id);
+        setMixEdited(false);
         setMixName('');
+    };
+
+    const handleUpdateMix = (mix: AmbientMix) => {
+        const levels = mixer.currentLevels();
+        if (Object.keys(levels).length === 0) return;
+
+        if (mix.id.startsWith('local-')) {
+            const updated = updateLocalMix(mix.id, mix.name, levels);
+            if (!updated) {
+                toast.error("Couldn't update the mix", { description: 'Local mix storage is unavailable.' });
+                return;
+            }
+            setLocalMixes(readLocalMixes());
+            setMixEdited(false);
+            return;
+        }
+
+        updateMix.mutate(
+            { id: mix.id, name: mix.name, levels },
+            {
+                onSuccess: (updated) => {
+                    if (!updated) {
+                        toast.error("Couldn't update the mix", {
+                            description: 'It may have been deleted on another device.',
+                        });
+                        return;
+                    }
+                    setMixEdited(false);
+                },
+                onError: (error) => toast.error("Couldn't update the mix", { description: describeApiError(error) }),
+            },
+        );
     };
 
     const boardHasSound = board.some((slot) => slot && !slot.muted);
     const boardHasLayer = board.some(Boolean);
     const activeMix = presets.find((mix) => mix.id === activeMixId) ?? null;
+    // Typing a name always saves a new mix; an empty input on an edited own mix updates it.
+    const updateTarget = mixEdited && activeMix && !activeMix.id.startsWith('builtin-') ? activeMix : undefined;
+    const updateMode = Boolean(updateTarget) && !mixName.trim();
+    const savePending = saveMix.isPending || updateMix.isPending;
 
     // Up to four category icons so a mix is recognizable without loading it.
     const mixCategoryIcons = (mix: AmbientMix) =>
@@ -191,7 +336,13 @@ export function AmbiencePanel() {
                                 className="text-ink focus-visible:outline-ember flex w-full items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs transition-colors hover:bg-white/10 focus-visible:outline-2"
                             >
                                 <span className={cn('min-w-0 flex-1 truncate text-left', !activeMix && 'text-ink-mid')}>
-                                    {activeMix ? activeMix.name : boardHasLayer ? 'Custom mix' : 'Choose a mix'}
+                                    {activeMix
+                                        ? mixEdited
+                                            ? `${activeMix.name} (edited)`
+                                            : activeMix.name
+                                        : boardHasLayer
+                                          ? 'Custom mix'
+                                          : 'Choose a mix'}
                                 </span>
                                 {activeMix && (
                                     <span className="text-ink-dim flex shrink-0 items-center gap-1" aria-hidden>
@@ -221,7 +372,7 @@ export function AmbiencePanel() {
                         : 'No ambient sounds are available yet.'}
                 </p>
             ) : (
-                <ul className="flex justify-between gap-1 px-4 py-4">
+                <ul className="scrollbar-custom flex justify-between gap-1 overflow-x-auto px-4 py-4">
                     {board.map((slot, index) => (
                         <BoardSlot
                             key={slot ? slot.soundId : `empty-${index}`}
@@ -230,21 +381,27 @@ export function AmbiencePanel() {
                             powered={powered}
                             available={available}
                             onAdd={(soundId) => {
-                                setActiveMixId(null);
+                                markBoardEdited();
                                 mixer.addSound(soundId);
                             }}
                             onRemove={() => {
-                                setActiveMixId(null);
+                                markBoardEdited();
                                 mixer.removeSlot(index);
                             }}
                             onToggleMute={() => {
-                                setActiveMixId(null);
+                                markBoardEdited();
                                 // Waking a single layer while the bus is off should make sound.
                                 if (!powered && slot?.muted) mixer.setPowered(true);
                                 mixer.toggleSlotMute(index);
                             }}
                             onVolume={(volume) => {
-                                setActiveMixId(null);
+                                markBoardEdited();
+                                // A fader move expresses "I want to hear this" — wake the
+                                // bus and the layer instead of adjusting silence. Read the
+                                // mixer directly: drag events can outpace the render cycle,
+                                // and a stale closure would double-toggle the mute.
+                                if (!mixer.isPowered()) mixer.setPowered(true);
+                                if (mixer.getBoard()[index]?.muted) mixer.toggleSlotMute(index);
                                 mixer.setSlotVolume(index, volume);
                             }}
                         />
@@ -257,14 +414,20 @@ export function AmbiencePanel() {
                     className="flex items-center gap-2 border-t border-white/5 px-4 py-2.5"
                     onSubmit={(event) => {
                         event.preventDefault();
-                        handleSaveMix();
+                        if (updateMode && updateTarget) {
+                            handleUpdateMix(updateTarget);
+                        } else {
+                            handleSaveMix();
+                        }
                     }}
                 >
                     <input
                         type="text"
+                        name="mix-name"
+                        autoComplete="off"
                         value={mixName}
                         onChange={(event) => setMixName(event.target.value)}
-                        placeholder="Name this mix"
+                        placeholder={updateMode ? 'Or save as a new mix…' : 'Name this mix'}
                         maxLength={40}
                         disabled={!boardHasSound}
                         aria-label="Mix name"
@@ -272,11 +435,19 @@ export function AmbiencePanel() {
                     />
                     <button
                         type="submit"
-                        disabled={!boardHasSound || !mixName.trim() || saveMix.isPending}
-                        className="border-ember/40 bg-ember/15 text-ember hover:bg-ember/25 focus-visible:outline-ember flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-colors focus-visible:outline-2 disabled:pointer-events-none disabled:opacity-40"
+                        disabled={!boardHasSound || savePending || (!updateMode && !mixName.trim())}
+                        className="border-ember/40 bg-ember/15 text-ember hover:bg-ember/25 focus-visible:outline-ember flex max-w-[55%] items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition-colors focus-visible:outline-2 disabled:pointer-events-none disabled:opacity-40"
                     >
-                        <Check size={12} aria-hidden />
-                        Save mix
+                        <Check size={12} className="shrink-0" aria-hidden />
+                        <span className="truncate">
+                            {savePending
+                                ? updateMode
+                                    ? 'Updating…'
+                                    : 'Saving…'
+                                : updateMode && updateTarget
+                                  ? `Update “${updateTarget.name}”`
+                                  : 'Save mix'}
+                        </span>
                     </button>
                 </form>
             )}
@@ -355,7 +526,7 @@ function BoardSlot({
                 type="button"
                 aria-label={`Remove ${sound.label}`}
                 onClick={onRemove}
-                className="bg-night-2 text-ink-dim hover:text-ink focus-visible:outline-ember absolute -top-1.5 -right-0.5 z-10 rounded-full p-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2"
+                className="bg-night-2 text-ink-dim hover:text-ink focus-visible:outline-ember pointer-coarse:opacity-100 absolute -top-1.5 -right-0.5 z-10 rounded-full p-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2"
             >
                 <X size={11} aria-hidden />
             </button>

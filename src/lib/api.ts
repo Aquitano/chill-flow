@@ -104,6 +104,7 @@ export type SessionPayload = {
     summary: {
         totalSessions: number;
         totalMinutes: number;
+        completedCycles: number;
         currentStreak: number;
     };
 };
@@ -140,6 +141,8 @@ export const api = {
         listMixes: () => unwrap<AmbientMix[]>(client.ambient.listMixes.$get()),
         saveMix: (input: { name: string; levels: Record<string, number> }) =>
             unwrap<AmbientMix>(client.ambient.saveMix.$post(input)),
+        updateMix: (input: { id: string; name: string; levels: Record<string, number> }) =>
+            unwrap<AmbientMix | null>(client.ambient.updateMix.$post(input)),
         deleteMix: (input: { id: string }) => unwrap<{ success: boolean }>(client.ambient.deleteMix.$post(input)),
     },
     preferences: {
@@ -148,10 +151,16 @@ export const api = {
     },
     sessions: {
         list: () => unwrap<SessionPayload>(client.sessions.list.$get()),
-        start: (input: { mode: string; plannedDurationSeconds: number; trackId: string | null }) =>
-            unwrap<FocusSession>(client.sessions.start.$post(input)),
+        start: (input: {
+            mode: string;
+            timerKind: FocusSession['timerKind'];
+            plannedDurationSeconds: number;
+            trackId: string | null;
+        }) => unwrap<FocusSession>(client.sessions.start.$post(input)),
         complete: (input: { id: string; elapsedSeconds: number }) =>
             unwrap<FocusSession | null>(client.sessions.complete.$post(input)),
+        completeCycle: (input: { id: string }) =>
+            unwrap<FocusSession | null>(client.sessions.completeCycle.$post(input)),
         cancel: (input: { id: string }) => unwrap<FocusSession | null>(client.sessions.cancel.$post(input)),
     },
 };

@@ -44,6 +44,7 @@ export function playableMixes(mixes: AmbientMix[], sounds: AmbientSound[]): Ambi
 
 const LOCAL_MIXES_KEY = 'audio.ambientMixes';
 const MAX_LOCAL_MIXES = 20;
+const IMPORT_DISMISSED_KEY = 'audio.ambientMixImportDismissed';
 
 export function readLocalMixes(): AmbientMix[] {
     try {
@@ -75,6 +76,21 @@ export function saveLocalMix(name: string, levels: Record<string, number>): Ambi
     }
 }
 
+export function updateLocalMix(id: string, name: string, levels: Record<string, number>): AmbientMix | null {
+    const mixes = readLocalMixes();
+    const index = mixes.findIndex((mix) => mix.id === id);
+    if (index === -1) return null;
+    const updated: AmbientMix = { id, name, levels };
+    const next = [...mixes];
+    next[index] = updated;
+    try {
+        localStorage.setItem(LOCAL_MIXES_KEY, JSON.stringify(next));
+        return updated;
+    } catch {
+        return null;
+    }
+}
+
 export function deleteLocalMix(id: string): AmbientMix[] {
     const remaining = readLocalMixes().filter((mix) => mix.id !== id);
     try {
@@ -83,4 +99,29 @@ export function deleteLocalMix(id: string): AmbientMix[] {
         /* storage unavailable */
     }
     return remaining;
+}
+
+/*
+ * Import-offer bookkeeping: "Not now" remembers the declined mix ids so the same
+ * mixes never prompt again, while mixes saved later (new ids) still get offered.
+ */
+
+export function readImportDismissedIds(): string[] {
+    try {
+        const raw = localStorage.getItem(IMPORT_DISMISSED_KEY);
+        if (!raw) return [];
+        const parsed: unknown = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
+    } catch {
+        return [];
+    }
+}
+
+export function dismissMixImport(ids: string[]): void {
+    try {
+        const merged = Array.from(new Set([...readImportDismissedIds(), ...ids]));
+        localStorage.setItem(IMPORT_DISMISSED_KEY, JSON.stringify(merged));
+    } catch {
+        /* storage unavailable */
+    }
 }

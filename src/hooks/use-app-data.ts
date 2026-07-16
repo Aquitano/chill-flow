@@ -55,6 +55,18 @@ export function useSaveAmbientMixMutation() {
     });
 }
 
+export function useUpdateAmbientMixMutation() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (input: { id: string; name: string; levels: Record<string, number> }) =>
+            api.ambient.updateMix(input),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: queryKeys.ambientMixes });
+        },
+    });
+}
+
 export function useDeleteAmbientMixMutation() {
     const queryClient = useQueryClient();
 
@@ -192,8 +204,12 @@ export function useSessionStartMutation() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: (input: { mode: string; plannedDurationSeconds: number; trackId: string | null }) =>
-            api.sessions.start(input),
+        mutationFn: (input: {
+            mode: string;
+            timerKind: 'focus' | 'pomodoro';
+            plannedDurationSeconds: number;
+            trackId: string | null;
+        }) => api.sessions.start(input),
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
         },
@@ -205,6 +221,17 @@ export function useSessionCompleteMutation() {
 
     return useMutation({
         mutationFn: (input: { id: string; elapsedSeconds: number }) => api.sessions.complete(input),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
+        },
+    });
+}
+
+export function useSessionCycleCompleteMutation() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (input: { id: string }) => api.sessions.completeCycle(input),
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
         },

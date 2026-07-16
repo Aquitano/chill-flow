@@ -57,6 +57,13 @@
       "when": 1783288627570,
       "tag": "0007_fantastic_abomination",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784059213391,
+      "tag": "0008_stormy_secret_warriors",
+      "breakpoints": true
     }
   ]
 }

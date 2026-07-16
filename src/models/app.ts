@@ -100,9 +100,12 @@ export interface AppMode {
 export interface FocusSession {
     id: string;
     mode: string;
+    timerKind: 'focus' | 'pomodoro';
     status: 'active' | 'completed' | 'canceled';
     plannedDurationSeconds: number;
     elapsedSeconds: number;
     trackId: string | null;
     completedAt: string;
+    /** Set once the break following a Pomodoro focus block finished (a full cycle). */
+    cycleCompletedAt: string | null;
 }

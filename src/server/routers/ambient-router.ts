@@ -1,7 +1,7 @@
 import { HTTPException } from 'hono/http-exception';
 import { j, protectedDataProcedure, protectedMutationProcedure, publicProcedure } from '../jstack';
 import { appRepository } from '../repositories/app-repository';
-import { deleteAmbientMixInputSchema, saveAmbientMixInputSchema } from '../validation/app';
+import { deleteAmbientMixInputSchema, saveAmbientMixInputSchema, updateAmbientMixInputSchema } from '../validation/app';
 
 const MAX_MIXES_PER_USER = 20;
 
@@ -26,6 +26,15 @@ export const ambientRouter = j.router({
             });
         }
         return c.superjson(await appRepository.createAmbientMix(ctx.db, ctx.userId, input));
+    }),
+
+    updateMix: protectedMutationProcedure.input(updateAmbientMixInputSchema).mutation(async ({ c, ctx, input }) => {
+        return c.superjson(
+            await appRepository.updateAmbientMix(ctx.db, ctx.userId, input.id, {
+                name: input.name,
+                levels: input.levels,
+            }),
+        );
     }),
 
     deleteMix: protectedMutationProcedure.input(deleteAmbientMixInputSchema).mutation(async ({ c, ctx, input }) => {
