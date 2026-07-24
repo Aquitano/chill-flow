@@ -172,6 +172,8 @@ interface AppState {
 
     currentQuote: Quote | null;
     tasks: Task[];
+    /** The task the current focus block is for; recorded with the session. */
+    focusTaskId: string | null;
     backgrounds: Background[];
     selectedBackgroundId: string | null;
     sessionSummary: {
@@ -213,6 +215,7 @@ interface AppState {
     setMode: (mode: string) => void;
     setTracks: (tracks: Track[]) => void;
     setTasks: (tasks: Task[]) => void;
+    setFocusTask: (taskId: string | null) => void;
     setBackgrounds: (backgrounds: Background[]) => void;
     setCurrentTrack: (track: Track | null) => void;
     setLikedTrackIds: (trackIds: string[]) => void;
@@ -302,6 +305,7 @@ export const useAppStore = create<AppState>()(
         modes: defaultModes,
         currentQuote: null,
         tasks: [],
+        focusTaskId: null,
         backgrounds: [],
         selectedBackgroundId: null,
         sessionSummary: {
@@ -360,7 +364,18 @@ export const useAppStore = create<AppState>()(
                 false,
                 'setTracks',
             ),
-        setTasks: (tasks) => set({ tasks }, false, 'setTasks'),
+        setTasks: (tasks) =>
+            set(
+                (state) => {
+                    // A task that got completed or deleted elsewhere is no longer something
+                    // to focus on, so the dial stops claiming it is.
+                    const focused = tasks.find((task) => task.id === state.focusTaskId);
+                    return { tasks, focusTaskId: focused && !focused.isCompleted ? state.focusTaskId : null };
+                },
+                false,
+                'setTasks',
+            ),
+        setFocusTask: (taskId) => set({ focusTaskId: taskId }, false, 'setFocusTask'),
         setBackgrounds: (backgrounds) =>
             set(
                 (state) => ({

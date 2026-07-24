@@ -156,6 +156,7 @@ export const api = {
             timerKind: FocusSession['timerKind'];
             plannedDurationSeconds: number;
             trackId: string | null;
+            taskId: string | null;
         }) => unwrap<FocusSession>(client.sessions.start.$post(input)),
         complete: (input: { id: string; elapsedSeconds: number }) =>
             unwrap<FocusSession | null>(client.sessions.complete.$post(input)),

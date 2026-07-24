@@ -105,6 +105,7 @@ export const startSessionInputSchema = z.object({
         .min(60)
         .max(12 * 60 * 60),
     trackId: nullableTrackIdSchema,
+    taskId: taskIdSchema.nullish(),
 });
 
 export const completeSessionInputSchema = z.object({

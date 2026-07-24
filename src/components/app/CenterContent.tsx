@@ -2,6 +2,7 @@
 
 import { useAppStore } from '@/store/app-store';
 import { AnimatePresence, motion } from 'framer-motion';
+import { Target, X } from 'lucide-react';
 import { TasksPanel } from './tasks/TasksPanel';
 import { PANEL_LEFT_RESERVE, useResizablePanel } from './tasks/use-resizable-panel';
 import { TimerDial } from './TimerDial';
@@ -12,10 +13,16 @@ export const CenterContent: React.FC = () => {
     const currentQuote = useAppStore((state) => state.currentQuote);
     const sessionSummary = useAppStore((state) => state.sessionSummary);
     const isTasksOpen = useAppStore((state) => state.isTasksOpen);
+    const tasks = useAppStore((state) => state.tasks);
+    const focusTaskId = useAppStore((state) => state.focusTaskId);
+    const setFocusTask = useAppStore((state) => state.setFocusTask);
 
     const showQuote = modes[currentMode]?.showQuote || false;
     const showBackground = modes[currentMode]?.showBackground || false;
     const showTimer = modes[currentMode]?.showTimer || false;
+
+    const focusTask = tasks.find((task) => task.id === focusTaskId) ?? null;
+    const captionKey = focusTask?.id ?? (showQuote && currentQuote ? currentQuote.id : 'totals');
 
     // The tasks panel floats over the workspace at a fixed left offset while the dial is
     // centred in the viewport, so on anything narrower than roughly 1280px the two used to
@@ -92,16 +99,30 @@ export const CenterContent: React.FC = () => {
                 </AnimatePresence>
             </motion.div>
 
-            {/* Quiet line beneath the dial: quote in modes that show both, else honest totals. */}
-            <motion.p
-                key={showTimer && showQuote && currentQuote ? currentQuote.id : 'totals'}
+            {/* Quiet line beneath the dial. What you chose to focus on outranks the quote,
+                which outranks the totals. */}
+            <motion.div
+                key={captionKey}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.5, duration: 0.8 }}
-                className="mt-8 max-w-md px-6 text-center text-sm text-ink-mid [text-shadow:0_1px_8px_rgba(0,0,0,0.8)]"
+                className="text-ink-mid mt-8 max-w-md px-6 text-center text-sm [text-shadow:0_1px_8px_rgba(0,0,0,0.8)]"
             >
                 {showTimer &&
-                    (showQuote && currentQuote ? (
+                    (focusTask ? (
+                        <span className="inline-flex max-w-full items-center gap-2">
+                            <Target className="text-ember size-3.5 shrink-0" aria-hidden />
+                            <span className="text-ink truncate">{focusTask.text}</span>
+                            <button
+                                type="button"
+                                onClick={() => setFocusTask(null)}
+                                className="text-ink-dim hover:text-ink focus-visible:outline-ember shrink-0 rounded transition-colors focus-visible:outline-2"
+                                aria-label="Stop focusing on this task"
+                            >
+                                <X className="size-3.5" />
+                            </button>
+                        </span>
+                    ) : showQuote && currentQuote ? (
                         <span className="font-serif text-base italic">
                             “{currentQuote.text}” — {currentQuote.author}
                         </span>
@@ -110,7 +131,7 @@ export const CenterContent: React.FC = () => {
                             {sessionSummary.totalSessions} sessions · {sessionSummary.totalMinutes} min focused
                         </span>
                     ))}
-            </motion.p>
+            </motion.div>
         </div>
     );
 };

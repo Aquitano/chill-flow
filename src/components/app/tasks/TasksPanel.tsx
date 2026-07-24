@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils';
 import type { Task } from '@/models/app';
 import { useAppStore } from '@/store/app-store';
 import { AnimatePresence, motion } from 'framer-motion';
-import { CalendarDays, Check, Flag, Trash2, X } from 'lucide-react';
+import { CalendarDays, Check, Flag, Target, Trash2, X } from 'lucide-react';
 import { useState } from 'react';
 import { DUE_TEXT } from './due-meta';
 import { PRIORITY_META, PRIORITY_OPTIONS } from './priority-meta';
@@ -31,6 +31,8 @@ const MAX_TASK_LENGTH = 120;
 function TaskRow({ task }: { task: Task }) {
     const updateTask = useUpdateTaskMutation();
     const deleteTask = useDeleteTaskMutation();
+    const setFocusTask = useAppStore((state) => state.setFocusTask);
+    const isFocused = useAppStore((state) => state.focusTaskId === task.id);
     const meta = PRIORITY_META[task.priority];
     // Non-null while renaming; the row shows the field instead of the label.
     const [draft, setDraft] = useState<string | null>(null);
@@ -151,7 +153,29 @@ function TaskRow({ task }: { task: Task }) {
                 )}
             </span>
 
-            <div className="flex items-center gap-1 opacity-100 transition md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100">
+            <div
+                className={cn(
+                    'flex items-center gap-1 transition',
+                    // The focus marker stays visible without hover; it is state, not an action.
+                    isFocused
+                        ? 'opacity-100'
+                        : 'opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100',
+                )}
+            >
+                {!task.isCompleted && (
+                    <button
+                        type="button"
+                        onClick={() => setFocusTask(isFocused ? null : task.id)}
+                        aria-pressed={isFocused}
+                        className={cn(
+                            'rounded p-1 transition hover:bg-white/10',
+                            isFocused ? 'text-ember' : 'text-ink-dim hover:text-ink-mid',
+                        )}
+                        aria-label={isFocused ? 'Stop focusing on this task' : 'Focus on this task'}
+                    >
+                        <Target className="h-3.5 w-3.5" />
+                    </button>
+                )}
                 {!task.dueAt && (
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>

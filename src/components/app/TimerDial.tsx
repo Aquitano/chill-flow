@@ -10,6 +10,7 @@ import {
     useSessionCompleteMutation,
     useSessionCycleCompleteMutation,
     useSessionStartMutation,
+    useUpdateTaskMutation,
 } from '@/hooks/use-app-data';
 import {
     FocusSessionEvent,
@@ -154,6 +155,7 @@ export const TimerDial: React.FC = () => {
     const customMinutes = useAppStore((state) => state.customMinutes);
     const pomodoroSettings = useAppStore((state) => state.pomodoroSettings);
     const currentTrack = useAppStore((state) => state.currentTrack);
+    const focusTaskId = useAppStore((state) => state.focusTaskId);
 
     const setTimerMode = useAppStore((state) => state.setTimerMode);
     const startTimer = useAppStore((state) => state.startTimer);
@@ -195,6 +197,7 @@ export const TimerDial: React.FC = () => {
     const [customOpen, setCustomOpen] = useState(false);
     const [announcement, setAnnouncement] = useState('');
 
+    const updateTask = useUpdateTaskMutation();
     const startSession = useSessionStartMutation();
     const completeSession = useSessionCompleteMutation();
     const completeCycle = useSessionCycleCompleteMutation();
@@ -209,9 +212,16 @@ export const TimerDial: React.FC = () => {
         cancel: cancelSession,
     });
     mutationsRef.current = { start: startSession, complete: completeSession, completeCycle, cancel: cancelSession };
+    const updateTaskRef = useRef(updateTask);
+    updateTaskRef.current = updateTask;
     const timerKind = timerMode === 'pomodoro' ? ('pomodoro' as const) : ('focus' as const);
-    const contextRef = useRef({ mode: currentMode, timerKind, trackId: currentTrack?.id ?? null });
-    contextRef.current = { mode: currentMode, timerKind, trackId: currentTrack?.id ?? null };
+    const contextRef = useRef({
+        mode: currentMode,
+        timerKind,
+        trackId: currentTrack?.id ?? null,
+        taskId: focusTaskId,
+    });
+    contextRef.current = { mode: currentMode, timerKind, trackId: currentTrack?.id ?? null, taskId: focusTaskId };
 
     // Single entry point for the focus-session lifecycle: feed an event to the pure
     // reducer, persist the next state, and execute the resulting API command.
@@ -228,6 +238,7 @@ export const TimerDial: React.FC = () => {
                         timerKind: contextRef.current.timerKind,
                         plannedDurationSeconds: command.plannedSeconds,
                         trackId: contextRef.current.trackId,
+                        taskId: contextRef.current.taskId,
                     },
                     {
                         onSuccess: (session) => {
@@ -352,6 +363,23 @@ export const TimerDial: React.FC = () => {
         return () => window.removeEventListener('pagehide', handlePageHide);
     }, [dispatchSession]);
 
+    // Closes the loop between the two halves of the workspace: a block aimed at a task
+    // ends by asking whether that task is done, instead of the list and the dial never
+    // touching. Reads the store imperatively so completion effects need no extra deps.
+    const promptFocusTask = useCallback(() => {
+        const { focusTaskId: taskId, tasks } = useAppStore.getState();
+        const task = tasks.find((entry) => entry.id === taskId);
+        if (!task || task.isCompleted) return;
+
+        toast(`Finished a block on “${task.text}”`, {
+            id: 'focus-task-complete',
+            action: {
+                label: 'Mark done',
+                onClick: () => updateTaskRef.current.mutate({ id: task.id, isCompleted: true }),
+            },
+        });
+    }, []);
+
     // Announce focus-countdown completion (finite focus reaching 0:00). Open-ended focus
     // also sits at timerSeconds 0, so it is excluded to keep selecting it from reading as
     // a completion. The chime and the live region always fire; the browser notification is
@@ -367,7 +395,8 @@ export const TimerDial: React.FC = () => {
         if (showNotificationsPref) {
             showTimerNotification('Focus session complete', 'Nice work — time to step away for a bit.');
         }
-    }, [timerSeconds, timerMode, isOpenEnded, showNotificationsPref, timerSoundPref]);
+        promptFocusTask();
+    }, [timerSeconds, timerMode, isOpenEnded, showNotificationsPref, timerSoundPref, promptFocusTask]);
 
     // Announce Pomodoro phase changes. `isBreak` only flips via advancePomodoroPhase
     // (a real phase boundary), so watching it covers focus→break and break→focus.
@@ -381,12 +410,13 @@ export const TimerDial: React.FC = () => {
             setAnnouncement('Focus block done. Break time.');
             if (timerSoundPref) playTimerChime('complete');
             if (showNotificationsPref) showTimerNotification('Break time', 'Focus block done — take your break.');
+            promptFocusTask();
         } else {
             setAnnouncement('Break over. Back to focus.');
             if (timerSoundPref) playTimerChime('resume');
             if (showNotificationsPref) showTimerNotification('Back to focus', 'Break over — back into the flow.');
         }
-    }, [pomodoroSettings.isBreak, showNotificationsPref, timerSoundPref, timerMode]);
+    }, [pomodoroSettings.isBreak, showNotificationsPref, timerSoundPref, timerMode, promptFocusTask]);
 
     // Start/pause the timer. On the first start with notifications enabled, ask for
     // permission inside this gesture (browsers reject permission prompts otherwise).

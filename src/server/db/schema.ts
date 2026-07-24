@@ -106,6 +106,9 @@ export const focusSessions = pgTable(
         plannedDurationSeconds: integer('plannedDurationSeconds').notNull(),
         elapsedSeconds: integer('elapsedSeconds').notNull().default(0),
         trackId: text('trackId'),
+        // What the block was for, when the user picked a task to focus on. Not a foreign
+        // key: deleting a task must not erase the focus time that was spent on it.
+        taskId: text('taskId'),
         startedAt: timestamp('startedAt').defaultNow().notNull(),
         completedAt: timestamp('completedAt'),
         canceledAt: timestamp('canceledAt'),

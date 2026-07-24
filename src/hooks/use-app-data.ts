@@ -231,6 +231,7 @@ export function useSessionStartMutation() {
             timerKind: 'focus' | 'pomodoro';
             plannedDurationSeconds: number;
             trackId: string | null;
+            taskId: string | null;
         }) => api.sessions.start(input),
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: queryKeys.sessions });

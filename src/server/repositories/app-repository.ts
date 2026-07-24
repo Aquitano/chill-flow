@@ -148,6 +148,7 @@ function mapSession(row: typeof focusSessions.$inferSelect): FocusSession {
         plannedDurationSeconds: row.plannedDurationSeconds,
         elapsedSeconds: row.elapsedSeconds,
         trackId: row.trackId,
+        taskId: row.taskId,
         completedAt: asIsoString(row.completedAt ?? row.startedAt),
         cycleCompletedAt: row.cycleCompletedAt ? asIsoString(row.cycleCompletedAt) : null,
     };
@@ -501,7 +502,8 @@ export const appRepository = {
     async startSession(
         database: Database,
         userId: string,
-        input: Pick<FocusSession, 'mode' | 'timerKind' | 'plannedDurationSeconds' | 'trackId'>,
+        input: Pick<FocusSession, 'mode' | 'timerKind' | 'plannedDurationSeconds' | 'trackId'> &
+            Partial<Pick<FocusSession, 'taskId'>>,
     ) {
         const now = new Date();
 
@@ -527,6 +529,7 @@ export const appRepository = {
                 plannedDurationSeconds: input.plannedDurationSeconds,
                 elapsedSeconds: 0,
                 trackId: input.trackId,
+                taskId: input.taskId ?? null,
                 startedAt: now,
                 completedAt: null,
                 canceledAt: null,

@@ -106,6 +106,8 @@ export interface FocusSession {
     plannedDurationSeconds: number;
     elapsedSeconds: number;
     trackId: string | null;
+    /** The task this block was for, when the user picked one. */
+    taskId: string | null;
     completedAt: string;
     /** Set once the break following a Pomodoro focus block finished (a full cycle). */
     cycleCompletedAt: string | null;
