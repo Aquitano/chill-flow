@@ -79,11 +79,11 @@ export function TokenHighlightInput({
                 ref={mirrorRef}
                 aria-hidden
                 className={cn(
-                    'pointer-events-none absolute inset-0 overflow-hidden whitespace-pre text-white',
+                    'text-ink pointer-events-none absolute inset-0 overflow-hidden whitespace-pre',
                     TEXT_LAYOUT,
                 )}
             >
-                {value.length === 0 ? <span className="text-neutral-500">{placeholder}</span> : segments}
+                {value.length === 0 ? <span className="text-ink-dim">{placeholder}</span> : segments}
             </div>
             <input
                 ref={resolvedRef}
@@ -99,7 +99,7 @@ export function TokenHighlightInput({
                 className={cn(
                     // Text is transparent (the mirror paints the visible glyphs), so give
                     // the selection an explicit colour or selected text would be invisible.
-                    'relative w-full bg-transparent whitespace-pre text-transparent caret-white outline-none selection:bg-white/30 selection:text-white placeholder:text-transparent',
+                    'caret-ember selection:text-ink relative w-full bg-transparent whitespace-pre text-transparent outline-none selection:bg-white/30 placeholder:text-transparent',
                     TEXT_LAYOUT,
                 )}
             />
