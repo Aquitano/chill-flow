@@ -221,6 +221,8 @@ export function TasksPanel() {
     return (
         <motion.aside
             key="tasks-panel"
+            data-workspace-panel
+            aria-label="Tasks"
             style={resizable ? { width: size.width, height: size.height } : undefined}
             className={cn(
                 'z-20 flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-black/80 shadow-lg backdrop-blur-md',

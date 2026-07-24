@@ -7,6 +7,16 @@ import { useEffect } from 'react';
 const VOLUME_STEP = 5;
 
 /**
+ * Controls that Space and Enter activate on their own. A workspace shortcut must never
+ * race the control the user is actually pressing — tabbing to "Start timer" and hitting
+ * Space has to start the timer, not toggle the music.
+ */
+const ACTIVATABLE_SELECTOR =
+    'button, summary, a[href], [role="button"], [role="switch"], [role="tab"], [role="option"], [role="menuitem"], [role="checkbox"]';
+
+const ARROW_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+
+/**
  * Workspace keyboard shortcuts:
  *   Ctrl/Cmd+K — command palette
  *   Space — play/pause music
@@ -25,9 +35,10 @@ const VOLUME_STEP = 5;
  *   ?     — open the shortcuts reference
  *   Esc   — close open panels
  *
- * Skipped while typing (inputs, textareas, contenteditable) or inside any
- * dialog/menu/dock panel, and when a modifier is held (except Shift and the
- * palette chord), so shortcuts never eat real input.
+ * Skipped while typing (inputs, textareas, contenteditable), inside any
+ * dialog/menu/workspace panel, when the focused control already owns the key
+ * (Space on a button, arrows in a tablist), and when a modifier is held (except
+ * Shift and the palette chord), so shortcuts never eat real input.
  */
 export function useWorkspaceHotkeys() {
     useEffect(() => {
@@ -65,6 +76,15 @@ export function useWorkspaceHotkeys() {
                 inOwnOverlay ||
                 target?.closest('[role="dialog"], [role="listbox"], [role="slider"], [data-workspace-panel]')
             ) {
+                return;
+            }
+
+            // Keys the focused control owns: activation on a button, roving arrows in a
+            // tablist. Claiming these would break keyboard operation of the workspace.
+            if ((event.key === ' ' || event.key === 'Enter') && target?.closest(ACTIVATABLE_SELECTOR)) {
+                return;
+            }
+            if (ARROW_KEYS.has(event.key) && target?.closest('[role="tablist"]')) {
                 return;
             }
 
