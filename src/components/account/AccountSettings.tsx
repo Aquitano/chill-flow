@@ -3,6 +3,7 @@
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { usePreferencesQuery, useUpdatePreferencesMutation } from '@/hooks/use-app-data';
+import { playTimerChime } from '@/lib/audio/chime';
 import {
     NotificationPermissionState,
     getNotificationPermission,
@@ -11,7 +12,7 @@ import {
 import { UserPreferences } from '@/models/app';
 import { useAppStore } from '@/store/app-store';
 import { UserButton, useUser } from '@clerk/nextjs';
-import { Bell, BellOff, Volume2 } from 'lucide-react';
+import { Bell, BellOff, Volume2, VolumeX } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -176,6 +177,27 @@ export function AccountSettings() {
                         className="cursor-pointer"
                     />
                     <span className="w-9 text-right text-sm tabular-nums text-neutral-300">{volume[0] ?? 50}%</span>
+                </div>
+            </SettingRow>
+
+            <SettingRow
+                title="Timer chime"
+                description="Play a soft tone when a focus session finishes or a Pomodoro phase changes — audible even when the tab is in the background."
+            >
+                <div className="flex items-center gap-2">
+                    {preferences.timerSound ? (
+                        <Volume2 size={16} className="text-emerald-300" />
+                    ) : (
+                        <VolumeX size={16} className="text-neutral-400" />
+                    )}
+                    <Toggle
+                        checked={preferences.timerSound}
+                        onChange={(next) => {
+                            if (next) playTimerChime('complete');
+                            save({ timerSound: next }, next ? 'Timer chime on.' : 'Timer chime off.');
+                        }}
+                        label="Timer chime"
+                    />
                 </div>
             </SettingRow>
 

@@ -72,6 +72,7 @@ export interface UserPreferences {
     transitionSpeed: number;
     volume: number;
     showNotifications: boolean;
+    timerSound: boolean;
     theme: 'light' | 'dark' | 'system';
     timerMode: 'focus' | 'pomodoro';
     timerPreset: string;
