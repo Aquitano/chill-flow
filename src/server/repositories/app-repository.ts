@@ -451,6 +451,15 @@ export const appRepository = {
         return updatedTask ? mapTask(updatedTask) : null;
     },
 
+    async clearCompletedTasks(database: Database, userId: string) {
+        const deletedTasks = await database
+            .delete(tasks)
+            .where(and(eq(tasks.userId, userId), eq(tasks.isCompleted, true)))
+            .returning({ id: tasks.id });
+
+        return { count: deletedTasks.length };
+    },
+
     async deleteTask(database: Database, userId: string, taskId: string) {
         const deletedTasks = await database
             .delete(tasks)

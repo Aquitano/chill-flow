@@ -189,6 +189,28 @@ export function useDeleteTaskMutation() {
     });
 }
 
+export function useClearCompletedTasksMutation() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: () => api.tasks.clearCompleted(),
+        onMutate: async (): Promise<TaskListContext> => {
+            await queryClient.cancelQueries({ queryKey: queryKeys.tasks });
+            const previous = queryClient.getQueryData<Task[]>(queryKeys.tasks);
+            queryClient.setQueryData<Task[]>(queryKeys.tasks, (old = []) => old.filter((task) => !task.isCompleted));
+            return { previous };
+        },
+        onError: (_error, _input, context) => {
+            if (context?.previous) {
+                queryClient.setQueryData(queryKeys.tasks, context.previous);
+            }
+        },
+        onSettled: async () => {
+            await queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
+        },
+    });
+}
+
 export function useUpdatePreferencesMutation() {
     const queryClient = useQueryClient();
 

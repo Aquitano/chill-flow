@@ -116,6 +116,7 @@ export const api = {
         update: (input: { id: string; text?: string; priority?: Task['priority']; isCompleted?: boolean }) =>
             unwrap<Task | null>(client.tasks.update.$post(input)),
         delete: (input: { id: string }) => unwrap<{ success: boolean }>(client.tasks.delete.$post(input)),
+        clearCompleted: () => unwrap<{ count: number }>(client.tasks.clearCompleted.$post()),
     },
     tracks: {
         list: () => unwrap<Track[]>(client.tracks.list.$get()),

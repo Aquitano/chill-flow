@@ -29,4 +29,10 @@ export const tasksRouter = j.router({
         .mutation(async ({ c, ctx, input }) => {
             return c.superjson(await appRepository.deleteTask(ctx.db, ctx.userId, input.id));
         }),
+
+    clearCompleted: protectedMutationProcedure
+        .use(createRateLimitMiddleware({ key: 'tasks:clearCompleted', limit: 10, windowMs: 60_000 }))
+        .mutation(async ({ c, ctx }) => {
+            return c.superjson(await appRepository.clearCompletedTasks(ctx.db, ctx.userId));
+        }),
 });

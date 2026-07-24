@@ -7,7 +7,11 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useDeleteTaskMutation, useUpdateTaskMutation } from '@/hooks/use-app-data';
+import {
+    useClearCompletedTasksMutation,
+    useDeleteTaskMutation,
+    useUpdateTaskMutation,
+} from '@/hooks/use-app-data';
 import { dueState, formatDue, quickDueOptions, type DueState } from '@/lib/task-dates';
 import type { TaskPriority } from '@/lib/task-parser';
 import { cn } from '@/lib/utils';
@@ -15,15 +19,29 @@ import type { Task } from '@/models/app';
 import { useAppStore } from '@/store/app-store';
 import { AnimatePresence, motion } from 'framer-motion';
 import { CalendarDays, Check, Flag, Trash2, X } from 'lucide-react';
+import { useState } from 'react';
 import { DUE_TEXT } from './due-meta';
 import { PRIORITY_META, PRIORITY_OPTIONS } from './priority-meta';
 import { TaskComposer } from './TaskComposer';
 import type { ResizablePanel } from './use-resizable-panel';
 
+/** Matches the server's task-text limit, so a rename can't fail validation on length. */
+const MAX_TASK_LENGTH = 120;
+
 function TaskRow({ task }: { task: Task }) {
     const updateTask = useUpdateTaskMutation();
     const deleteTask = useDeleteTaskMutation();
     const meta = PRIORITY_META[task.priority];
+    // Non-null while renaming; the row shows the field instead of the label.
+    const [draft, setDraft] = useState<string | null>(null);
+
+    const commitRename = () => {
+        const next = draft?.trim() ?? '';
+        if (next && next !== task.text) {
+            updateTask.mutate({ id: task.id, text: next });
+        }
+        setDraft(null);
+    };
 
     const dueMenuItems = (
         <>
@@ -76,14 +94,39 @@ function TaskRow({ task }: { task: Task }) {
             </button>
 
             <span className="min-w-0 flex-1">
-                <span
-                    className={cn(
-                        'block text-sm',
-                        task.isCompleted ? 'text-ink-dim line-through' : 'text-ink',
-                    )}
-                >
-                    {task.text}
-                </span>
+                {draft === null ? (
+                    <button
+                        type="button"
+                        onClick={() => setDraft(task.text)}
+                        className={cn(
+                            'focus-visible:outline-ember block w-full truncate rounded text-left text-sm focus-visible:outline-2',
+                            task.isCompleted ? 'text-ink-dim line-through' : 'text-ink',
+                        )}
+                        aria-label={`Rename task: ${task.text}`}
+                    >
+                        {task.text}
+                    </button>
+                ) : (
+                    <input
+                        type="text"
+                        autoFocus
+                        value={draft}
+                        maxLength={MAX_TASK_LENGTH}
+                        onChange={(event) => setDraft(event.target.value)}
+                        onBlur={commitRename}
+                        onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                                event.preventDefault();
+                                commitRename();
+                            } else if (event.key === 'Escape') {
+                                event.preventDefault();
+                                setDraft(null);
+                            }
+                        }}
+                        aria-label="Task name"
+                        className="focus-visible:outline-ember text-ink block w-full rounded bg-white/5 px-1 py-0.5 text-sm outline-none focus-visible:outline-2"
+                    />
+                )}
                 {task.dueAt && (
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -212,6 +255,7 @@ function groupTasks(tasks: Task[]): TaskGroup[] {
 export function TasksPanel({ panel }: { panel: ResizablePanel }) {
     const tasks = useAppStore((state) => state.tasks);
     const setTasksOpen = useAppStore((state) => state.setTasksOpen);
+    const clearCompleted = useClearCompletedTasksMutation();
     const openCount = tasks.filter((task) => !task.isCompleted).length;
     const { enabled: resizable, size, resizing, onResizeStart } = panel;
     const groups = groupTasks(tasks);
@@ -283,6 +327,16 @@ export function TasksPanel({ panel }: { panel: ResizablePanel }) {
                                           )}
                                       >
                                           {group.label}
+                                          {group.id === 'done' && (
+                                              <button
+                                                  type="button"
+                                                  onClick={() => clearCompleted.mutate()}
+                                                  disabled={clearCompleted.isPending}
+                                                  className="focus-visible:outline-ember text-ink-dim hover:text-ink ml-2 rounded normal-case transition focus-visible:outline-2 disabled:opacity-50"
+                                              >
+                                                  Clear
+                                              </button>
+                                          )}
                                       </motion.li>,
                                   ]
                                 : []),
