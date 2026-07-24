@@ -3,6 +3,7 @@
 import { useAppStore } from '@/store/app-store';
 import { AnimatePresence, motion } from 'framer-motion';
 import { TasksPanel } from './tasks/TasksPanel';
+import { PANEL_LEFT_RESERVE, useResizablePanel } from './tasks/use-resizable-panel';
 import { TimerDial } from './TimerDial';
 
 export const CenterContent: React.FC = () => {
@@ -16,15 +17,31 @@ export const CenterContent: React.FC = () => {
     const showBackground = modes[currentMode]?.showBackground || false;
     const showTimer = modes[currentMode]?.showTimer || false;
 
+    // The tasks panel floats over the workspace at a fixed left offset while the dial is
+    // centred in the viewport, so on anything narrower than roughly 1280px the two used to
+    // overlap — the panel covering the dial it sits in front of. Reserving the panel's
+    // width here re-centres the dial in what's actually left, and tracks the drag-resize.
+    const panel = useResizablePanel();
+    const tasksGutter = isTasksOpen && panel.enabled ? panel.size.width + PANEL_LEFT_RESERVE : 0;
+    // Subtract the container's own horizontal padding too, so the dial fits the box that
+    // is actually left rather than spilling back over the panel.
+    const dialWidth = tasksGutter
+        ? `min(560px, calc(100vw - 3rem - ${tasksGutter}px), calc(100vh - 16rem))`
+        : 'min(560px, calc(100vw - 2rem), calc(100vh - 16rem))';
+
     return (
         // Extra bottom padding keeps the dial + caption clear of the track dock.
-        <div className="absolute inset-0 z-10 flex min-h-screen w-full flex-col items-center justify-center px-4 pt-24 pb-44 sm:px-6">
-            <AnimatePresence>{isTasksOpen && <TasksPanel />}</AnimatePresence>
+        <div
+            className="absolute inset-0 z-10 flex min-h-screen w-full flex-col items-center justify-center px-4 pt-24 pb-44 transition-[padding] duration-300 motion-reduce:transition-none sm:px-6"
+            style={tasksGutter ? { paddingLeft: `calc(1.5rem + ${tasksGutter}px)` } : undefined}
+        >
+            <AnimatePresence>{isTasksOpen && <TasksPanel panel={panel} />}</AnimatePresence>
 
             <motion.div
-                className={`relative z-10 flex aspect-square w-[min(560px,calc(100vw-2rem),calc(100vh-16rem))] flex-col items-center justify-center rounded-full ${
+                className={`relative z-10 flex aspect-square flex-col items-center justify-center rounded-full transition-[width] duration-300 motion-reduce:transition-none ${
                     showBackground ? 'bg-black/60 shadow-lg backdrop-blur-[2px]' : 'bg-transparent'
                 }`}
+                style={{ width: dialWidth }}
                 initial={{ scale: 0.94, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}

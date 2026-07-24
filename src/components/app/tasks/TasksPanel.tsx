@@ -18,7 +18,7 @@ import { CalendarDays, Check, Flag, Trash2, X } from 'lucide-react';
 import { DUE_TEXT } from './due-meta';
 import { PRIORITY_META, PRIORITY_OPTIONS } from './priority-meta';
 import { TaskComposer } from './TaskComposer';
-import { useResizablePanel } from './use-resizable-panel';
+import type { ResizablePanel } from './use-resizable-panel';
 
 function TaskRow({ task }: { task: Task }) {
     const updateTask = useUpdateTaskMutation();
@@ -108,7 +108,7 @@ function TaskRow({ task }: { task: Task }) {
                 )}
             </span>
 
-            <div className="flex items-center gap-1 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+            <div className="flex items-center gap-1 opacity-100 transition md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100">
                 {!task.dueAt && (
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -209,11 +209,11 @@ function groupTasks(tasks: Task[]): TaskGroup[] {
     return groups;
 }
 
-export function TasksPanel() {
+export function TasksPanel({ panel }: { panel: ResizablePanel }) {
     const tasks = useAppStore((state) => state.tasks);
     const setTasksOpen = useAppStore((state) => state.setTasksOpen);
     const openCount = tasks.filter((task) => !task.isCompleted).length;
-    const { enabled: resizable, size, resizing, onResizeStart } = useResizablePanel();
+    const { enabled: resizable, size, resizing, onResizeStart } = panel;
     const groups = groupTasks(tasks);
 
     return (
@@ -224,12 +224,13 @@ export function TasksPanel() {
             style={resizable ? { width: size.width, height: size.height } : undefined}
             className={cn(
                 'z-20 flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-black/80 shadow-lg backdrop-blur-md',
-                // Phones: a full sheet between the header and the player bar, so the
-                // list never half-covers the dial. Desktop: a floating side panel.
-                'max-sm:fixed max-sm:inset-x-3 max-sm:top-16 max-sm:bottom-28',
-                'sm:absolute sm:top-24 sm:left-6',
+                // Narrow viewports: a full sheet between the header and the player bar, so
+                // the list never half-covers the dial. Wider: a floating side panel, with
+                // the dial giving up the width it takes (see CenterContent).
+                'max-md:fixed max-md:inset-x-3 max-md:top-16 max-md:bottom-28',
+                'md:absolute md:top-24 md:left-6',
                 // Fallback sizing before the desktop resize state is active.
-                !resizable && 'sm:max-h-[calc(100vh-11rem)] sm:w-80',
+                !resizable && 'md:max-h-[calc(100vh-11rem)] md:w-80',
                 resizing && 'select-none',
             )}
             initial={{ x: -50, opacity: 0 }}
