@@ -498,22 +498,6 @@ export const appRepository = {
         return mapPreferences(updatedPreferences);
     },
 
-    async listSessions(database: Database, userId: string) {
-        const storedSessions = await database
-            .select()
-            .from(focusSessions)
-            .where(
-                and(
-                    eq(focusSessions.userId, userId),
-                    eq(focusSessions.status, 'completed'),
-                    isNotNull(focusSessions.completedAt),
-                ),
-            )
-            .orderBy(desc(focusSessions.completedAt));
-
-        return storedSessions.map(mapSession);
-    },
-
     async startSession(
         database: Database,
         userId: string,

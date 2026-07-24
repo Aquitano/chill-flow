@@ -9,11 +9,10 @@ import {
 } from '../validation/app';
 
 export const sessionsRouter = j.router({
+    // Summary only: the workspace renders totals, and the full history of every completed
+    // session is an unbounded payload nothing reads.
     list: protectedDataProcedure.query(async ({ c, ctx }) => {
-        return c.superjson({
-            sessions: await appRepository.listSessions(ctx.db, ctx.userId),
-            summary: await appRepository.getSessionSummary(ctx.db, ctx.userId),
-        });
+        return c.superjson({ summary: await appRepository.getSessionSummary(ctx.db, ctx.userId) });
     }),
 
     start: protectedMutationProcedure

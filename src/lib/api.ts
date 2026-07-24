@@ -100,7 +100,6 @@ export type PreferencesPayload = {
 };
 
 export type SessionPayload = {
-    sessions: FocusSession[];
     summary: {
         totalSessions: number;
         totalMinutes: number;

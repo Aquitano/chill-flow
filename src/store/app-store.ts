@@ -1,5 +1,5 @@
 import { tracksInScene } from '@/lib/tracks';
-import { Background, FocusSession, Quote, Task, Track } from '@/models/app';
+import { Background, Quote, Task, Track } from '@/models/app';
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 
@@ -174,7 +174,6 @@ interface AppState {
     tasks: Task[];
     backgrounds: Background[];
     selectedBackgroundId: string | null;
-    sessions: FocusSession[];
     sessionSummary: {
         totalSessions: number;
         totalMinutes: number;
@@ -227,7 +226,7 @@ interface AppState {
     getQueue: () => Track[];
     setSelectedBackgroundId: (backgroundId: string | null) => void;
     setCurrentQuote: (quote: Quote | null) => void;
-    setSessions: (sessions: FocusSession[], summary: AppState['sessionSummary']) => void;
+    setSessionSummary: (summary: AppState['sessionSummary']) => void;
     toggleRepeat: () => void;
 
     setTimerMode: (mode: TimerMode) => void;
@@ -305,7 +304,6 @@ export const useAppStore = create<AppState>()(
         tasks: [],
         backgrounds: [],
         selectedBackgroundId: null,
-        sessions: [],
         sessionSummary: {
             totalSessions: 0,
             totalMinutes: 0,
@@ -449,7 +447,7 @@ export const useAppStore = create<AppState>()(
         },
         setSelectedBackgroundId: (backgroundId) => set({ selectedBackgroundId: backgroundId }, false, 'setBackgroundId'),
         setCurrentQuote: (quote) => set({ currentQuote: quote }, false, 'setCurrentQuote'),
-        setSessions: (sessions, summary) => set({ sessions, sessionSummary: summary }, false, 'setSessions'),
+        setSessionSummary: (summary) => set({ sessionSummary: summary }, false, 'setSessionSummary'),
         toggleRepeat: () => set((state) => ({ repeatEnabled: !state.repeatEnabled }), false, 'toggleRepeat'),
 
         setTimerMode: (mode) => {

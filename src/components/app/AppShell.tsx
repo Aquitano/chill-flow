@@ -18,6 +18,7 @@ import { readTimerSnapshot } from '@/lib/timer-persistence';
 import { useWorkspaceHotkeys } from '@/hooks/use-workspace-hotkeys';
 import { PomodoroCadence, TimerMode, useAppStore } from '@/store/app-store';
 import { AnimatePresence, motion } from 'framer-motion';
+import { useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -54,12 +55,13 @@ export function AppShell() {
     const setSelectedBackgroundId = useAppStore((state) => state.setSelectedBackgroundId);
     const setCurrentTrack = useAppStore((state) => state.setCurrentTrack);
     const setLikedTrackIds = useAppStore((state) => state.setLikedTrackIds);
-    const setSessions = useAppStore((state) => state.setSessions);
+    const setSessionSummary = useAppStore((state) => state.setSessionSummary);
     const setMode = useAppStore((state) => state.setMode);
     const setCurrentQuote = useAppStore((state) => state.setCurrentQuote);
     const hydratePreferences = useAppStore((state) => state.hydratePreferences);
     const restoreTimer = useAppStore((state) => state.restoreTimer);
 
+    const searchParams = useSearchParams();
     const tracksQuery = useTracksQuery();
     const tasksQuery = useTasksQuery();
     const preferencesQuery = usePreferencesQuery();
@@ -90,9 +92,9 @@ export function AppShell() {
 
     useEffect(() => {
         if (sessionsQuery.data) {
-            setSessions(sessionsQuery.data.sessions, sessionsQuery.data.summary);
+            setSessionSummary(sessionsQuery.data.summary);
         }
-    }, [sessionsQuery.data, setSessions]);
+    }, [sessionsQuery.data, setSessionSummary]);
 
     useEffect(() => {
         // Hydrate workspace state from saved preferences exactly once. Re-running would
@@ -113,11 +115,22 @@ export function AppShell() {
             sessionsBeforeLongBreak: preferences.pomodoroSettings.sessionsBeforeLongBreak,
         };
 
+        // A ?track= deep link (from /soundscapes) wins over the saved preference for this
+        // visit. It only selects the track — playback still waits for a real gesture.
+        const requestedTrackId = searchParams.get('track');
         const selectedTrack = tracksQuery.data?.length
-            ? (tracksQuery.data.find((track) => track.id === preferences.selectedTrackId) ??
+            ? ((requestedTrackId
+                  ? tracksQuery.data.find((track) => track.id === requestedTrackId)
+                  : undefined) ??
+              tracksQuery.data.find((track) => track.id === preferences.selectedTrackId) ??
               tracksQuery.data[0] ??
               null)
             : null;
+
+        if (requestedTrackId) {
+            // Drop the parameter so a later reload restores the saved track instead.
+            window.history.replaceState(null, '', window.location.pathname);
+        }
 
         // Seed the persist baseline with the exact shape we later write, so hydration
         // itself never triggers a redundant save. Uses the *resolved* track id.
@@ -179,6 +192,7 @@ export function AppShell() {
         setMode,
         setSelectedBackgroundId,
         restoreTimer,
+        searchParams,
         tracksQuery.data,
     ]);
 
