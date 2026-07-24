@@ -166,7 +166,9 @@ function mapPreferences(row: typeof userPreferences.$inferSelect): UserPreferenc
         timerMode: row.timerMode as UserPreferences['timerMode'],
         timerPreset: row.timerPreset,
         customMinutes: row.customMinutes,
-        pomodoroSettings: row.pomodoroSettings,
+        // Merged over the defaults: rows written before a cadence field existed hold the
+        // older JSON shape, and a missing key must read as the default rather than undefined.
+        pomodoroSettings: { ...DEFAULT_POMODORO_SETTINGS, ...row.pomodoroSettings },
         customModes: [],
         selectedTrackId: row.selectedTrackId,
         selectedBackgroundId: row.selectedBackgroundId,

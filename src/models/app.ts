@@ -64,6 +64,10 @@ export interface PomodoroSettings {
     breakMinutes: number;
     longBreakMinutes: number;
     sessionsBeforeLongBreak: number;
+    /** Roll straight into the break when a focus block ends, instead of waiting for play. */
+    autoStartBreaks: boolean;
+    /** Roll straight into the next focus block when a break ends. */
+    autoStartFocus: boolean;
 }
 
 export interface UserPreferences {

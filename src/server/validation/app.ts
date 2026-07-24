@@ -69,6 +69,10 @@ const pomodoroSettingsSchema = z.object({
     breakMinutes: z.number().int().min(1).max(120),
     longBreakMinutes: z.number().int().min(1).max(240),
     sessionsBeforeLongBreak: z.number().int().min(1).max(12),
+    // Defaulted rather than required: a client on the previous shape keeps working, and
+    // the stored JSON ends up complete either way.
+    autoStartBreaks: z.boolean().default(true),
+    autoStartFocus: z.boolean().default(true),
 });
 
 export const updatePreferencesInputSchema = z.object({
