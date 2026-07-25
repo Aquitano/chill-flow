@@ -211,6 +211,9 @@ export const TimerDial: React.FC = () => {
     const prevResetCountRef = useRef(timerResetCount);
     const prevTimerSecondsRef = useRef(timerSeconds);
     const prevIsBreakRef = useRef(pomodoroSettings.isBreak);
+    // Set by handleSkipBreak so the boundary effect can tell an explicit skip from a break
+    // that ran out; the two differ in wording and in whether the user is present.
+    const skippedBreakRef = useRef(false);
 
     const [customHours, setCustomHours] = useState('0');
     const [customMins, setCustomMins] = useState('25');
@@ -431,15 +434,24 @@ export const TimerDial: React.FC = () => {
             return;
         }
 
+        const skipped = skippedBreakRef.current;
+        skippedBreakRef.current = false;
+
         // The break ran out, so the block that was waiting on it is a full focus-plus-break
-        // cycle — earned by the break finishing, not by the next block being started.
+        // cycle — earned by the break finishing, not by the next block being started. A skip
+        // clears the pending mark before reaching here, so it earns nothing.
         if (pendingCycleSessionIdRef.current) {
             mutationsRef.current.completeCycle.mutate({ id: pendingCycleSessionIdRef.current });
             pendingCycleSessionIdRef.current = null;
         }
-        setAnnouncement('Break over. Back to focus.');
+        // This effect owns the announcement for both boundaries; handleSkipBreak setting its
+        // own would be overwritten here on the very next commit.
+        setAnnouncement(skipped ? 'Break skipped. Back to focus.' : 'Break over. Back to focus.');
         if (timerSoundPref) playTimerChime('resume');
-        if (showNotificationsPref) showTimerNotification('Back to focus', 'Break over — back into the flow.');
+        // No notification for a skip: the user just pressed the button, so they are here.
+        if (showNotificationsPref && !skipped) {
+            showTimerNotification('Back to focus', 'Break over — back into the flow.');
+        }
     }, [pomodoroSettings.isBreak, showNotificationsPref, timerSoundPref, timerMode, promptFocusTask]);
 
     // Start/pause the timer. On the first start with notifications enabled, ask for
@@ -491,7 +503,7 @@ export const TimerDial: React.FC = () => {
         // A skipped break is not a completed focus-plus-break cycle, so the block waiting
         // on this break never earns its cycle mark.
         pendingCycleSessionIdRef.current = null;
-        setAnnouncement('Break skipped. Back to focus.');
+        skippedBreakRef.current = true;
         advancePomodoroPhase();
         // Skipping is an explicit "back to work now", so it runs even for someone who
         // starts their focus blocks by hand.

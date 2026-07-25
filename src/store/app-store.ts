@@ -793,7 +793,15 @@ export const useAppStore = create<AppState>()(
                         return { pomodoroSettings };
                     }
 
-                    const phaseSeconds = phaseDurationSeconds({ ...state, pomodoroSettings }) ?? state.timerSeconds;
+                    // Only a change to *this* phase's length may move the dial. The auto-start
+                    // toggles are policy and carry no duration, and retuning a phase the dial
+                    // isn't showing must not restart the one it is — either would throw away
+                    // the remaining time of a phase paused at a boundary.
+                    const phaseSeconds = phaseDurationSeconds({ ...state, pomodoroSettings });
+                    if (phaseSeconds == null || phaseSeconds === phaseDurationSeconds(state)) {
+                        return { pomodoroSettings };
+                    }
+
                     return { pomodoroSettings, ...timerSecondsPatch('pomodoro', phaseSeconds) };
                 },
                 false,

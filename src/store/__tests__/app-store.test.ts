@@ -213,6 +213,40 @@ describe('pomodoro auto-start', () => {
         expect(useAppStore.getState().pomodoroSettings.isBreak).toBe(false);
         expect(useAppStore.getState().timerActive).toBe(true);
     });
+
+    it('keeps the remaining time when a policy toggle changes', () => {
+        // The toggles sit in the popover beside a dial that now deliberately waits at phase
+        // boundaries, so restarting the phase on a toggle is exactly the wrong moment.
+        atTime(0);
+        useAppStore.getState().startTimer();
+        atTime(10 * 60_000);
+        useAppStore.getState().pauseTimer();
+        expect(useAppStore.getState().timerSeconds).toBe(15 * 60);
+
+        useAppStore.getState().updatePomodoroSettings({ autoStartFocus: false });
+        expect(useAppStore.getState().timerSeconds).toBe(15 * 60);
+
+        useAppStore.getState().updatePomodoroSettings({ autoStartBreaks: false });
+        expect(useAppStore.getState().timerSeconds).toBe(15 * 60);
+    });
+
+    it('keeps a paused break when an unrelated duration is retuned', () => {
+        useAppStore.getState().updatePomodoroSettings({ isBreak: true });
+        atTime(0);
+        useAppStore.getState().startTimer();
+        atTime(2 * 60_000);
+        useAppStore.getState().pauseTimer();
+        expect(useAppStore.getState().timerSeconds).toBe(3 * 60);
+
+        useAppStore.getState().updatePomodoroSettings({ focusMinutes: 40 });
+        expect(useAppStore.getState().timerSeconds).toBe(3 * 60);
+    });
+
+    it('still shows a retuned duration for the phase on the dial', () => {
+        useAppStore.getState().updatePomodoroSettings({ focusMinutes: 40 });
+
+        expect(useAppStore.getState().timerSeconds).toBe(40 * 60);
+    });
 });
 
 describe('open-ended focus', () => {
