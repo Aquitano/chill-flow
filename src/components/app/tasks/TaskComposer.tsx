@@ -121,9 +121,9 @@ export function TaskComposer() {
             <button
                 type="button"
                 onClick={() => setExpanded(true)}
-                className="group mb-4 flex w-full items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-neutral-400 transition hover:border-white/20 hover:text-white"
+                className="group focus-visible:outline-ember mb-4 flex w-full items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-ink-dim transition hover:border-white/20 hover:text-ink focus-visible:outline-2"
             >
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-rose-500/80 text-white transition group-hover:bg-rose-500">
+                <span className="bg-ember/80 text-night group-hover:bg-ember flex h-5 w-5 items-center justify-center rounded-full transition">
                     <Plus className="h-3.5 w-3.5" />
                 </span>
                 Add task
@@ -149,7 +149,7 @@ export function TaskComposer() {
 
     return (
         <div
-            className="mb-4 rounded-xl border border-white/15 bg-neutral-900/80 p-3 shadow-lg"
+            className="mb-4 rounded-xl border border-white/15 bg-night-2/90 p-3 shadow-lg"
             // Escape closes the card from anywhere inside it (input, chip, footer). The
             // chip menus live in portals, so their own Escape-to-close doesn't reach here.
             onKeyDown={(event) => {
@@ -218,7 +218,7 @@ export function TaskComposer() {
                     <span
                         id={hintId}
                         role="tooltip"
-                        className="pointer-events-none absolute bottom-full left-0 z-40 mb-1.5 rounded-md border border-white/10 bg-neutral-800 px-2 py-1 text-[11px] whitespace-nowrap text-neutral-200 opacity-0 shadow-md transition-opacity duration-150 group-focus-within/hint:opacity-100 group-hover/hint:opacity-100"
+                        className="pointer-events-none absolute bottom-full left-0 z-40 mb-1.5 rounded-md border border-white/10 bg-night-2 px-2 py-1 text-[11px] whitespace-nowrap text-ink-mid opacity-0 shadow-md transition-opacity duration-150 group-focus-within/hint:opacity-100 group-hover/hint:opacity-100"
                     >
                         Type <span className="font-mono">p1</span>–<span className="font-mono">p4</span> or a date like{' '}
                         <span className="font-mono">tomorrow 5pm</span>
@@ -233,7 +233,7 @@ export function TaskComposer() {
                                 'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition',
                                 effectiveDue
                                     ? DUE_CHIP[dueState(effectiveDue.dueAt, effectiveDue.hasTime)]
-                                    : 'border-white/15 bg-white/5 text-neutral-400 hover:text-neutral-200',
+                                    : 'border-white/15 bg-white/5 text-ink-dim hover:text-ink-mid',
                             )}
                             aria-label={
                                 effectiveDue
@@ -255,7 +255,7 @@ export function TaskComposer() {
                     >
                         {quickDueOptions().map((option) => (
                             <DropdownMenuItem key={option.id} onSelect={() => selectDue(option.dueAt)}>
-                                <CalendarDays className="h-3.5 w-3.5 text-neutral-400" />
+                                <CalendarDays className="h-3.5 w-3.5 text-ink-dim" />
                                 {option.label}
                             </DropdownMenuItem>
                         ))}
@@ -263,7 +263,7 @@ export function TaskComposer() {
                             <>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem onSelect={() => selectDue(null)}>
-                                    <X className="h-3.5 w-3.5 text-neutral-400" />
+                                    <X className="h-3.5 w-3.5 text-ink-dim" />
                                     No date
                                 </DropdownMenuItem>
                             </>
@@ -276,11 +276,11 @@ export function TaskComposer() {
                 <span
                     role="status"
                     aria-live="polite"
-                    className="inline-flex items-center gap-1 text-xs text-neutral-200"
+                    className="inline-flex items-center gap-1 text-xs text-ink-mid"
                 >
                     {confirmations.length > 0 && (
                         <>
-                            <Check className="h-3 w-3 text-emerald-400" />
+                            <Check className="h-3 w-3 text-ember" />
                             {confirmations.join(' · ')}
                         </>
                     )}
@@ -288,7 +288,7 @@ export function TaskComposer() {
             </div>
 
             <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-3">
-                <span className="hidden items-center gap-1 text-[11px] text-neutral-500 sm:flex">
+                <span className="hidden items-center gap-1 text-[11px] text-ink-dim sm:flex">
                     <CornerDownLeft className="h-3 w-3" /> to add
                 </span>
                 <div className="flex items-center gap-2">

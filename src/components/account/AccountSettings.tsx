@@ -3,15 +3,14 @@
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { usePreferencesQuery, useUpdatePreferencesMutation } from '@/hooks/use-app-data';
-import {
-    NotificationPermissionState,
-    getNotificationPermission,
-    requestNotificationPermission,
-} from '@/lib/notifications';
+import { ToggleSwitch } from '@/components/ui/toggle-switch';
+import { useNotificationPermission } from '@/hooks/use-notification-permission';
+import { playTimerChime } from '@/lib/audio/chime';
+import { getNotificationPermission } from '@/lib/notifications';
 import { UserPreferences } from '@/models/app';
 import { useAppStore } from '@/store/app-store';
 import { UserButton, useUser } from '@clerk/nextjs';
-import { Bell, BellOff, Volume2 } from 'lucide-react';
+import { Bell, BellOff, Volume2, VolumeX } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -35,55 +34,22 @@ function SettingRow({
     );
 }
 
-function Toggle({
-    checked,
-    onChange,
-    label,
-}: {
-    checked: boolean;
-    onChange: (next: boolean) => void;
-    label: string;
-}) {
-    return (
-        <button
-            type="button"
-            role="switch"
-            aria-checked={checked}
-            aria-label={label}
-            onClick={() => onChange(!checked)}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                checked ? 'bg-emerald-500' : 'bg-white/15'
-            }`}
-        >
-            <span
-                className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                    checked ? 'translate-x-5' : 'translate-x-0.5'
-                }`}
-            />
-        </button>
-    );
-}
-
 export function AccountSettings() {
     const { user } = useUser();
     const preferencesQuery = usePreferencesQuery();
     const updatePreferences = useUpdatePreferencesMutation();
     const modes = useAppStore((state) => state.modes);
+    const { permission, request: requestPermission } = useNotificationPermission();
 
     const preferences = preferencesQuery.data?.preferences;
 
     const [volume, setVolume] = useState<number[]>([50]);
-    const [permission, setPermission] = useState<NotificationPermissionState>('default');
 
     useEffect(() => {
         if (preferences) {
             setVolume([preferences.volume]);
         }
     }, [preferences?.volume]);
-
-    useEffect(() => {
-        setPermission(getNotificationPermission());
-    }, []);
 
     const save = (patch: Partial<UserPreferences>, successMessage: string) => {
         updatePreferences.mutate(patch, {
@@ -117,8 +83,7 @@ export function AccountSettings() {
     const handleNotificationsToggle = async (next: boolean) => {
         // Enabling the preference also prompts for browser permission (a user gesture).
         if (next && getNotificationPermission() === 'default') {
-            const result = await requestNotificationPermission();
-            setPermission(result);
+            await requestPermission();
         }
         save({ showNotifications: next }, next ? 'Notifications enabled.' : 'Notifications disabled.');
     };
@@ -180,6 +145,27 @@ export function AccountSettings() {
             </SettingRow>
 
             <SettingRow
+                title="Timer chime"
+                description="Play a soft tone when a focus session finishes or a Pomodoro phase changes — audible even when the tab is in the background."
+            >
+                <div className="flex items-center gap-2">
+                    {preferences.timerSound ? (
+                        <Volume2 size={16} className="text-emerald-300" />
+                    ) : (
+                        <VolumeX size={16} className="text-neutral-400" />
+                    )}
+                    <ToggleSwitch
+                        checked={preferences.timerSound}
+                        onChange={(next) => {
+                            if (next) playTimerChime('complete');
+                            save({ timerSound: next }, next ? 'Timer chime on.' : 'Timer chime off.');
+                        }}
+                        label="Timer chime"
+                    />
+                </div>
+            </SettingRow>
+
+            <SettingRow
                 title="Timer notifications"
                 description="Get a browser notification when a focus session finishes or a Pomodoro phase changes."
             >
@@ -190,7 +176,7 @@ export function AccountSettings() {
                         ) : (
                             <BellOff size={16} className="text-neutral-400" />
                         )}
-                        <Toggle
+                        <ToggleSwitch
                             checked={notificationsOn}
                             onChange={handleNotificationsToggle}
                             label="Timer notifications"
@@ -204,7 +190,7 @@ export function AccountSettings() {
                             variant="outline"
                             size="sm"
                             className="border-white/15 bg-white/5 text-white/80 hover:bg-white/10"
-                            onClick={async () => setPermission(await requestNotificationPermission())}
+                            onClick={async () => requestPermission()}
                         >
                             Enable browser notifications
                         </Button>

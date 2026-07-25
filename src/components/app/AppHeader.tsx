@@ -10,6 +10,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useAppStore } from '@/store/app-store';
+import { UserButton } from '@clerk/nextjs';
 import { motion } from 'framer-motion';
 import { Check, ChevronDown, ListTodo, SlidersHorizontal } from 'lucide-react';
 
@@ -101,6 +102,24 @@ export const AppHeader: React.FC = () => {
                 >
                     <SlidersHorizontal size={16} />
                 </Button>
+                {/* The workspace is otherwise a dead end: no way to reach the account or
+                    sign out without editing the URL. */}
+                <UserButton
+                    appearance={{
+                        elements: {
+                            avatarBox: 'h-8 w-8 rounded-full ring-2 ring-white/20 hover:ring-white/40 transition-all',
+                        },
+                        variables: { fontFamily: 'var(--font-sans)' },
+                    }}
+                >
+                    <UserButton.MenuItems>
+                        <UserButton.Link
+                            label="Workspace settings"
+                            labelIcon={<SlidersHorizontal size={14} />}
+                            href="/account"
+                        />
+                    </UserButton.MenuItems>
+                </UserButton>
             </div>
         </motion.header>
     );

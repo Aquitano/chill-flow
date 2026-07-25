@@ -100,7 +100,6 @@ export type PreferencesPayload = {
 };
 
 export type SessionPayload = {
-    sessions: FocusSession[];
     summary: {
         totalSessions: number;
         totalMinutes: number;
@@ -116,6 +115,7 @@ export const api = {
         update: (input: { id: string; text?: string; priority?: Task['priority']; isCompleted?: boolean }) =>
             unwrap<Task | null>(client.tasks.update.$post(input)),
         delete: (input: { id: string }) => unwrap<{ success: boolean }>(client.tasks.delete.$post(input)),
+        clearCompleted: () => unwrap<{ count: number }>(client.tasks.clearCompleted.$post()),
     },
     tracks: {
         list: () => unwrap<Track[]>(client.tracks.list.$get()),
@@ -156,6 +156,7 @@ export const api = {
             timerKind: FocusSession['timerKind'];
             plannedDurationSeconds: number;
             trackId: string | null;
+            taskId: string | null;
         }) => unwrap<FocusSession>(client.sessions.start.$post(input)),
         complete: (input: { id: string; elapsedSeconds: number }) =>
             unwrap<FocusSession | null>(client.sessions.complete.$post(input)),

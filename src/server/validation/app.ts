@@ -77,6 +77,7 @@ export const updatePreferencesInputSchema = z.object({
     transitionSpeed: z.number().int().min(100).max(2000).optional(),
     volume: z.number().int().min(0).max(100).optional(),
     showNotifications: z.boolean().optional(),
+    timerSound: z.boolean().optional(),
     theme: z.enum(['light', 'dark', 'system']).optional(),
     timerMode: z.enum(['focus', 'pomodoro']).optional(),
     timerPreset: z.string().trim().min(1).max(16).optional(),
@@ -104,6 +105,7 @@ export const startSessionInputSchema = z.object({
         .min(60)
         .max(12 * 60 * 60),
     trackId: nullableTrackIdSchema,
+    taskId: taskIdSchema.nullish(),
 });
 
 export const completeSessionInputSchema = z.object({
