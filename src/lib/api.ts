@@ -180,7 +180,7 @@ export const api = {
         completeCycle: (input: { id: string }) =>
             unwrap<FocusSession | null>(client.sessions.completeCycle.$post(input)),
         cancel: (input: { id: string }) => unwrap<FocusSession | null>(client.sessions.cancel.$post(input)),
-        recover: (input: { id: string; elapsedSeconds: number }) =>
+        recover: (input: { id: string; elapsedSeconds: number; savedAtMs: number }) =>
             unwrap<SessionRecovery>(client.sessions.recover.$post(input)),
     },
 };

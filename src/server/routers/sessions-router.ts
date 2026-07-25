@@ -55,6 +55,14 @@ export const sessionsRouter = j.router({
         .use(createRateLimitMiddleware({ key: 'sessions:recover', limit: 10, windowMs: 60_000 }))
         .input(recoverSessionInputSchema)
         .mutation(async ({ c, ctx, input }) => {
-            return c.superjson(await appRepository.recoverSession(ctx.db, ctx.userId, input.id, input.elapsedSeconds));
+            return c.superjson(
+                await appRepository.recoverSession(
+                    ctx.db,
+                    ctx.userId,
+                    input.id,
+                    input.elapsedSeconds,
+                    input.savedAtMs,
+                ),
+            );
         }),
 });

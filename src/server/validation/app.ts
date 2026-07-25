@@ -151,6 +151,8 @@ export const flushSessionInputSchema = z.discriminatedUnion('outcome', [
 export const recoverSessionInputSchema = z.object({
     id: sessionIdSchema,
     elapsedSeconds: elapsedSecondsSchema,
+    /** When the device last wrote that snapshot — the moment it stopped being able to focus. */
+    savedAtMs: z.number().int().positive(),
 });
 
 export const trackLookupInputSchema = z.object({

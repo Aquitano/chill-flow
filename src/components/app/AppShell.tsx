@@ -204,7 +204,11 @@ export function AppShell() {
             // reload reports one thing, not two.
             if (snapshot.sessionId && outcome !== 'ignored') {
                 recoverSession.mutate(
-                    { id: snapshot.sessionId, elapsedSeconds: provenFocusSeconds(snapshot) },
+                    {
+                        id: snapshot.sessionId,
+                        elapsedSeconds: provenFocusSeconds(snapshot),
+                        savedAtMs: snapshot.savedAt,
+                    },
                     {
                         onSuccess: (recovery) => {
                             if (recovery.outcome !== 'completed') return;

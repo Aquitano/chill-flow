@@ -699,10 +699,21 @@ export const appRepository = {
      *
      * The client names the row from its own timer snapshot rather than asking for "the
      * active one", so opening a second tab can never close a session still running in the
-     * first. The elapsed time it can prove is clamped to what the clock allows, and a block
-     * too short to record is canceled instead.
+     * first. A block too short to record is canceled instead.
+     *
+     * Its claim is never taken at face value: the block can't have outlasted its planned
+     * duration, nor the wall time between starting and the device's last snapshot. That
+     * second bound is what keeps a stale claim honest — a preset retuned between the crash
+     * and the reload would otherwise let the client derive elapsed time from the wrong phase
+     * length, and reopening days later leaves `now` far too generous a ceiling.
      */
-    async recoverSession(database: Database, userId: string, sessionId: string, provenElapsedSeconds: number) {
+    async recoverSession(
+        database: Database,
+        userId: string,
+        sessionId: string,
+        provenElapsedSeconds: number,
+        snapshotSavedAtMs: number,
+    ) {
         const [openSession] = await database
             .select()
             .from(focusSessions)
@@ -719,10 +730,12 @@ export const appRepository = {
             return { outcome: 'none' as const, elapsedSeconds: 0 };
         }
 
-        const sinceStartSeconds = Math.floor((Date.now() - openSession.startedAt.getTime()) / 1000);
+        // A clock ahead of ours would otherwise widen its own ceiling.
+        const lastAliveMs = Math.min(snapshotSavedAtMs, Date.now());
+        const aliveSeconds = Math.floor((lastAliveMs - openSession.startedAt.getTime()) / 1000);
         const elapsedSeconds = Math.max(
             0,
-            Math.min(provenElapsedSeconds, openSession.plannedDurationSeconds, sinceStartSeconds),
+            Math.min(provenElapsedSeconds, openSession.plannedDurationSeconds, aliveSeconds),
         );
 
         if (elapsedSeconds < MIN_RECORDED_SECONDS) {
