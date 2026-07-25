@@ -157,6 +157,7 @@ export const api = {
     },
     sessions: {
         list: () => unwrap<SessionPayload>(client.sessions.list.$get()),
+        history: () => unwrap<FocusSession[]>(client.sessions.history.$get()),
         start: (input: {
             mode: string;
             timerKind: FocusSession['timerKind'];

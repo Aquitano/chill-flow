@@ -235,6 +235,9 @@ const COMPLETED_DAY = sql<string>`to_char(${focusSessions.completedAt}, 'YYYY-MM
 /** Bound on the day list behind the streak; longer than any streak worth reporting. */
 const STREAK_WINDOW_DAYS = 366;
 
+/** How far back the progress panel's history list reaches. */
+const SESSION_HISTORY_LIMIT = 50;
+
 function completedSessionsOf(userId: string) {
     return and(
         eq(focusSessions.userId, userId),
@@ -719,6 +722,22 @@ export const appRepository = {
             database.delete(savedPresets).where(eq(savedPresets.userId, userId)),
             database.delete(userPreferences).where(eq(userPreferences.userId, userId)),
         ]);
+    },
+
+    /**
+     * Recent blocks for the progress panel. Bounded on the server rather than by a client
+     * parameter: this is a "what have I been doing lately" list, and no caller has a reason
+     * to ask for a user's entire history.
+     */
+    async listRecentSessions(database: Database, userId: string) {
+        const recentSessions = await database
+            .select()
+            .from(focusSessions)
+            .where(completedSessionsOf(userId))
+            .orderBy(desc(focusSessions.completedAt))
+            .limit(SESSION_HISTORY_LIMIT);
+
+        return recentSessions.map(mapSession);
     },
 
     async getSessionSummary(database: Database, userId: string) {

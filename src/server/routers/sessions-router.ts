@@ -16,6 +16,12 @@ export const sessionsRouter = j.router({
         return c.superjson({ summary: await appRepository.getSessionSummary(ctx.db, ctx.userId) });
     }),
 
+    // Loaded on demand by the progress panel, so the workspace's first paint stays four
+    // numbers rather than a list nothing is showing yet.
+    history: protectedDataProcedure.query(async ({ c, ctx }) => {
+        return c.superjson(await appRepository.listRecentSessions(ctx.db, ctx.userId));
+    }),
+
     start: protectedMutationProcedure
         .use(createRateLimitMiddleware({ key: 'sessions:start', limit: 15, windowMs: 60_000 }))
         .input(startSessionInputSchema)

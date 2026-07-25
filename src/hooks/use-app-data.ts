@@ -9,6 +9,7 @@ const queryKeys = {
     tracks: ['tracks'],
     preferences: ['preferences'],
     sessions: ['sessions'],
+    sessionHistory: ['sessions', 'history'],
     ambientSounds: ['ambient', 'sounds'],
     ambientMixes: ['ambient', 'mixes'],
 };
@@ -89,6 +90,18 @@ export function useSessionsQuery() {
     return useQuery({
         queryKey: queryKeys.sessions,
         queryFn: api.sessions.list,
+    });
+}
+
+/**
+ * Recent completed blocks. Keyed under `sessions` so finishing a block invalidates the
+ * history along with the totals; pass enabled=false until the progress panel is showing.
+ */
+export function useSessionHistoryQuery(enabled: boolean) {
+    return useQuery({
+        queryKey: queryKeys.sessionHistory,
+        queryFn: api.sessions.history,
+        enabled,
     });
 }
 
