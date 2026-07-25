@@ -126,12 +126,13 @@ export function useWorkspaceHotkeys() {
                 case 'S':
                     // No hidden countdowns: only in modes where the dial is on screen.
                     if (!store.modes[store.currentMode]?.showTimer) break;
+                    // Every timer intent goes through the store, and the session lifecycle
+                    // watches those transitions — so the shortcut records, pauses, and
+                    // abandons blocks exactly as the dial's own buttons do.
                     if (event.shiftKey) {
                         store.resetTimer();
                         break;
                     }
-                    // The session lifecycle reacts to the timerActive transition, so
-                    // toggling through the store records/pauses sessions correctly.
                     if (store.timerActive) {
                         store.pauseTimer();
                     } else {

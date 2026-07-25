@@ -12,6 +12,7 @@ import {
     useDeleteTaskMutation,
     useUpdateTaskMutation,
 } from '@/hooks/use-app-data';
+import { describeApiError } from '@/lib/api';
 import { dueState, formatDue, quickDueOptions, type DueState } from '@/lib/task-dates';
 import type { TaskPriority } from '@/lib/task-parser';
 import { cn } from '@/lib/utils';
@@ -20,6 +21,7 @@ import { useAppStore } from '@/store/app-store';
 import { AnimatePresence, motion } from 'framer-motion';
 import { CalendarDays, Check, Flag, Target, Trash2, X } from 'lucide-react';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { DUE_TEXT } from './due-meta';
 import { PRIORITY_META, PRIORITY_OPTIONS } from './priority-meta';
 import { TaskComposer } from './TaskComposer';
@@ -27,6 +29,48 @@ import type { ResizablePanel } from './use-resizable-panel';
 
 /** Matches the server's task-text limit, so a rename can't fail validation on length. */
 const MAX_TASK_LENGTH = 120;
+
+/**
+ * Clearing hard-deletes every completed task at once, and nothing is kept server-side to
+ * restore from — so the button asks first rather than offering an undo it can't honour.
+ */
+function ClearCompletedButton({ count }: { count: number }) {
+    const clearCompleted = useClearCompletedTasksMutation();
+    const [armed, setArmed] = useState(false);
+
+    const handleClick = () => {
+        if (!armed) {
+            setArmed(true);
+            return;
+        }
+
+        setArmed(false);
+        clearCompleted.mutate(undefined, {
+            onSuccess: ({ count: cleared }) => toast(`Cleared ${cleared} completed ${plural(cleared, 'task')}`),
+            onError: (error) => toast.error("Couldn't clear completed tasks", { description: describeApiError(error) }),
+        });
+    };
+
+    return (
+        <button
+            type="button"
+            onClick={handleClick}
+            onBlur={() => setArmed(false)}
+            disabled={clearCompleted.isPending}
+            className={cn(
+                'focus-visible:outline-ember ml-2 rounded normal-case transition',
+                'focus-visible:outline-2 disabled:opacity-50',
+                armed ? 'text-ember' : 'text-ink-dim hover:text-ink',
+            )}
+        >
+            {armed ? `Delete ${count} ${plural(count, 'task')}?` : 'Clear'}
+        </button>
+    );
+}
+
+function plural(count: number, noun: string) {
+    return count === 1 ? noun : `${noun}s`;
+}
 
 function TaskRow({ task }: { task: Task }) {
     const updateTask = useUpdateTaskMutation();
@@ -279,7 +323,6 @@ function groupTasks(tasks: Task[]): TaskGroup[] {
 export function TasksPanel({ panel }: { panel: ResizablePanel }) {
     const tasks = useAppStore((state) => state.tasks);
     const setTasksOpen = useAppStore((state) => state.setTasksOpen);
-    const clearCompleted = useClearCompletedTasksMutation();
     const openCount = tasks.filter((task) => !task.isCompleted).length;
     const { enabled: resizable, size, resizing, onResizeStart } = panel;
     const groups = groupTasks(tasks);
@@ -351,16 +394,7 @@ export function TasksPanel({ panel }: { panel: ResizablePanel }) {
                                           )}
                                       >
                                           {group.label}
-                                          {group.id === 'done' && (
-                                              <button
-                                                  type="button"
-                                                  onClick={() => clearCompleted.mutate()}
-                                                  disabled={clearCompleted.isPending}
-                                                  className="focus-visible:outline-ember text-ink-dim hover:text-ink ml-2 rounded normal-case transition focus-visible:outline-2 disabled:opacity-50"
-                                              >
-                                                  Clear
-                                              </button>
-                                          )}
+                                          {group.id === 'done' && <ClearCompletedButton count={group.tasks.length} />}
                                       </motion.li>,
                                   ]
                                 : []),

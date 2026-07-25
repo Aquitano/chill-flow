@@ -198,6 +198,12 @@ interface AppState {
     countUpStartedAt: number | null;
     /** Open-ended seconds banked by earlier run segments. */
     countUpBankedSeconds: number;
+    /**
+     * Bumped by every resetTimer. Reset and pause both stop the dial, so the focus-session
+     * lifecycle can only tell them apart by watching this — and reset reaches the store
+     * from the dial button, ⇧S, and the command palette alike.
+     */
+    timerResetCount: number;
     selectedPreset: string;
     customMinutes: string;
     pomodoroSettings: PomodoroSettings;
@@ -321,6 +327,7 @@ export const useAppStore = create<AppState>()(
         countUpSeconds: 0,
         countUpStartedAt: null,
         countUpBankedSeconds: 0,
+        timerResetCount: 0,
         selectedPreset: '25m',
         customMinutes: '25',
         focusTimerSeconds: 25 * 60,
@@ -657,17 +664,31 @@ export const useAppStore = create<AppState>()(
 
         resetTimer: () => {
             const state = get();
+            const resetCount = state.timerResetCount + 1;
 
             if (isOpenEnded(state)) {
                 set(
-                    { ...timerSecondsPatch('focus', 0), timerActive: false, timerEndsAt: null, ...IDLE_COUNT_UP },
+                    {
+                        ...timerSecondsPatch('focus', 0),
+                        timerActive: false,
+                        timerEndsAt: null,
+                        ...IDLE_COUNT_UP,
+                        timerResetCount: resetCount,
+                    },
                     false,
                     'resetOpenEndedTimer',
                 );
                 return;
             }
 
-            set(timerDurationPatch(state.timerMode, phaseDurationSeconds(state) ?? 0), false, 'resetTimer');
+            set(
+                {
+                    ...timerDurationPatch(state.timerMode, phaseDurationSeconds(state) ?? 0),
+                    timerResetCount: resetCount,
+                },
+                false,
+                'resetTimer',
+            );
         },
 
         setTimerPreset: (preset) => {

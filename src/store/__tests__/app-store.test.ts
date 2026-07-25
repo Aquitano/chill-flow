@@ -1,3 +1,4 @@
+import { sessionEventForTransition, type FocusSessionStatus } from '@/lib/focus-session';
 import {
     OPEN_ENDED_PRESET,
     defaultModes,
@@ -193,6 +194,74 @@ describe('open-ended focus', () => {
 
         expect(useAppStore.getState().countUpSeconds).toBe(0);
         expect(useAppStore.getState().timerActive).toBe(false);
+    });
+});
+
+/**
+ * The dial reads store state into sessionEventForTransition, so these drive the real store
+ * and feed it the same way rather than restating what the timer does.
+ */
+describe('focus-session events the store produces', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+        resetStore();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    function transitionAt(wasFocusRunning: boolean, nowMs: number, sessionStatus: FocusSessionStatus = 'running') {
+        const state = useAppStore.getState();
+        const isFocusPhase = state.timerMode === 'focus' || !state.pomodoroSettings.isBreak;
+        return sessionEventForTransition({
+            wasFocusRunning,
+            isFocusRunning: state.timerActive && isFocusPhase,
+            timerActive: state.timerActive,
+            timerMode: state.timerMode,
+            timerSeconds: state.timerSeconds,
+            isOpenEnded: state.timerMode === 'focus' && state.selectedPreset === OPEN_ENDED_PRESET,
+            wasReset: state.timerResetCount > 0,
+            sessionStatus,
+            atMs: nowMs,
+        });
+    }
+
+    it('pauses an open-ended block instead of ending the session', () => {
+        atTime(0);
+        useAppStore.getState().setTimerPreset(OPEN_ENDED_PRESET);
+        useAppStore.getState().startTimer();
+
+        atTime(30_000);
+        useAppStore.getState().tickTimer();
+        useAppStore.getState().pauseTimer();
+
+        expect(transitionAt(true, 30_000)).toEqual({ type: 'PAUSE', atMs: 30_000 });
+    });
+
+    it('banks an open-ended block on reset, whichever control triggered it', () => {
+        atTime(0);
+        useAppStore.getState().setTimerPreset(OPEN_ENDED_PRESET);
+        useAppStore.getState().startTimer();
+
+        // ⇧S and the command palette call resetTimer directly, with no dial handler in play.
+        atTime(5 * 60_000);
+        useAppStore.getState().resetTimer();
+
+        expect(useAppStore.getState().timerResetCount).toBe(1);
+        expect(transitionAt(true, 5 * 60_000)).toEqual({ type: 'COMPLETE', atMs: 5 * 60_000 });
+    });
+
+    it('abandons a finite block on reset even though the dial reads full again', () => {
+        atTime(0);
+        useAppStore.getState().setTimerPreset('25m');
+        useAppStore.getState().startTimer();
+
+        atTime(10 * 60_000);
+        useAppStore.getState().resetTimer();
+
+        expect(useAppStore.getState().timerSeconds).toBe(25 * 60);
+        expect(transitionAt(true, 10 * 60_000)).toEqual({ type: 'CANCEL' });
     });
 });
 

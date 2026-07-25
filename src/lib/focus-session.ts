@@ -80,6 +80,63 @@ export function elapsedSecondsOf(state: FocusSessionState, atMs: number): number
     return Math.max(0, Math.min(totalSeconds, cap));
 }
 
+/**
+ * Timer state either side of a commit, as the session lifecycle sees it. Deliberately
+ * structural rather than importing the store's types: this module stays free of clocks,
+ * network, and store.
+ */
+export interface TimerTransition {
+    /** A focus phase was running at the previous commit. */
+    wasFocusRunning: boolean;
+    /** A focus phase is running now. */
+    isFocusRunning: boolean;
+    /** Whether the timer itself still runs — separates "rolled into a break" from "paused". */
+    timerActive: boolean;
+    timerMode: 'focus' | 'pomodoro';
+    timerSeconds: number;
+    isOpenEnded: boolean;
+    /** The user reset the dial in this commit (button, ⇧S, or the command palette). */
+    wasReset: boolean;
+    sessionStatus: FocusSessionStatus;
+    atMs: number;
+}
+
+/**
+ * Decide which lifecycle event a timer transition means, or null for none. Kept out of the
+ * component so the run/pause/reset matrix is testable without rendering a dial.
+ */
+export function sessionEventForTransition(transition: TimerTransition): FocusSessionEvent | null {
+    const { timerActive, timerMode, timerSeconds, isOpenEnded, sessionStatus, atMs } = transition;
+
+    // Reset abandons the block whether it was running or paused, so it is decided before
+    // the run/stop transition it also causes. Open-ended focus has no countdown to end it,
+    // making reset the only way to finish one — bank that time instead of discarding it.
+    if (transition.wasReset) {
+        if (sessionStatus === 'idle') return null;
+        return isOpenEnded ? { type: 'COMPLETE', atMs } : { type: 'CANCEL' };
+    }
+
+    if (!transition.wasFocusRunning && transition.isFocusRunning) {
+        if (sessionStatus === 'paused') return { type: 'RESUME', atMs };
+        if (isOpenEnded || timerSeconds >= MIN_RECORDED_SECONDS) {
+            return { type: 'START', plannedSeconds: isOpenEnded ? 0 : timerSeconds, atMs };
+        }
+        return null;
+    }
+
+    if (transition.wasFocusRunning && !transition.isFocusRunning) {
+        // Still ticking but no longer a focus phase → a Pomodoro focus block rolled into
+        // its break, so the block finished.
+        if (timerActive) return { type: 'COMPLETE', atMs };
+        // A finite focus countdown that reached zero finished. Open-ended focus holds
+        // timerSeconds at 0 for its whole run, so it can only have been paused.
+        if (timerMode === 'focus' && !isOpenEnded && timerSeconds === 0) return { type: 'COMPLETE', atMs };
+        return { type: 'PAUSE', atMs };
+    }
+
+    return null;
+}
+
 export function focusSessionReducer(state: FocusSessionState, event: FocusSessionEvent): FocusSessionResult {
     switch (event.type) {
         case 'START': {

@@ -15,9 +15,9 @@ import {
 import {
     FocusSessionEvent,
     FocusSessionState,
-    MIN_RECORDED_SECONDS,
     focusSessionReducer,
     initialFocusSessionState,
+    sessionEventForTransition,
 } from '@/lib/focus-session';
 import { playTimerChime } from '@/lib/audio/chime';
 import { getNotificationPermission, requestNotificationPermission, showTimerNotification } from '@/lib/notifications';
@@ -151,6 +151,7 @@ export const TimerDial: React.FC = () => {
     const timerSeconds = useAppStore((state) => state.timerSeconds);
     const timerActive = useAppStore((state) => state.timerActive);
     const countUpSeconds = useAppStore((state) => state.countUpSeconds);
+    const timerResetCount = useAppStore((state) => state.timerResetCount);
     const selectedPreset = useAppStore((state) => state.selectedPreset);
     const customMinutes = useAppStore((state) => state.customMinutes);
     const pomodoroSettings = useAppStore((state) => state.pomodoroSettings);
@@ -189,6 +190,7 @@ export const TimerDial: React.FC = () => {
     const pendingCycleSessionIdRef = useRef<string | null>(null);
     const sessionStateRef = useRef<FocusSessionState>(initialFocusSessionState);
     const prevFocusRunningRef = useRef(false);
+    const prevResetCountRef = useRef(timerResetCount);
     const prevTimerSecondsRef = useRef(timerSeconds);
     const prevIsBreakRef = useRef(pomodoroSettings.isBreak);
 
@@ -317,38 +319,40 @@ export const TimerDial: React.FC = () => {
     useEffect(() => {
         const isFocusPhase = timerMode === 'focus' || (timerMode === 'pomodoro' && !pomodoroSettings.isBreak);
         const focusRunning = timerActive && isFocusPhase;
-        const wasRunning = prevFocusRunningRef.current;
+        const wasFocusRunning = prevFocusRunningRef.current;
+        const wasReset = timerResetCount !== prevResetCountRef.current;
         const now = Date.now();
 
-        if (!wasRunning && focusRunning) {
-            // Re-entering a Pomodoro focus phase only happens when the break countdown
-            // finished, so a block waiting on its break is now a full completed cycle.
-            if (timerMode === 'pomodoro' && pendingCycleSessionIdRef.current) {
-                mutationsRef.current.completeCycle.mutate({ id: pendingCycleSessionIdRef.current });
-                pendingCycleSessionIdRef.current = null;
-            }
-            if (sessionStateRef.current.status === 'paused') {
-                dispatchSession({ type: 'RESUME', atMs: now });
-            } else if (isOpenEnded || timerSeconds >= MIN_RECORDED_SECONDS) {
-                dispatchSession({ type: 'START', plannedSeconds: isOpenEnded ? 0 : timerSeconds, atMs: now });
-            }
-        } else if (wasRunning && !focusRunning) {
-            if (timerActive) {
-                // Still active but no longer a focus phase → Pomodoro focus rolled into a
-                // break: the focus block finished. Its cycle completes when the break does.
-                pendingCycleSessionIdRef.current = activeSessionIdRef.current;
-                dispatchSession({ type: 'COMPLETE', atMs: now });
-            } else if (timerMode === 'focus' && timerSeconds === 0) {
-                // Finite focus countdown reached zero.
-                dispatchSession({ type: 'COMPLETE', atMs: now });
-            } else {
-                // Timer paused by the user; keep the session resumable.
-                dispatchSession({ type: 'PAUSE', atMs: now });
-            }
+        prevFocusRunningRef.current = focusRunning;
+        prevResetCountRef.current = timerResetCount;
+
+        // Re-entering a Pomodoro focus phase only happens when the break countdown
+        // finished, so a block waiting on its break is now a full completed cycle.
+        if (!wasFocusRunning && focusRunning && timerMode === 'pomodoro' && pendingCycleSessionIdRef.current) {
+            mutationsRef.current.completeCycle.mutate({ id: pendingCycleSessionIdRef.current });
+            pendingCycleSessionIdRef.current = null;
+        }
+        // A focus block rolling into its break completes here; its cycle completes with the break.
+        if (wasFocusRunning && !focusRunning && timerActive) {
+            pendingCycleSessionIdRef.current = activeSessionIdRef.current;
         }
 
-        prevFocusRunningRef.current = focusRunning;
-    }, [timerActive, timerMode, pomodoroSettings.isBreak, timerSeconds, isOpenEnded, dispatchSession]);
+        const event = sessionEventForTransition({
+            wasFocusRunning,
+            isFocusRunning: focusRunning,
+            timerActive,
+            timerMode,
+            timerSeconds,
+            isOpenEnded,
+            wasReset,
+            sessionStatus: sessionStateRef.current.status,
+            atMs: now,
+        });
+
+        if (event) {
+            dispatchSession(event);
+        }
+    }, [timerActive, timerMode, pomodoroSettings.isBreak, timerSeconds, isOpenEnded, timerResetCount, dispatchSession]);
 
     // Best-effort flush when the tab is being closed/navigated away mid-session so the
     // focus time isn't silently lost. (Hard closes may not always deliver the request.)
@@ -463,17 +467,6 @@ export const TimerDial: React.FC = () => {
         setTimerMode(mode);
     };
 
-    // Reset abandons a countdown block, but for open-ended focus it is the only way to
-    // end one — so bank the time actually focused rather than discarding it.
-    const handleReset = () => {
-        if (isOpenEnded && sessionStateRef.current.status !== 'idle') {
-            dispatchSession({ type: 'COMPLETE', atMs: Date.now() });
-        } else {
-            dispatchSession({ type: 'CANCEL' });
-        }
-        resetTimer();
-    };
-
     const handleSkipBreak = () => {
         // A skipped break is not a completed focus-plus-break cycle, so the block waiting
         // on this break never earns its cycle mark.
@@ -560,7 +553,7 @@ export const TimerDial: React.FC = () => {
                     variant="outline"
                     size="icon"
                     className="h-10 w-10 rounded-full border-white/15 bg-black/40 hover:bg-white/10"
-                    onClick={handleReset}
+                    onClick={resetTimer}
                     aria-label={isOpenEnded ? 'Finish open-ended focus' : 'Reset timer'}
                 >
                     <RefreshCcw size={15} />
