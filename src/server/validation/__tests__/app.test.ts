@@ -82,6 +82,39 @@ describe('backend validation', () => {
         expect(result.success).toBe(true);
     });
 
+    it('leaves the auto-start flags absent when a client omits them', () => {
+        // A tab still running a bundle from before these fields existed posts the old
+        // four-field shape on its next save. Filling in a default here would write `true`
+        // over a deliberate `false`, since the settings column is replaced whole.
+        const result = updatePreferencesInputSchema.parse({
+            pomodoroSettings: {
+                focusMinutes: 25,
+                breakMinutes: 5,
+                longBreakMinutes: 15,
+                sessionsBeforeLongBreak: 4,
+            },
+        });
+
+        expect(result.pomodoroSettings).not.toHaveProperty('autoStartBreaks');
+        expect(result.pomodoroSettings).not.toHaveProperty('autoStartFocus');
+    });
+
+    it('carries the auto-start flags through when a client sends them', () => {
+        const result = updatePreferencesInputSchema.parse({
+            pomodoroSettings: {
+                focusMinutes: 25,
+                breakMinutes: 5,
+                longBreakMinutes: 15,
+                sessionsBeforeLongBreak: 4,
+                autoStartBreaks: false,
+                autoStartFocus: true,
+            },
+        });
+
+        expect(result.pomodoroSettings?.autoStartBreaks).toBe(false);
+        expect(result.pomodoroSettings?.autoStartFocus).toBe(true);
+    });
+
     it('rejects out-of-range Pomodoro settings and non-numeric custom minutes', () => {
         expect(
             updatePreferencesInputSchema.safeParse({

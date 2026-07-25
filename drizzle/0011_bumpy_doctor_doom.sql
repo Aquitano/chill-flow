@@ -1,0 +1,1 @@
+ALTER TABLE "user_preferences" ALTER COLUMN "pomodoroSettings" SET DEFAULT '{"focusMinutes":25,"breakMinutes":5,"longBreakMinutes":15,"sessionsBeforeLongBreak":4,"autoStartBreaks":true,"autoStartFocus":true}'::jsonb;

@@ -54,6 +54,10 @@ export type PomodoroSettingsValue = {
     breakMinutes: number;
     longBreakMinutes: number;
     sessionsBeforeLongBreak: number;
+    /** Roll straight into the break when a focus block ends, instead of waiting for play. */
+    autoStartBreaks: boolean;
+    /** Roll straight into the next focus block when a break ends. */
+    autoStartFocus: boolean;
 };
 
 export const DEFAULT_POMODORO_SETTINGS: PomodoroSettingsValue = {
@@ -61,6 +65,8 @@ export const DEFAULT_POMODORO_SETTINGS: PomodoroSettingsValue = {
     breakMinutes: 5,
     longBreakMinutes: 15,
     sessionsBeforeLongBreak: 4,
+    autoStartBreaks: true,
+    autoStartFocus: true,
 };
 
 export const userPreferences = pgTable(

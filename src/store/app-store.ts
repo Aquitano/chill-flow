@@ -21,7 +21,12 @@ export type TimerMode = 'focus' | 'pomodoro';
 /** Cadence portion of Pomodoro settings that round-trips to the account (no runtime fields). */
 export type PomodoroCadence = Pick<
     PomodoroSettings,
-    'focusMinutes' | 'breakMinutes' | 'longBreakMinutes' | 'sessionsBeforeLongBreak'
+    | 'focusMinutes'
+    | 'breakMinutes'
+    | 'longBreakMinutes'
+    | 'sessionsBeforeLongBreak'
+    | 'autoStartBreaks'
+    | 'autoStartFocus'
 >;
 
 /** Workspace timer/volume defaults restored from persisted preferences. */
@@ -144,6 +149,10 @@ export type PomodoroSettings = {
     breakMinutes: number;
     longBreakMinutes: number;
     sessionsBeforeLongBreak: number;
+    /** Roll straight into the break when a focus block ends, instead of waiting for play. */
+    autoStartBreaks: boolean;
+    /** Roll straight into the next focus block when a break ends. */
+    autoStartFocus: boolean;
     currentSession: number;
     isBreak: boolean;
 };
@@ -337,6 +346,8 @@ export const useAppStore = create<AppState>()(
             breakMinutes: 5,
             longBreakMinutes: 15,
             sessionsBeforeLongBreak: 4,
+            autoStartBreaks: true,
+            autoStartFocus: true,
             currentSession: 1,
             isBreak: false,
         },
@@ -782,7 +793,15 @@ export const useAppStore = create<AppState>()(
                         return { pomodoroSettings };
                     }
 
-                    const phaseSeconds = phaseDurationSeconds({ ...state, pomodoroSettings }) ?? state.timerSeconds;
+                    // Only a change to *this* phase's length may move the dial. The auto-start
+                    // toggles are policy and carry no duration, and retuning a phase the dial
+                    // isn't showing must not restart the one it is — either would throw away
+                    // the remaining time of a phase paused at a boundary.
+                    const phaseSeconds = phaseDurationSeconds({ ...state, pomodoroSettings });
+                    if (phaseSeconds == null || phaseSeconds === phaseDurationSeconds(state)) {
+                        return { pomodoroSettings };
+                    }
+
                     return { pomodoroSettings, ...timerSecondsPatch('pomodoro', phaseSeconds) };
                 },
                 false,
@@ -808,6 +827,8 @@ export const useAppStore = create<AppState>()(
                     : pomodoroSettings.breakMinutes
                 : pomodoroSettings.focusMinutes;
             const nextSeconds = nextMinutes * 60;
+            // The phase always changes; whether its clock starts itself is the user's call.
+            const autoStart = nextBreakState ? pomodoroSettings.autoStartBreaks : pomodoroSettings.autoStartFocus;
 
             set(
                 {
@@ -817,8 +838,8 @@ export const useAppStore = create<AppState>()(
                         isBreak: nextBreakState,
                     },
                     ...timerSecondsPatch('pomodoro', nextSeconds),
-                    timerActive: true,
-                    timerEndsAt: Date.now() + nextSeconds * 1000,
+                    timerActive: autoStart,
+                    timerEndsAt: autoStart ? Date.now() + nextSeconds * 1000 : null,
                 },
                 false,
                 'advancePomodoroPhase',

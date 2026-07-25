@@ -90,8 +90,8 @@ export interface TimerTransition {
     wasFocusRunning: boolean;
     /** A focus phase is running now. */
     isFocusRunning: boolean;
-    /** Whether the timer itself still runs — separates "rolled into a break" from "paused". */
-    timerActive: boolean;
+    /** The phase now on the dial is a Pomodoro break — separates a handover from a pause. */
+    isBreak: boolean;
     timerMode: 'focus' | 'pomodoro';
     timerSeconds: number;
     isOpenEnded: boolean;
@@ -106,7 +106,7 @@ export interface TimerTransition {
  * component so the run/pause/reset matrix is testable without rendering a dial.
  */
 export function sessionEventForTransition(transition: TimerTransition): FocusSessionEvent | null {
-    const { timerActive, timerMode, timerSeconds, isOpenEnded, sessionStatus, atMs } = transition;
+    const { isBreak, timerMode, timerSeconds, isOpenEnded, sessionStatus, atMs } = transition;
 
     // Reset abandons the block whether it was running or paused, so it is decided before
     // the run/stop transition it also causes. Open-ended focus has no countdown to end it,
@@ -125,9 +125,9 @@ export function sessionEventForTransition(transition: TimerTransition): FocusSes
     }
 
     if (transition.wasFocusRunning && !transition.isFocusRunning) {
-        // Still ticking but no longer a focus phase → a Pomodoro focus block rolled into
-        // its break, so the block finished.
-        if (timerActive) return { type: 'COMPLETE', atMs };
+        // A focus phase that gave way to a break finished, whether or not the break started
+        // itself — so this reads the phase rather than whether the clock is still running.
+        if (isBreak) return { type: 'COMPLETE', atMs };
         // A finite focus countdown that reached zero finished. Open-ended focus holds
         // timerSeconds at 0 for its whole run, so it can only have been paused.
         if (timerMode === 'focus' && !isOpenEnded && timerSeconds === 0) return { type: 'COMPLETE', atMs };
