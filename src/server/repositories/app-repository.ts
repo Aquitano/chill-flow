@@ -566,16 +566,26 @@ export const appRepository = {
 
     async completeSession(database: Database, userId: string, sessionId: string, elapsedSeconds: number) {
         // Match by id even when the row is no longer 'active' — a concurrent startSession
-        // in another tab may have flipped it to 'canceled'. That focus time is real and
-        // must still be recorded. The `status != 'completed'` guard keeps this idempotent
-        // (a re-complete, e.g. from the pagehide flush, matches no row and returns null).
+        // in another tab may have flipped it to 'canceled'. That focus time is real and must
+        // still be recorded, but only the part that ran *before* the handover: without the
+        // clamp two tabs running in parallel each bank the whole overlap. Every SET
+        // expression reads the pre-update row, so canceledAt is still readable here.
+        // The `status != 'completed'` guard keeps this idempotent (a re-complete, e.g. from
+        // the unload beacon, matches no row and returns null).
         const [completedSession] = await database
             .update(focusSessions)
             .set({
                 status: 'completed',
                 completedAt: new Date(),
                 canceledAt: null,
-                elapsedSeconds,
+                elapsedSeconds: sql<number>`case
+                    when ${focusSessions.status} = 'canceled' and ${focusSessions.canceledAt} is not null
+                        then least(
+                            ${elapsedSeconds}::int,
+                            greatest(0, floor(extract(epoch from (${focusSessions.canceledAt} - ${focusSessions.startedAt})))::int)
+                        )
+                    else ${elapsedSeconds}::int
+                end`,
             })
             .where(
                 and(

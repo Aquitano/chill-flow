@@ -22,6 +22,7 @@ import {
     sessionEventForTransition,
 } from '@/lib/focus-session';
 import { playTimerChime } from '@/lib/audio/chime';
+import { FocusChannel, openFocusChannel } from '@/lib/focus-channel';
 import { getNotificationPermission, requestNotificationPermission, showTimerNotification } from '@/lib/notifications';
 import { flushSessionBeacon } from '@/lib/session-beacon';
 import {
@@ -226,6 +227,7 @@ export const TimerDial: React.FC = () => {
     const isBreak = timerMode === 'pomodoro' && pomodoroSettings.isBreak;
 
     const recorderRef = useRef<RecorderState>(idleRecorder);
+    const focusChannelRef = useRef<FocusChannel | null>(null);
     // A completed Pomodoro focus block waiting for its break to finish; once it does,
     // the block is marked as a full focus-plus-break cycle.
     const pendingCycleSessionIdRef = useRef<string | null>(null);
@@ -321,6 +323,7 @@ export const TimerDial: React.FC = () => {
             switch (command.type) {
                 case 'START_SESSION':
                     recorderRef.current = recorderStarting();
+                    focusChannelRef.current?.announceStart();
                     mutationsRef.current.start.mutate(
                         {
                             mode: contextRef.current.mode,
@@ -357,6 +360,29 @@ export const TimerDial: React.FC = () => {
         },
         [runRecorderEffect],
     );
+
+    // Another tab claimed the focus session, which means the server has already canceled this
+    // tab's row. Bank what this block earned before the handover and stop the clock, rather
+    // than letting two dials count the same minutes.
+    useEffect(() => {
+        const channel = openFocusChannel(() => {
+            if (sessionStateRef.current.status !== 'running') return;
+
+            dispatchSession({ type: 'COMPLETE', atMs: Date.now() });
+            pauseTimer();
+            toast('Focus moved to another tab', {
+                id: 'focus-handover',
+                description: 'This block was saved, so the time is only counted once.',
+                action: { label: 'Take over', onClick: () => startTimer() },
+            });
+        });
+        focusChannelRef.current = channel;
+
+        return () => {
+            focusChannelRef.current = null;
+            channel.close();
+        };
+    }, [dispatchSession, pauseTimer, startTimer]);
 
     // The dial is derived from a wall-clock deadline, so this interval only repaints it.
     // Background tabs throttle (and sleeping machines stop) timers, so also resync the
