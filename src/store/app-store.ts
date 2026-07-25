@@ -112,7 +112,7 @@ function timerDurationPatch(mode: TimerMode, seconds: number) {
  * always lands *paused* where the user left off, never crediting time the app was closed.
  */
 export interface TimerSnapshot {
-    version: 1;
+    version: 2;
     savedAt: number;
     timerMode: TimerMode;
     selectedPreset: string;
@@ -124,14 +124,19 @@ export interface TimerSnapshot {
     elapsedSeconds: number;
     pomodoroSession: number;
     pomodoroIsBreak: boolean;
+    /**
+     * The session row this device left open, so a reload can settle that specific block.
+     * Naming it keeps recovery off a live session running in another tab.
+     */
+    sessionId: string | null;
 }
 
 export type TimerRestoreOutcome = 'ignored' | 'restored' | 'finished';
 
-export function timerSnapshotOf(state: AppState, nowMs: number): TimerSnapshot {
+export function timerSnapshotOf(state: AppState, nowMs: number, sessionId: string | null): TimerSnapshot {
     const openEnded = isOpenEnded(state);
     return {
-        version: 1,
+        version: 2,
         savedAt: nowMs,
         timerMode: state.timerMode,
         selectedPreset: state.selectedPreset,
@@ -141,6 +146,7 @@ export function timerSnapshotOf(state: AppState, nowMs: number): TimerSnapshot {
         elapsedSeconds: openEnded ? countUpSecondsAt(state, nowMs) : 0,
         pomodoroSession: state.pomodoroSettings.currentSession,
         pomodoroIsBreak: state.pomodoroSettings.isBreak,
+        sessionId,
     };
 }
 
@@ -572,7 +578,7 @@ export const useAppStore = create<AppState>()(
             // The account's saved preset wins over a device-local snapshot that no longer
             // matches it — the workspace should open the way the user last configured it.
             if (
-                snapshot.version !== 1 ||
+                snapshot.version !== 2 ||
                 snapshot.timerMode !== state.timerMode ||
                 snapshot.selectedPreset !== state.selectedPreset
             ) {

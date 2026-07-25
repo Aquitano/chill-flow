@@ -146,8 +146,12 @@ export const flushSessionInputSchema = z.discriminatedUnion('outcome', [
     z.object({ outcome: z.literal('canceled'), id: sessionIdSchema }),
 ]);
 
-/** Focus time this device can prove from its local timer snapshot after a hard reload. */
+/**
+ * The block a device left open, plus the focus time it can still prove from its local timer
+ * snapshot. Naming the row keeps recovery off a session running in another tab.
+ */
 export const recoverSessionInputSchema = z.object({
+    id: sessionIdSchema,
     elapsedSeconds: elapsedSecondsSchema,
 });
 

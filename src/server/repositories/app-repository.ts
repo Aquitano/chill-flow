@@ -1,5 +1,6 @@
 import { appEnv } from '@/lib/env';
 import { backgroundCatalog } from '@/lib/backgrounds';
+import { MIN_RECORDED_SECONDS } from '@/lib/focus-session';
 import { quotes } from '@/lib/quotes';
 import {
     AdminTrack,
@@ -263,6 +264,66 @@ function taskDueTimePatch(
     }
 
     return {};
+}
+
+/**
+ * Record a finished block. Matches by id even when the row is no longer 'active' — a
+ * concurrent startSession in another tab may have flipped it to 'canceled'. That focus time
+ * is real and must still be recorded, but only the part that ran *before* the handover:
+ * without the clamp, two tabs running in parallel each bank the whole overlap. Every SET
+ * expression reads the pre-update row, so canceledAt is still readable here.
+ *
+ * The `status != 'completed'` guard keeps this idempotent — a re-complete, such as the
+ * unload beacon racing the in-app write, matches no row and returns null.
+ *
+ * Module-level rather than a method so session recovery can reuse it without the repository
+ * referring to itself.
+ */
+async function completeSession(database: Database, userId: string, sessionId: string, elapsedSeconds: number) {
+    const [completedSession] = await database
+        .update(focusSessions)
+        .set({
+            status: 'completed',
+            completedAt: new Date(),
+            canceledAt: null,
+            elapsedSeconds: sql<number>`case
+                when ${focusSessions.status} = 'canceled' and ${focusSessions.canceledAt} is not null
+                    then least(
+                        ${elapsedSeconds}::int,
+                        greatest(0, floor(extract(epoch from (${focusSessions.canceledAt} - ${focusSessions.startedAt})))::int)
+                    )
+                else ${elapsedSeconds}::int
+            end`,
+        })
+        .where(
+            and(
+                eq(focusSessions.userId, userId),
+                eq(focusSessions.id, sessionId),
+                ne(focusSessions.status, 'completed'),
+            ),
+        )
+        .returning();
+
+    return completedSession ? mapSession(completedSession) : null;
+}
+
+async function cancelSession(database: Database, userId: string, sessionId: string) {
+    const [canceledSession] = await database
+        .update(focusSessions)
+        .set({
+            status: 'canceled',
+            canceledAt: new Date(),
+        })
+        .where(
+            and(
+                eq(focusSessions.userId, userId),
+                eq(focusSessions.id, sessionId),
+                eq(focusSessions.status, 'active'),
+            ),
+        )
+        .returning();
+
+    return canceledSession ? mapSession(canceledSession) : null;
 }
 
 export const appRepository = {
@@ -565,39 +626,47 @@ export const appRepository = {
         return mapSession(createdSession);
     },
 
-    async completeSession(database: Database, userId: string, sessionId: string, elapsedSeconds: number) {
-        // Match by id even when the row is no longer 'active' — a concurrent startSession
-        // in another tab may have flipped it to 'canceled'. That focus time is real and must
-        // still be recorded, but only the part that ran *before* the handover: without the
-        // clamp two tabs running in parallel each bank the whole overlap. Every SET
-        // expression reads the pre-update row, so canceledAt is still readable here.
-        // The `status != 'completed'` guard keeps this idempotent (a re-complete, e.g. from
-        // the unload beacon, matches no row and returns null).
-        const [completedSession] = await database
-            .update(focusSessions)
-            .set({
-                status: 'completed',
-                completedAt: new Date(),
-                canceledAt: null,
-                elapsedSeconds: sql<number>`case
-                    when ${focusSessions.status} = 'canceled' and ${focusSessions.canceledAt} is not null
-                        then least(
-                            ${elapsedSeconds}::int,
-                            greatest(0, floor(extract(epoch from (${focusSessions.canceledAt} - ${focusSessions.startedAt})))::int)
-                        )
-                    else ${elapsedSeconds}::int
-                end`,
-            })
+    completeSession,
+
+    /**
+     * Settle the session a device left open after a hard reload — a crash, a kill, a dead
+     * battery — where the unload beacon never got to run.
+     *
+     * The client names the row from its own timer snapshot rather than asking for "the
+     * active one", so opening a second tab can never close a session still running in the
+     * first. The elapsed time it can prove is clamped to what the clock allows, and a block
+     * too short to record is canceled instead.
+     */
+    async recoverSession(database: Database, userId: string, sessionId: string, provenElapsedSeconds: number) {
+        const [openSession] = await database
+            .select()
+            .from(focusSessions)
             .where(
                 and(
                     eq(focusSessions.userId, userId),
                     eq(focusSessions.id, sessionId),
-                    ne(focusSessions.status, 'completed'),
+                    eq(focusSessions.status, 'active'),
                 ),
             )
-            .returning();
+            .limit(1);
 
-        return completedSession ? mapSession(completedSession) : null;
+        if (!openSession) {
+            return { outcome: 'none' as const, elapsedSeconds: 0 };
+        }
+
+        const sinceStartSeconds = Math.floor((Date.now() - openSession.startedAt.getTime()) / 1000);
+        const elapsedSeconds = Math.max(
+            0,
+            Math.min(provenElapsedSeconds, openSession.plannedDurationSeconds, sinceStartSeconds),
+        );
+
+        if (elapsedSeconds < MIN_RECORDED_SECONDS) {
+            await cancelSession(database, userId, sessionId);
+            return { outcome: 'canceled' as const, elapsedSeconds: 0 };
+        }
+
+        const recovered = await completeSession(database, userId, sessionId, elapsedSeconds);
+        return { outcome: 'completed' as const, elapsedSeconds: recovered?.elapsedSeconds ?? elapsedSeconds };
     },
 
     async completeSessionCycle(database: Database, userId: string, sessionId: string) {
@@ -620,24 +689,7 @@ export const appRepository = {
         return markedSession ? mapSession(markedSession) : null;
     },
 
-    async cancelSession(database: Database, userId: string, sessionId: string) {
-        const [canceledSession] = await database
-            .update(focusSessions)
-            .set({
-                status: 'canceled',
-                canceledAt: new Date(),
-            })
-            .where(
-                and(
-                    eq(focusSessions.userId, userId),
-                    eq(focusSessions.id, sessionId),
-                    eq(focusSessions.status, 'active'),
-                ),
-            )
-            .returning();
-
-        return canceledSession ? mapSession(canceledSession) : null;
-    },
+    cancelSession,
 
     /**
      * Erase everything keyed to a user, for the Clerk `user.deleted` webhook. Batched so a

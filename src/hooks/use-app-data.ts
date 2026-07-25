@@ -272,6 +272,18 @@ export function useSessionCycleCompleteMutation() {
     });
 }
 
+export function useSessionRecoverMutation() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (input: { id: string; elapsedSeconds: number }) => api.sessions.recover(input),
+        retry: retryTransientOnce,
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
+        },
+    });
+}
+
 export function useSessionCancelMutation() {
     const queryClient = useQueryClient();
 

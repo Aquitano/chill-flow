@@ -404,19 +404,26 @@ export const TimerDial: React.FC = () => {
     }, [timerActive, tickTimer]);
 
     // Keep a device-local snapshot of the dial so closing the tab mid-block doesn't throw
-    // the position away. Rewritten as the page goes away, when the remaining time is exact.
+    // the position away. It names the open session row too, so the next load can settle
+    // exactly the block this device abandoned.
+    const saveTimerSnapshot = useCallback(() => {
+        writeTimerSnapshot(timerSnapshotOf(useAppStore.getState(), Date.now(), recordedSessionId(recorderRef.current)));
+    }, []);
+
     useEffect(() => {
-        const save = () => writeTimerSnapshot(timerSnapshotOf(useAppStore.getState(), Date.now()));
+        saveTimerSnapshot();
+        document.addEventListener('visibilitychange', saveTimerSnapshot);
 
-        save();
-        window.addEventListener('pagehide', save);
-        document.addEventListener('visibilitychange', save);
-
-        return () => {
-            window.removeEventListener('pagehide', save);
-            document.removeEventListener('visibilitychange', save);
-        };
-    }, [timerActive, timerMode, selectedPreset, customMinutes, pomodoroSettings.isBreak, pomodoroSettings.currentSession]);
+        return () => document.removeEventListener('visibilitychange', saveTimerSnapshot);
+    }, [
+        saveTimerSnapshot,
+        timerActive,
+        timerMode,
+        selectedPreset,
+        customMinutes,
+        pomodoroSettings.isBreak,
+        pomodoroSettings.currentSession,
+    ]);
 
     // Translate timer-state transitions into focus-session lifecycle events. A "focus
     // phase" is any running focus countdown — finite or infinite focus mode, or a
@@ -458,6 +465,9 @@ export const TimerDial: React.FC = () => {
     // pageshow opens a fresh one for the time still to come.
     useEffect(() => {
         const handlePageHide = () => {
+            // Snapshot first: the flush clears the recorder, and the snapshot needs the id
+            // so a beacon that never arrives can still be settled on the next load.
+            saveTimerSnapshot();
             if (sessionStateRef.current.status === 'idle') return;
             dispatchSession({ type: 'COMPLETE', atMs: Date.now() }, 'beacon');
         };
@@ -483,7 +493,7 @@ export const TimerDial: React.FC = () => {
             window.removeEventListener('pagehide', handlePageHide);
             window.removeEventListener('pageshow', handlePageShow);
         };
-    }, [dispatchSession]);
+    }, [dispatchSession, saveTimerSnapshot]);
 
     // Closes the loop between the two halves of the workspace: a block aimed at a task
     // ends by asking whether that task is done, instead of the list and the dial never

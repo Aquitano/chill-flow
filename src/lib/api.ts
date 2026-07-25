@@ -108,6 +108,12 @@ export type SessionPayload = {
     };
 };
 
+/** What became of a block this device left open: recorded, discarded, or already settled. */
+export type SessionRecovery = {
+    outcome: 'completed' | 'canceled' | 'none';
+    elapsedSeconds: number;
+};
+
 export const api = {
     tasks: {
         list: () => unwrap<Task[]>(client.tasks.list.$get()),
@@ -163,5 +169,7 @@ export const api = {
         completeCycle: (input: { id: string }) =>
             unwrap<FocusSession | null>(client.sessions.completeCycle.$post(input)),
         cancel: (input: { id: string }) => unwrap<FocusSession | null>(client.sessions.cancel.$post(input)),
+        recover: (input: { id: string; elapsedSeconds: number }) =>
+            unwrap<SessionRecovery>(client.sessions.recover.$post(input)),
     },
 };

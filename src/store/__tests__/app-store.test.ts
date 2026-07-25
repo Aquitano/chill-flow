@@ -375,7 +375,7 @@ describe('restoreTimer', () => {
 
     function snapshot(overrides: Partial<TimerSnapshot> = {}): TimerSnapshot {
         return {
-            version: 1,
+            version: 2,
             savedAt: 0,
             timerMode: 'focus',
             selectedPreset: '25m',
@@ -385,6 +385,7 @@ describe('restoreTimer', () => {
             elapsedSeconds: 0,
             pomodoroSession: 1,
             pomodoroIsBreak: false,
+            sessionId: null,
             ...overrides,
         };
     }
@@ -410,8 +411,9 @@ describe('restoreTimer', () => {
         useAppStore.getState().startTimer();
         atTime(5 * 60_000);
 
-        const taken = timerSnapshotOf(useAppStore.getState(), Date.now());
+        const taken = timerSnapshotOf(useAppStore.getState(), Date.now(), 'session-1');
         expect(taken.remainingSeconds).toBe(40 * 60);
+        expect(taken.sessionId).toBe('session-1');
 
         resetStore();
         useAppStore.getState().setTimerPreset('45m');

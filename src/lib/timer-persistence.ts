@@ -14,7 +14,7 @@ function isSnapshot(value: unknown): value is TimerSnapshot {
     if (!value || typeof value !== 'object') return false;
     const candidate = value as Record<string, unknown>;
     return (
-        candidate.version === 1 &&
+        candidate.version === 2 &&
         typeof candidate.savedAt === 'number' &&
         (candidate.timerMode === 'focus' || candidate.timerMode === 'pomodoro') &&
         typeof candidate.selectedPreset === 'string' &&
@@ -23,7 +23,8 @@ function isSnapshot(value: unknown): value is TimerSnapshot {
         typeof candidate.remainingSeconds === 'number' &&
         typeof candidate.elapsedSeconds === 'number' &&
         typeof candidate.pomodoroSession === 'number' &&
-        typeof candidate.pomodoroIsBreak === 'boolean'
+        typeof candidate.pomodoroIsBreak === 'boolean' &&
+        (candidate.sessionId === null || typeof candidate.sessionId === 'string')
     );
 }
 
