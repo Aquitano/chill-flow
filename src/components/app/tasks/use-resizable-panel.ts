@@ -7,12 +7,24 @@ export interface PanelSize {
     height: number;
 }
 
+export interface ResizablePanel {
+    enabled: boolean;
+    size: PanelSize;
+    resizing: boolean;
+    onResizeStart: (event: ReactPointerEvent) => void;
+}
+
 const STORAGE_KEY = 'chillflow:tasks-panel-size';
 const DEFAULT_SIZE: PanelSize = { width: 320, height: 440 };
 const MIN_SIZE: PanelSize = { width: 288, height: 220 };
-const DESKTOP_QUERY = '(min-width: 640px)';
+// Below this the panel is a full sheet instead: a 320px pane floating beside a dial on a
+// 700px-wide screen leaves neither enough room to be usable.
+const DESKTOP_QUERY = '(min-width: 768px)';
 const PANEL_TOP = 96; // matches the panel's `top-24` offset (6rem)
 const GUTTER = 16; // breathing space against the viewport edge / player bar
+
+/** The panel's left offset (`left-6`) plus a gap, i.e. what the dial must clear. */
+export const PANEL_LEFT_RESERVE = 24 + GUTTER;
 
 /**
  * Upper bounds derived from the live layout so the panel can never grow off-screen or
@@ -55,7 +67,7 @@ function readStored(): PanelSize | null {
  * (the panel is full-width on mobile); the chosen size is clamped to the viewport and
  * persisted to localStorage so it survives panel toggles and reloads.
  */
-export function useResizablePanel() {
+export function useResizablePanel(): ResizablePanel {
     const isClient = typeof window !== 'undefined';
     const [enabled, setEnabled] = useState(() => isClient && window.matchMedia(DESKTOP_QUERY).matches);
     const [size, setSize] = useState<PanelSize>(() =>

@@ -1,6 +1,7 @@
 'use client';
 
 import { AppHeader } from '@/components/app/AppHeader';
+import { Button } from '@/components/ui/button';
 import { CenterContent } from '@/components/app/CenterContent';
 import { CommandPalette } from '@/components/app/CommandPalette';
 import { PlayerDock } from '@/components/app/PlayerDock';
@@ -13,9 +14,11 @@ import {
     useTasksQuery,
 } from '@/hooks/use-app-data';
 import { selectQuoteForMode } from '@/lib/quotes';
+import { readTimerSnapshot } from '@/lib/timer-persistence';
 import { useWorkspaceHotkeys } from '@/hooks/use-workspace-hotkeys';
 import { PomodoroCadence, TimerMode, useAppStore } from '@/store/app-store';
 import { AnimatePresence, motion } from 'framer-motion';
+import { useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -52,11 +55,13 @@ export function AppShell() {
     const setSelectedBackgroundId = useAppStore((state) => state.setSelectedBackgroundId);
     const setCurrentTrack = useAppStore((state) => state.setCurrentTrack);
     const setLikedTrackIds = useAppStore((state) => state.setLikedTrackIds);
-    const setSessions = useAppStore((state) => state.setSessions);
+    const setSessionSummary = useAppStore((state) => state.setSessionSummary);
     const setMode = useAppStore((state) => state.setMode);
     const setCurrentQuote = useAppStore((state) => state.setCurrentQuote);
     const hydratePreferences = useAppStore((state) => state.hydratePreferences);
+    const restoreTimer = useAppStore((state) => state.restoreTimer);
 
+    const searchParams = useSearchParams();
     const tracksQuery = useTracksQuery();
     const tasksQuery = useTasksQuery();
     const preferencesQuery = usePreferencesQuery();
@@ -66,6 +71,9 @@ export function AppShell() {
     useWorkspaceHotkeys();
 
     const didHydratePreferences = useRef(false);
+    // The workspace only mounts once this flips, so the timer dial never renders against
+    // un-hydrated defaults — and the restored dial is in place before its effects run.
+    const [isHydrated, setIsHydrated] = useState(false);
     const lastPersistedPreferencesRef = useRef('');
     const savingPreferencesRef = useRef<string | null>(null);
     const availableQuotes = preferencesQuery.data?.quotes ?? [];
@@ -84,9 +92,9 @@ export function AppShell() {
 
     useEffect(() => {
         if (sessionsQuery.data) {
-            setSessions(sessionsQuery.data.sessions, sessionsQuery.data.summary);
+            setSessionSummary(sessionsQuery.data.summary);
         }
-    }, [sessionsQuery.data, setSessions]);
+    }, [sessionsQuery.data, setSessionSummary]);
 
     useEffect(() => {
         // Hydrate workspace state from saved preferences exactly once. Re-running would
@@ -107,11 +115,22 @@ export function AppShell() {
             sessionsBeforeLongBreak: preferences.pomodoroSettings.sessionsBeforeLongBreak,
         };
 
+        // A ?track= deep link (from /soundscapes) wins over the saved preference for this
+        // visit. It only selects the track — playback still waits for a real gesture.
+        const requestedTrackId = searchParams.get('track');
         const selectedTrack = tracksQuery.data?.length
-            ? (tracksQuery.data.find((track) => track.id === preferences.selectedTrackId) ??
+            ? ((requestedTrackId
+                  ? tracksQuery.data.find((track) => track.id === requestedTrackId)
+                  : undefined) ??
+              tracksQuery.data.find((track) => track.id === preferences.selectedTrackId) ??
               tracksQuery.data[0] ??
               null)
             : null;
+
+        if (requestedTrackId) {
+            // Drop the parameter so a later reload restores the saved track instead.
+            window.history.replaceState(null, '', window.location.pathname);
+        }
 
         // Seed the persist baseline with the exact shape we later write, so hydration
         // itself never triggers a redundant save. Uses the *resolved* track id.
@@ -143,7 +162,27 @@ export function AppShell() {
         if (selectedTrack) {
             setCurrentTrack(selectedTrack);
         }
+
+        // Pick the dial back up where the last visit left it. A restore always lands
+        // paused, so time the workspace was closed is never credited as focus.
+        const snapshot = readTimerSnapshot();
+        if (snapshot) {
+            const outcome = restoreTimer(snapshot);
+            if (outcome === 'finished') {
+                toast('Your focus block finished while you were away', {
+                    id: 'timer-restore',
+                    description: 'The time you focused was recorded.',
+                });
+            } else if (outcome === 'restored' && snapshot.wasRunning) {
+                toast('Picked up where you left off', {
+                    id: 'timer-restore',
+                    description: 'Your timer is paused — press play when you are ready.',
+                });
+            }
+        }
+
         didHydratePreferences.current = true;
+        setIsHydrated(true);
     }, [
         preferencesQuery.data,
         hydratePreferences,
@@ -152,6 +191,8 @@ export function AppShell() {
         setLikedTrackIds,
         setMode,
         setSelectedBackgroundId,
+        restoreTimer,
+        searchParams,
         tracksQuery.data,
     ]);
 
@@ -267,7 +308,11 @@ export function AppShell() {
         };
     }, [backgroundUrl, backgroundRetry]);
 
-    if (tracksQuery.isLoading || tasksQuery.isLoading || preferencesQuery.isLoading || sessionsQuery.isLoading) {
+    const isLoading =
+        tracksQuery.isLoading || tasksQuery.isLoading || preferencesQuery.isLoading || sessionsQuery.isLoading;
+    const hasError = tracksQuery.isError || tasksQuery.isError || preferencesQuery.isError || sessionsQuery.isError;
+
+    if (isLoading || (!isHydrated && !hasError)) {
         return (
             <main className="bg-night text-ink relative flex min-h-screen items-center justify-center">
                 {/* Skeleton mirrors the workspace layout: dial in the center, player strip below. */}
@@ -287,15 +332,25 @@ export function AppShell() {
         );
     }
 
-    if (tracksQuery.isError || tasksQuery.isError || preferencesQuery.isError || sessionsQuery.isError) {
+    if (hasError) {
         return (
-            <main className="flex min-h-screen items-center justify-center bg-black px-6 text-white">
+            <main className="bg-night text-ink flex min-h-screen items-center justify-center px-6">
                 <div className="max-w-md rounded-2xl border border-white/10 bg-white/5 p-6 text-center">
-                    <h1 className="text-2xl font-semibold">Workspace failed to load</h1>
-                    <p className="mt-3 text-sm text-neutral-400">
-                        The API could not initialize the current ChillFlow workspace. Refresh the page or check your env
-                        configuration.
+                    <h1 className="text-2xl font-semibold">Your workspace didn&apos;t load</h1>
+                    <p className="text-ink-mid mt-3 text-sm">
+                        We couldn&apos;t reach ChillFlow just now. Your sessions, tasks, and preferences are safe.
                     </p>
+                    <Button
+                        className="bg-ember text-night hover:bg-ember/90 mt-5"
+                        onClick={() => {
+                            void tracksQuery.refetch();
+                            void tasksQuery.refetch();
+                            void preferencesQuery.refetch();
+                            void sessionsQuery.refetch();
+                        }}
+                    >
+                        Try again
+                    </Button>
                 </div>
             </main>
         );

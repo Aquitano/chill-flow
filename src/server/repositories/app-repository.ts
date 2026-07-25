@@ -102,6 +102,7 @@ const defaultPreferences: UserPreferences = {
     transitionSpeed: 300,
     volume: 50,
     showNotifications: true,
+    timerSound: true,
     theme: 'dark',
     timerMode: 'focus',
     timerPreset: '25m',
@@ -147,6 +148,7 @@ function mapSession(row: typeof focusSessions.$inferSelect): FocusSession {
         plannedDurationSeconds: row.plannedDurationSeconds,
         elapsedSeconds: row.elapsedSeconds,
         trackId: row.trackId,
+        taskId: row.taskId,
         completedAt: asIsoString(row.completedAt ?? row.startedAt),
         cycleCompletedAt: row.cycleCompletedAt ? asIsoString(row.cycleCompletedAt) : null,
     };
@@ -159,6 +161,7 @@ function mapPreferences(row: typeof userPreferences.$inferSelect): UserPreferenc
         transitionSpeed: row.transitionSpeed,
         volume: row.volume,
         showNotifications: row.showNotifications,
+        timerSound: row.timerSound,
         theme: row.theme as UserPreferences['theme'],
         timerMode: row.timerMode as UserPreferences['timerMode'],
         timerPreset: row.timerPreset,
@@ -191,6 +194,7 @@ async function ensureUserPreferences(database: Database, userId: string) {
             transitionSpeed: defaultPreferences.transitionSpeed,
             volume: defaultPreferences.volume,
             showNotifications: defaultPreferences.showNotifications,
+            timerSound: defaultPreferences.timerSound,
             theme: defaultPreferences.theme,
             timerMode: defaultPreferences.timerMode,
             timerPreset: defaultPreferences.timerPreset,
@@ -448,6 +452,15 @@ export const appRepository = {
         return updatedTask ? mapTask(updatedTask) : null;
     },
 
+    async clearCompletedTasks(database: Database, userId: string) {
+        const deletedTasks = await database
+            .delete(tasks)
+            .where(and(eq(tasks.userId, userId), eq(tasks.isCompleted, true)))
+            .returning({ id: tasks.id });
+
+        return { count: deletedTasks.length };
+    },
+
     async deleteTask(database: Database, userId: string, taskId: string) {
         const deletedTasks = await database
             .delete(tasks)
@@ -486,26 +499,11 @@ export const appRepository = {
         return mapPreferences(updatedPreferences);
     },
 
-    async listSessions(database: Database, userId: string) {
-        const storedSessions = await database
-            .select()
-            .from(focusSessions)
-            .where(
-                and(
-                    eq(focusSessions.userId, userId),
-                    eq(focusSessions.status, 'completed'),
-                    isNotNull(focusSessions.completedAt),
-                ),
-            )
-            .orderBy(desc(focusSessions.completedAt));
-
-        return storedSessions.map(mapSession);
-    },
-
     async startSession(
         database: Database,
         userId: string,
-        input: Pick<FocusSession, 'mode' | 'timerKind' | 'plannedDurationSeconds' | 'trackId'>,
+        input: Pick<FocusSession, 'mode' | 'timerKind' | 'plannedDurationSeconds' | 'trackId'> &
+            Partial<Pick<FocusSession, 'taskId'>>,
     ) {
         const now = new Date();
 
@@ -531,6 +529,7 @@ export const appRepository = {
                 plannedDurationSeconds: input.plannedDurationSeconds,
                 elapsedSeconds: 0,
                 trackId: input.trackId,
+                taskId: input.taskId ?? null,
                 startedAt: now,
                 completedAt: null,
                 canceledAt: null,

@@ -10,17 +10,20 @@ import {
     useSessionCompleteMutation,
     useSessionCycleCompleteMutation,
     useSessionStartMutation,
+    useUpdateTaskMutation,
 } from '@/hooks/use-app-data';
 import {
     FocusSessionEvent,
     FocusSessionState,
-    MIN_RECORDED_SECONDS,
     focusSessionReducer,
     initialFocusSessionState,
+    sessionEventForTransition,
 } from '@/lib/focus-session';
+import { playTimerChime } from '@/lib/audio/chime';
 import { getNotificationPermission, requestNotificationPermission, showTimerNotification } from '@/lib/notifications';
+import { writeTimerSnapshot } from '@/lib/timer-persistence';
 import { cn } from '@/lib/utils';
-import { TimerMode, presetToMinutes, useAppStore } from '@/store/app-store';
+import { OPEN_ENDED_PRESET, TimerMode, phaseDurationSeconds, timerSnapshotOf, useAppStore } from '@/store/app-store';
 import { motion } from 'framer-motion';
 import {
     Clock,
@@ -30,6 +33,7 @@ import {
     Play,
     RefreshCcw,
     Settings,
+    SkipForward,
     Timer,
     Zap,
     type LucideIcon,
@@ -42,8 +46,11 @@ const FOCUS_PRESETS: { label: string; icon: LucideIcon }[] = [
     { label: '25m', icon: Timer },
     { label: '45m', icon: Hourglass },
     { label: '60m', icon: Clock },
-    { label: '∞', icon: InfinityIcon },
+    { label: OPEN_ENDED_PRESET, icon: InfinityIcon },
 ];
+
+/** Mirrors the 12-hour cap the server applies to a session's planned duration. */
+const MAX_CUSTOM_MINUTES = 12 * 60;
 
 const TICK_COUNT = 72;
 const TICKS = Array.from({ length: TICK_COUNT }, (_, index) => {
@@ -67,16 +74,89 @@ function formatTime(seconds: number): string {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
+/** Spoken form of the dial, so the live region reads "24 minutes" not "24:00". */
+function speakTime(seconds: number): string {
+    const mins = Math.round(seconds / 60);
+    if (mins < 1) return 'under a minute';
+    return `${mins} ${mins === 1 ? 'minute' : 'minutes'}`;
+}
+
+function clampNumber(value: number, min: number, max: number, fallback: number): number {
+    if (!Number.isFinite(value)) return fallback;
+    return Math.min(Math.max(Math.round(value), min), max);
+}
+
+/**
+ * Number field for the cadence popovers. Edits live in a local draft and only commit on
+ * blur, so a half-typed "3" on the way to "30" is never snapped back to a default. Keys
+ * are kept from the surrounding menu, which would otherwise treat them as typeahead.
+ */
+function CadenceField({
+    id,
+    label,
+    value,
+    min,
+    max,
+    onCommit,
+    className,
+}: {
+    id: string;
+    label: string;
+    value: number;
+    min: number;
+    max: number;
+    onCommit: (next: number) => void;
+    className?: string;
+}) {
+    const [draft, setDraft] = useState(String(value));
+
+    useEffect(() => {
+        setDraft(String(value));
+    }, [value]);
+
+    const commit = () => {
+        const next = clampNumber(parseInt(draft, 10), min, max, value);
+        setDraft(String(next));
+        if (next !== value) onCommit(next);
+    };
+
+    return (
+        <div className="space-y-1">
+            <label htmlFor={id} className="text-ink-dim text-xs">
+                {label}
+            </label>
+            <Input
+                id={id}
+                type="number"
+                inputMode="numeric"
+                min={min}
+                max={max}
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onBlur={commit}
+                onKeyDown={(event) => {
+                    if (event.key !== 'Escape' && event.key !== 'Tab') event.stopPropagation();
+                    if (event.key === 'Enter') event.currentTarget.blur();
+                }}
+                className={cn('h-7 bg-transparent', className)}
+            />
+        </div>
+    );
+}
+
 export const TimerDial: React.FC = () => {
     const currentMode = useAppStore((state) => state.currentMode);
 
     const timerMode = useAppStore((state) => state.timerMode);
     const timerSeconds = useAppStore((state) => state.timerSeconds);
     const timerActive = useAppStore((state) => state.timerActive);
+    const countUpSeconds = useAppStore((state) => state.countUpSeconds);
+    const timerResetCount = useAppStore((state) => state.timerResetCount);
     const selectedPreset = useAppStore((state) => state.selectedPreset);
     const customMinutes = useAppStore((state) => state.customMinutes);
     const pomodoroSettings = useAppStore((state) => state.pomodoroSettings);
     const currentTrack = useAppStore((state) => state.currentTrack);
+    const focusTaskId = useAppStore((state) => state.focusTaskId);
 
     const setTimerMode = useAppStore((state) => state.setTimerMode);
     const startTimer = useAppStore((state) => state.startTimer);
@@ -84,8 +164,9 @@ export const TimerDial: React.FC = () => {
     const resetTimer = useAppStore((state) => state.resetTimer);
     const setTimerPreset = useAppStore((state) => state.setTimerPreset);
     const setCustomTime = useAppStore((state) => state.setCustomTime);
-    const decrementTimer = useAppStore((state) => state.decrementTimer);
+    const tickTimer = useAppStore((state) => state.tickTimer);
     const updatePomodoroSettings = useAppStore((state) => state.updatePomodoroSettings);
+    const advancePomodoroPhase = useAppStore((state) => state.advancePomodoroPhase);
 
     const focusMinutesId = useId();
     const breakMinutesId = useId();
@@ -98,21 +179,27 @@ export const TimerDial: React.FC = () => {
     // Default to false until the real preference is loaded, so we never prompt for
     // notification permission (or fire one) for a user who has them turned off.
     const showNotificationsPref = preferencesQuery.data?.preferences.showNotifications ?? false;
+    const timerSoundPref = preferencesQuery.data?.preferences.timerSound ?? false;
 
-    const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+    const isOpenEnded = timerMode === 'focus' && selectedPreset === OPEN_ENDED_PRESET;
+    const isBreak = timerMode === 'pomodoro' && pomodoroSettings.isBreak;
+
     const activeSessionIdRef = useRef<string | null>(null);
     // A completed Pomodoro focus block waiting for its break to finish; once it does,
     // the block is marked as a full focus-plus-break cycle.
     const pendingCycleSessionIdRef = useRef<string | null>(null);
     const sessionStateRef = useRef<FocusSessionState>(initialFocusSessionState);
     const prevFocusRunningRef = useRef(false);
+    const prevResetCountRef = useRef(timerResetCount);
     const prevTimerSecondsRef = useRef(timerSeconds);
     const prevIsBreakRef = useRef(pomodoroSettings.isBreak);
 
     const [customHours, setCustomHours] = useState('0');
     const [customMins, setCustomMins] = useState('25');
     const [customOpen, setCustomOpen] = useState(false);
+    const [announcement, setAnnouncement] = useState('');
 
+    const updateTask = useUpdateTaskMutation();
     const startSession = useSessionStartMutation();
     const completeSession = useSessionCompleteMutation();
     const completeCycle = useSessionCycleCompleteMutation();
@@ -127,9 +214,16 @@ export const TimerDial: React.FC = () => {
         cancel: cancelSession,
     });
     mutationsRef.current = { start: startSession, complete: completeSession, completeCycle, cancel: cancelSession };
+    const updateTaskRef = useRef(updateTask);
+    updateTaskRef.current = updateTask;
     const timerKind = timerMode === 'pomodoro' ? ('pomodoro' as const) : ('focus' as const);
-    const contextRef = useRef({ mode: currentMode, timerKind, trackId: currentTrack?.id ?? null });
-    contextRef.current = { mode: currentMode, timerKind, trackId: currentTrack?.id ?? null };
+    const contextRef = useRef({
+        mode: currentMode,
+        timerKind,
+        trackId: currentTrack?.id ?? null,
+        taskId: focusTaskId,
+    });
+    contextRef.current = { mode: currentMode, timerKind, trackId: currentTrack?.id ?? null, taskId: focusTaskId };
 
     // Single entry point for the focus-session lifecycle: feed an event to the pure
     // reducer, persist the next state, and execute the resulting API command.
@@ -146,6 +240,7 @@ export const TimerDial: React.FC = () => {
                         timerKind: contextRef.current.timerKind,
                         plannedDurationSeconds: command.plannedSeconds,
                         trackId: contextRef.current.trackId,
+                        taskId: contextRef.current.taskId,
                     },
                     {
                         onSuccess: (session) => {
@@ -184,24 +279,39 @@ export const TimerDial: React.FC = () => {
         }
     }, []);
 
+    // The dial is derived from a wall-clock deadline, so this interval only repaints it.
+    // Background tabs throttle (and sleeping machines stop) timers, so also resync the
+    // moment the tab comes back rather than waiting for the next throttled tick.
     useEffect(() => {
-        if (timerIntervalRef.current) {
-            clearInterval(timerIntervalRef.current);
-            timerIntervalRef.current = null;
+        if (!timerActive) {
+            return;
         }
 
-        if (timerActive) {
-            timerIntervalRef.current = setInterval(() => {
-                decrementTimer();
-            }, 1000);
-        }
+        const interval = setInterval(tickTimer, 1000);
+        document.addEventListener('visibilitychange', tickTimer);
+        window.addEventListener('focus', tickTimer);
 
         return () => {
-            if (timerIntervalRef.current) {
-                clearInterval(timerIntervalRef.current);
-            }
+            clearInterval(interval);
+            document.removeEventListener('visibilitychange', tickTimer);
+            window.removeEventListener('focus', tickTimer);
         };
-    }, [timerActive, decrementTimer]);
+    }, [timerActive, tickTimer]);
+
+    // Keep a device-local snapshot of the dial so closing the tab mid-block doesn't throw
+    // the position away. Rewritten as the page goes away, when the remaining time is exact.
+    useEffect(() => {
+        const save = () => writeTimerSnapshot(timerSnapshotOf(useAppStore.getState(), Date.now()));
+
+        save();
+        window.addEventListener('pagehide', save);
+        document.addEventListener('visibilitychange', save);
+
+        return () => {
+            window.removeEventListener('pagehide', save);
+            document.removeEventListener('visibilitychange', save);
+        };
+    }, [timerActive, timerMode, selectedPreset, customMinutes, pomodoroSettings.isBreak, pomodoroSettings.currentSession]);
 
     // Translate timer-state transitions into focus-session lifecycle events. A "focus
     // phase" is any running focus countdown — finite or infinite focus mode, or a
@@ -209,41 +319,40 @@ export const TimerDial: React.FC = () => {
     useEffect(() => {
         const isFocusPhase = timerMode === 'focus' || (timerMode === 'pomodoro' && !pomodoroSettings.isBreak);
         const focusRunning = timerActive && isFocusPhase;
-        const wasRunning = prevFocusRunningRef.current;
+        const wasFocusRunning = prevFocusRunningRef.current;
+        const wasReset = timerResetCount !== prevResetCountRef.current;
         const now = Date.now();
 
-        if (!wasRunning && focusRunning) {
-            // Re-entering a Pomodoro focus phase only happens when the break countdown
-            // finished, so a block waiting on its break is now a full completed cycle.
-            if (timerMode === 'pomodoro' && pendingCycleSessionIdRef.current) {
-                mutationsRef.current.completeCycle.mutate({ id: pendingCycleSessionIdRef.current });
-                pendingCycleSessionIdRef.current = null;
-            }
-            if (sessionStateRef.current.status === 'paused') {
-                dispatchSession({ type: 'RESUME', atMs: now });
-            } else {
-                const isInfinite = selectedPreset === '∞';
-                if (isInfinite || timerSeconds >= MIN_RECORDED_SECONDS) {
-                    dispatchSession({ type: 'START', plannedSeconds: isInfinite ? 0 : timerSeconds, atMs: now });
-                }
-            }
-        } else if (wasRunning && !focusRunning) {
-            if (timerActive) {
-                // Still active but no longer a focus phase → Pomodoro focus rolled into a
-                // break: the focus block finished. Its cycle completes when the break does.
-                pendingCycleSessionIdRef.current = activeSessionIdRef.current;
-                dispatchSession({ type: 'COMPLETE', atMs: now });
-            } else if (timerMode === 'focus' && timerSeconds === 0) {
-                // Finite focus countdown reached zero.
-                dispatchSession({ type: 'COMPLETE', atMs: now });
-            } else {
-                // Timer paused by the user; keep the session resumable.
-                dispatchSession({ type: 'PAUSE', atMs: now });
-            }
+        prevFocusRunningRef.current = focusRunning;
+        prevResetCountRef.current = timerResetCount;
+
+        // Re-entering a Pomodoro focus phase only happens when the break countdown
+        // finished, so a block waiting on its break is now a full completed cycle.
+        if (!wasFocusRunning && focusRunning && timerMode === 'pomodoro' && pendingCycleSessionIdRef.current) {
+            mutationsRef.current.completeCycle.mutate({ id: pendingCycleSessionIdRef.current });
+            pendingCycleSessionIdRef.current = null;
+        }
+        // A focus block rolling into its break completes here; its cycle completes with the break.
+        if (wasFocusRunning && !focusRunning && timerActive) {
+            pendingCycleSessionIdRef.current = activeSessionIdRef.current;
         }
 
-        prevFocusRunningRef.current = focusRunning;
-    }, [timerActive, timerMode, pomodoroSettings.isBreak, timerSeconds, selectedPreset, dispatchSession]);
+        const event = sessionEventForTransition({
+            wasFocusRunning,
+            isFocusRunning: focusRunning,
+            timerActive,
+            timerMode,
+            timerSeconds,
+            isOpenEnded,
+            wasReset,
+            sessionStatus: sessionStateRef.current.status,
+            atMs: now,
+        });
+
+        if (event) {
+            dispatchSession(event);
+        }
+    }, [timerActive, timerMode, pomodoroSettings.isBreak, timerSeconds, isOpenEnded, timerResetCount, dispatchSession]);
 
     // Best-effort flush when the tab is being closed/navigated away mid-session so the
     // focus time isn't silently lost. (Hard closes may not always deliver the request.)
@@ -258,34 +367,60 @@ export const TimerDial: React.FC = () => {
         return () => window.removeEventListener('pagehide', handlePageHide);
     }, [dispatchSession]);
 
-    // Notify on focus-countdown completion (finite focus reaching 0:00). Infinite focus
-    // (selectedPreset '∞', which also sets timerSeconds to 0) is excluded so selecting it
-    // doesn't read as a completion. Gated by the showNotifications preference + permission.
+    // Closes the loop between the two halves of the workspace: a block aimed at a task
+    // ends by asking whether that task is done, instead of the list and the dial never
+    // touching. Reads the store imperatively so completion effects need no extra deps.
+    const promptFocusTask = useCallback(() => {
+        const { focusTaskId: taskId, tasks } = useAppStore.getState();
+        const task = tasks.find((entry) => entry.id === taskId);
+        if (!task || task.isCompleted) return;
+
+        toast(`Finished a block on “${task.text}”`, {
+            id: 'focus-task-complete',
+            action: {
+                label: 'Mark done',
+                onClick: () => updateTaskRef.current.mutate({ id: task.id, isCompleted: true }),
+            },
+        });
+    }, []);
+
+    // Announce focus-countdown completion (finite focus reaching 0:00). Open-ended focus
+    // also sits at timerSeconds 0, so it is excluded to keep selecting it from reading as
+    // a completion. The chime and the live region always fire; the browser notification is
+    // gated on the preference plus permission.
     useEffect(() => {
         const prevSeconds = prevTimerSecondsRef.current;
         prevTimerSecondsRef.current = timerSeconds;
 
-        if (!showNotificationsPref) return;
-        if (timerMode === 'focus' && selectedPreset !== '∞' && prevSeconds > 0 && timerSeconds === 0) {
+        if (timerMode !== 'focus' || isOpenEnded || prevSeconds <= 0 || timerSeconds !== 0) return;
+
+        setAnnouncement('Focus session complete.');
+        if (timerSoundPref) playTimerChime('complete');
+        if (showNotificationsPref) {
             showTimerNotification('Focus session complete', 'Nice work — time to step away for a bit.');
         }
-    }, [timerSeconds, timerMode, selectedPreset, showNotificationsPref]);
+        promptFocusTask();
+    }, [timerSeconds, timerMode, isOpenEnded, showNotificationsPref, timerSoundPref, promptFocusTask]);
 
-    // Notify on Pomodoro phase changes. `isBreak` only flips via advancePomodoroPhase
+    // Announce Pomodoro phase changes. `isBreak` only flips via advancePomodoroPhase
     // (a real phase boundary), so watching it covers focus→break and break→focus.
     useEffect(() => {
         const prevIsBreak = prevIsBreakRef.current;
         prevIsBreakRef.current = pomodoroSettings.isBreak;
 
-        if (prevIsBreak === pomodoroSettings.isBreak) return;
-        if (!showNotificationsPref || timerMode !== 'pomodoro') return;
+        if (prevIsBreak === pomodoroSettings.isBreak || timerMode !== 'pomodoro') return;
 
         if (pomodoroSettings.isBreak) {
-            showTimerNotification('Break time', 'Focus block done — take your break.');
+            setAnnouncement('Focus block done. Break time.');
+            if (timerSoundPref) playTimerChime('complete');
+            if (showNotificationsPref) showTimerNotification('Break time', 'Focus block done — take your break.');
+            promptFocusTask();
         } else {
-            showTimerNotification('Back to focus', 'Break over — back into the flow.');
+            setAnnouncement('Break over. Back to focus.');
+            if (timerSoundPref) playTimerChime('resume');
+            if (showNotificationsPref) showTimerNotification('Back to focus', 'Break over — back into the flow.');
         }
-    }, [pomodoroSettings.isBreak, showNotificationsPref, timerMode]);
+    }, [pomodoroSettings.isBreak, showNotificationsPref, timerSoundPref, timerMode, promptFocusTask]);
 
     // Start/pause the timer. On the first start with notifications enabled, ask for
     // permission inside this gesture (browsers reject permission prompts otherwise).
@@ -300,10 +435,20 @@ export const TimerDial: React.FC = () => {
         startTimer();
     }, [timerActive, pauseTimer, startTimer, showNotificationsPref]);
 
+    // Seed the fields from the duration currently in play each time the popover opens.
+    const handleCustomOpenChange = (open: boolean) => {
+        if (open) {
+            const total = clampNumber(parseInt(customMinutes, 10), 1, MAX_CUSTOM_MINUTES, 25);
+            setCustomHours(String(Math.floor(total / 60)));
+            setCustomMins(String(total % 60));
+        }
+        setCustomOpen(open);
+    };
+
     const handleSetCustomTime = () => {
-        const hours = parseInt(customHours) || 0;
-        const mins = parseInt(customMins) || 0;
-        const totalMinutes = hours * 60 + mins;
+        const hours = parseInt(customHours, 10) || 0;
+        const mins = parseInt(customMins, 10) || 0;
+        const totalMinutes = Math.min(hours * 60 + mins, MAX_CUSTOM_MINUTES);
 
         if (totalMinutes > 0) {
             setCustomTime(totalMinutes.toString());
@@ -322,28 +467,28 @@ export const TimerDial: React.FC = () => {
         setTimerMode(mode);
     };
 
-    const isInfinite = timerMode === 'focus' && selectedPreset === '∞';
-    const isBreak = timerMode === 'pomodoro' && pomodoroSettings.isBreak;
+    const handleSkipBreak = () => {
+        // A skipped break is not a completed focus-plus-break cycle, so the block waiting
+        // on this break never earns its cycle mark.
+        pendingCycleSessionIdRef.current = null;
+        setAnnouncement('Break skipped. Back to focus.');
+        advancePomodoroPhase();
+    };
 
-    const totalSeconds = (() => {
-        if (timerMode === 'focus') {
-            const minutes = presetToMinutes(selectedPreset, customMinutes);
-            return minutes === null ? null : minutes * 60;
-        }
-        const minutes = pomodoroSettings.isBreak
-            ? pomodoroSettings.currentSession === pomodoroSettings.sessionsBeforeLongBreak
-                ? pomodoroSettings.longBreakMinutes
-                : pomodoroSettings.breakMinutes
-            : pomodoroSettings.focusMinutes;
-        return minutes * 60;
-    })();
-    const ringProgress =
-        totalSeconds && totalSeconds > 0 ? Math.min(Math.max(1 - timerSeconds / totalSeconds, 0), 1) : 0;
+    const displaySeconds = isOpenEnded ? countUpSeconds : timerSeconds;
+    const totalSeconds = phaseDurationSeconds({ timerMode, selectedPreset, customMinutes, pomodoroSettings });
+    // Open-ended focus has no target to fill, so the ring reads as an hour hand: it sweeps
+    // once per hour of real focus rather than sitting inert.
+    const ringProgress = isOpenEnded
+        ? (countUpSeconds % 3600) / 3600
+        : totalSeconds && totalSeconds > 0
+          ? Math.min(Math.max(1 - timerSeconds / totalSeconds, 0), 1)
+          : 0;
 
     const phaseLabel =
         timerMode === 'pomodoro'
             ? `${pomodoroSettings.isBreak ? 'Break' : 'Focus'} ${pomodoroSettings.currentSession}/${pomodoroSettings.sessionsBeforeLongBreak}`
-            : isInfinite
+            : isOpenEnded
               ? 'Open-ended focus'
               : `${selectedPreset} focus block`;
 
@@ -351,7 +496,7 @@ export const TimerDial: React.FC = () => {
         <div className="relative z-20 flex h-full w-full flex-col items-center justify-center rounded-full">
             <svg viewBox="0 0 100 100" className="pointer-events-none absolute inset-1" aria-hidden>
                 {TICKS.map((tick, index) => {
-                    const lit = isInfinite || index / TICK_COUNT < ringProgress;
+                    const lit = index / TICK_COUNT < ringProgress;
                     return (
                         <line
                             key={index}
@@ -362,15 +507,20 @@ export const TimerDial: React.FC = () => {
                             strokeWidth="0.55"
                             strokeLinecap="round"
                             className={cn('stroke-current transition-colors duration-500', {
-                                'text-ember': lit && !isBreak && !isInfinite,
+                                'text-ember': lit && !isBreak,
                                 'text-ink-mid': lit && isBreak,
-                                'text-ember/30': lit && isInfinite,
                                 'text-white/10': !lit,
                             })}
                         />
                     );
                 })}
             </svg>
+
+            {/* The dial itself is aria-live="off" — a per-second countdown would flood a
+                screen reader — so boundaries are announced here instead. */}
+            <p className="sr-only" role="status" aria-live="polite">
+                {announcement}
+            </p>
 
             <Tabs value={timerMode} onValueChange={(value) => handleTimerModeChange(value as TimerMode)}>
                 <TabsList className="h-7 bg-black/50">
@@ -393,8 +543,9 @@ export const TimerDial: React.FC = () => {
                 className="text-ink mt-1 text-6xl font-medium tabular-nums sm:text-7xl"
                 role="timer"
                 aria-live="off"
+                aria-label={`${isOpenEnded ? 'Focused for' : 'Remaining'} ${speakTime(displaySeconds)}`}
             >
-                {isInfinite ? '∞' : formatTime(timerSeconds)}
+                {formatTime(displaySeconds)}
             </motion.div>
 
             <div className="mt-6 flex items-center gap-4">
@@ -402,11 +553,8 @@ export const TimerDial: React.FC = () => {
                     variant="outline"
                     size="icon"
                     className="h-10 w-10 rounded-full border-white/15 bg-black/40 hover:bg-white/10"
-                    onClick={() => {
-                        dispatchSession({ type: 'CANCEL' });
-                        resetTimer();
-                    }}
-                    aria-label="Reset timer"
+                    onClick={resetTimer}
+                    aria-label={isOpenEnded ? 'Finish open-ended focus' : 'Reset timer'}
                 >
                     <RefreshCcw size={15} />
                 </Button>
@@ -437,76 +585,44 @@ export const TimerDial: React.FC = () => {
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="center" className="space-y-2 bg-black/90 p-3 backdrop-blur-md">
-                            <div className="space-y-1">
-                                <label htmlFor={focusMinutesId} className="text-ink-dim text-xs">
-                                    Focus (minutes)
-                                </label>
-                                <Input
-                                    id={focusMinutesId}
-                                    type="number"
-                                    value={pomodoroSettings.focusMinutes}
-                                    onChange={(e) =>
-                                        updatePomodoroSettings({ focusMinutes: parseInt(e.target.value) || 25 })
-                                    }
-                                    className="h-7 bg-transparent"
-                                    min="1"
-                                    max="60"
-                                />
-                            </div>
-                            <div className="space-y-1">
-                                <label htmlFor={breakMinutesId} className="text-ink-dim text-xs">
-                                    Break (minutes)
-                                </label>
-                                <Input
-                                    id={breakMinutesId}
-                                    type="number"
-                                    value={pomodoroSettings.breakMinutes}
-                                    onChange={(e) =>
-                                        updatePomodoroSettings({ breakMinutes: parseInt(e.target.value) || 5 })
-                                    }
-                                    className="h-7 bg-transparent"
-                                    min="1"
-                                    max="30"
-                                />
-                            </div>
-                            <div className="space-y-1">
-                                <label htmlFor={longBreakMinutesId} className="text-ink-dim text-xs">
-                                    Long break (minutes)
-                                </label>
-                                <Input
-                                    id={longBreakMinutesId}
-                                    type="number"
-                                    value={pomodoroSettings.longBreakMinutes}
-                                    onChange={(e) =>
-                                        updatePomodoroSettings({ longBreakMinutes: parseInt(e.target.value) || 15 })
-                                    }
-                                    className="h-7 bg-transparent"
-                                    min="1"
-                                    max="60"
-                                />
-                            </div>
-                            <div className="space-y-1">
-                                <label htmlFor={sessionsId} className="text-ink-dim text-xs">
-                                    Sessions before long break
-                                </label>
-                                <Input
-                                    id={sessionsId}
-                                    type="number"
-                                    value={pomodoroSettings.sessionsBeforeLongBreak}
-                                    onChange={(e) =>
-                                        updatePomodoroSettings({
-                                            sessionsBeforeLongBreak: parseInt(e.target.value) || 4,
-                                        })
-                                    }
-                                    className="h-7 bg-transparent"
-                                    min="1"
-                                    max="10"
-                                />
-                            </div>
+                            <CadenceField
+                                id={focusMinutesId}
+                                label="Focus (minutes)"
+                                value={pomodoroSettings.focusMinutes}
+                                min={1}
+                                max={240}
+                                onCommit={(focusMinutes) => updatePomodoroSettings({ focusMinutes })}
+                            />
+                            <CadenceField
+                                id={breakMinutesId}
+                                label="Break (minutes)"
+                                value={pomodoroSettings.breakMinutes}
+                                min={1}
+                                max={120}
+                                onCommit={(breakMinutes) => updatePomodoroSettings({ breakMinutes })}
+                            />
+                            <CadenceField
+                                id={longBreakMinutesId}
+                                label="Long break (minutes)"
+                                value={pomodoroSettings.longBreakMinutes}
+                                min={1}
+                                max={240}
+                                onCommit={(longBreakMinutes) => updatePomodoroSettings({ longBreakMinutes })}
+                            />
+                            <CadenceField
+                                id={sessionsId}
+                                label="Sessions before long break"
+                                value={pomodoroSettings.sessionsBeforeLongBreak}
+                                min={1}
+                                max={12}
+                                onCommit={(sessionsBeforeLongBreak) =>
+                                    updatePomodoroSettings({ sessionsBeforeLongBreak })
+                                }
+                            />
                         </DropdownMenuContent>
                     </DropdownMenu>
                 ) : (
-                    <DropdownMenu open={customOpen} onOpenChange={setCustomOpen}>
+                    <DropdownMenu open={customOpen} onOpenChange={handleCustomOpenChange}>
                         <DropdownMenuTrigger asChild>
                             <Button
                                 variant="outline"
@@ -520,41 +636,29 @@ export const TimerDial: React.FC = () => {
                         <DropdownMenuContent align="center" className="bg-black/90 p-3 backdrop-blur-md">
                             <div className="text-ink-mid mb-2 text-xs">Custom duration</div>
                             <div className="flex items-end gap-2">
-                                <div className="flex flex-col">
-                                    <label htmlFor={customHoursId} className="text-ink-dim mb-1 text-xs">
-                                        Hours
-                                    </label>
-                                    <Input
-                                        id={customHoursId}
-                                        value={customHours}
-                                        onChange={(e) => setCustomHours(e.target.value)}
-                                        className="h-7 w-16 bg-transparent"
-                                        type="number"
-                                        min="0"
-                                        max="12"
-                                        onClick={(e) => e.stopPropagation()}
-                                    />
-                                </div>
-                                <div className="flex flex-col">
-                                    <label htmlFor={customMinsId} className="text-ink-dim mb-1 text-xs">
-                                        Minutes
-                                    </label>
-                                    <Input
-                                        id={customMinsId}
-                                        value={customMins}
-                                        onChange={(e) => setCustomMins(e.target.value)}
-                                        className="h-7 w-16 bg-transparent"
-                                        type="number"
-                                        min="0"
-                                        max="59"
-                                        onClick={(e) => e.stopPropagation()}
-                                    />
-                                </div>
+                                <CadenceField
+                                    id={customHoursId}
+                                    label="Hours"
+                                    value={parseInt(customHours, 10) || 0}
+                                    min={0}
+                                    max={12}
+                                    onCommit={(hours) => setCustomHours(String(hours))}
+                                    className="w-16"
+                                />
+                                <CadenceField
+                                    id={customMinsId}
+                                    label="Minutes"
+                                    value={parseInt(customMins, 10) || 0}
+                                    min={0}
+                                    max={59}
+                                    onCommit={(minutes) => setCustomMins(String(minutes))}
+                                    className="w-16"
+                                />
                                 <Button
                                     size="sm"
                                     variant="secondary"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
+                                    onClick={(event) => {
+                                        event.stopPropagation();
                                         handleSetCustomTime();
                                     }}
                                 >
@@ -577,7 +681,11 @@ export const TimerDial: React.FC = () => {
                                 type="button"
                                 onClick={() => setTimerPreset(preset.label)}
                                 aria-pressed={active}
-                                aria-label={preset.label === '∞' ? 'Open-ended focus' : `${preset.label} focus block`}
+                                aria-label={
+                                    preset.label === OPEN_ENDED_PRESET
+                                        ? 'Open-ended focus'
+                                        : `${preset.label} focus block`
+                                }
                                 className={cn(
                                     'focus-visible:outline-ember relative rounded-full px-3 py-1.5 text-xs transition-colors focus-visible:outline-2',
                                     active ? 'text-ember' : 'text-ink-mid hover:text-ink',
@@ -592,7 +700,7 @@ export const TimerDial: React.FC = () => {
                                 )}
                                 <span className="relative flex items-center gap-1.5">
                                     <Icon className="h-3 w-3" aria-hidden />
-                                    {preset.label !== '∞' && preset.label}
+                                    {preset.label !== OPEN_ENDED_PRESET && preset.label}
                                 </span>
                             </button>
                         );
@@ -620,6 +728,16 @@ export const TimerDial: React.FC = () => {
                     >
                         Break {pomodoroSettings.breakMinutes}m
                     </span>
+                    {isBreak && (
+                        <button
+                            type="button"
+                            onClick={handleSkipBreak}
+                            className="text-ink-dim hover:text-ink focus-visible:outline-ember flex items-center gap-1.5 rounded-full px-2 py-1 transition-colors focus-visible:outline-2"
+                        >
+                            <SkipForward className="h-3 w-3" aria-hidden />
+                            Skip break
+                        </button>
+                    )}
                 </div>
             )}
         </div>

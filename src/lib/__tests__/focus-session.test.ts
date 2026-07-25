@@ -4,9 +4,11 @@ import {
     FocusSessionState,
     MAX_SESSION_SECONDS,
     MIN_RECORDED_SECONDS,
+    TimerTransition,
     elapsedSecondsOf,
     focusSessionReducer,
     initialFocusSessionState,
+    sessionEventForTransition,
 } from '../focus-session';
 
 const s = 1000; // one second in ms
@@ -146,5 +148,110 @@ describe('focusSessionReducer', () => {
         };
         expect(elapsedSecondsOf(running, 1100 * s)).toBe(400); // 300 accrued + 100 live
         expect(elapsedSecondsOf(running, 0)).toBe(300); // clock going backwards → only accrued
+    });
+});
+
+describe('sessionEventForTransition', () => {
+    /** A running finite focus block, as the dial reports it. */
+    function transition(overrides: Partial<TimerTransition> = {}): TimerTransition {
+        return {
+            wasFocusRunning: true,
+            isFocusRunning: false,
+            timerActive: false,
+            timerMode: 'focus',
+            timerSeconds: 15 * 60,
+            isOpenEnded: false,
+            wasReset: false,
+            sessionStatus: 'running',
+            atMs: 30 * s,
+            ...overrides,
+        };
+    }
+
+    it('pauses an open-ended block rather than ending it', () => {
+        // Open-ended focus holds timerSeconds at 0 for its whole run, which used to look
+        // identical to a finite countdown reaching zero.
+        const event = sessionEventForTransition(transition({ isOpenEnded: true, timerSeconds: 0 }));
+
+        expect(event).toEqual({ type: 'PAUSE', atMs: 30 * s });
+    });
+
+    it('resumes the same open-ended session after a pause instead of opening a new one', () => {
+        const paused = focusSessionReducer(
+            focusSessionReducer(initialFocusSessionState, { type: 'START', plannedSeconds: 0, atMs: 0 }).state,
+            { type: 'PAUSE', atMs: 30 * s },
+        ).state;
+
+        const event = sessionEventForTransition(
+            transition({
+                wasFocusRunning: false,
+                isFocusRunning: true,
+                timerActive: true,
+                isOpenEnded: true,
+                timerSeconds: 0,
+                sessionStatus: paused.status,
+                atMs: 90 * s,
+            }),
+        );
+
+        expect(event).toEqual({ type: 'RESUME', atMs: 90 * s });
+        expect(focusSessionReducer(paused, event!).command).toEqual({ type: 'NONE' });
+    });
+
+    it('completes a finite focus countdown that reached zero', () => {
+        expect(sessionEventForTransition(transition({ timerSeconds: 0 }))).toEqual({ type: 'COMPLETE', atMs: 30 * s });
+    });
+
+    it('completes a Pomodoro focus block that rolled into its break', () => {
+        const event = sessionEventForTransition(transition({ timerMode: 'pomodoro', timerActive: true }));
+
+        expect(event).toEqual({ type: 'COMPLETE', atMs: 30 * s });
+    });
+
+    it('banks the time when an open-ended block is reset, since reset is how one ends', () => {
+        const event = sessionEventForTransition(transition({ isOpenEnded: true, timerSeconds: 0, wasReset: true }));
+
+        expect(event).toEqual({ type: 'COMPLETE', atMs: 30 * s });
+    });
+
+    it('abandons a finite block on reset, from a paused session as well as a running one', () => {
+        expect(sessionEventForTransition(transition({ wasReset: true }))).toEqual({ type: 'CANCEL' });
+        expect(
+            sessionEventForTransition(
+                transition({ wasFocusRunning: false, sessionStatus: 'paused', wasReset: true }),
+            ),
+        ).toEqual({ type: 'CANCEL' });
+    });
+
+    it('takes reset over the stop it also causes, so a reset never reads as a pause', () => {
+        // ⇧S and the palette reset without the dial's own click handler; the reset must
+        // still win over the timerActive transition landing in the same commit.
+        const event = sessionEventForTransition(transition({ isOpenEnded: true, timerSeconds: 0, wasReset: true }));
+
+        expect(event).not.toEqual({ type: 'PAUSE', atMs: 30 * s });
+    });
+
+    it('ignores a reset with no session behind it', () => {
+        expect(
+            sessionEventForTransition(
+                transition({ wasFocusRunning: false, sessionStatus: 'idle', wasReset: true }),
+            ),
+        ).toBeNull();
+    });
+
+    it('does not open a session for a block shorter than the recorded minimum', () => {
+        const starting = transition({ wasFocusRunning: false, isFocusRunning: true, timerActive: true });
+
+        expect(sessionEventForTransition({ ...starting, timerSeconds: MIN_RECORDED_SECONDS - 1 })).toBeNull();
+        expect(sessionEventForTransition({ ...starting, timerSeconds: MIN_RECORDED_SECONDS })).toEqual({
+            type: 'START',
+            plannedSeconds: MIN_RECORDED_SECONDS,
+            atMs: 30 * s,
+        });
+    });
+
+    it('reports no event when the run state did not change', () => {
+        expect(sessionEventForTransition(transition({ wasFocusRunning: false }))).toBeNull();
+        expect(sessionEventForTransition(transition({ isFocusRunning: true, timerActive: true }))).toBeNull();
     });
 });

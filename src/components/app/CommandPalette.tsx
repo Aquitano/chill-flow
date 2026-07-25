@@ -19,6 +19,7 @@ import {
     SkipForward,
     Sparkles,
     SquareCheckBig,
+    Target,
     Timer,
     Waves,
     type LucideIcon,
@@ -27,7 +28,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 type PaletteItem = {
     id: string;
-    group: 'Tracks' | 'Scenes' | 'Actions';
+    group: 'Tracks' | 'Scenes' | 'Tasks' | 'Actions';
     label: string;
     sub?: string;
     icon: LucideIcon;
@@ -53,6 +54,7 @@ export function CommandPalette() {
     const open = useAppStore((state) => state.activeOverlay === 'palette');
     const setOverlay = useAppStore((state) => state.setOverlay);
     const tracks = useAppStore((state) => state.tracks);
+    const tasks = useAppStore((state) => state.tasks);
     const { mixer, board, sounds: ambientSounds, powered } = useAmbient();
 
     const [query, setQuery] = useState('');
@@ -106,6 +108,23 @@ export function CommandPalette() {
         }));
 
         const snapshot = store();
+
+        const taskItems: PaletteItem[] = tasks
+            .filter((task) => !task.isCompleted)
+            .map((task) => ({
+                id: `task-${task.id}`,
+                group: 'Tasks',
+                label: task.text,
+                sub: snapshot.focusTaskId === task.id ? 'Focusing' : 'Focus on this',
+                icon: Target,
+                keywords: 'task focus work on',
+                run: () => {
+                    const s = store();
+                    s.setFocusTask(s.focusTaskId === task.id ? null : task.id);
+                    close();
+                },
+            }));
+
         const actionItems: PaletteItem[] = [
             {
                 id: 'action-play',
@@ -282,9 +301,9 @@ export function CommandPalette() {
             }),
         ];
 
-        return [...trackItems, ...sceneItems, ...actionItems];
+        return [...trackItems, ...sceneItems, ...taskItems, ...actionItems];
         // `open` retriggers the snapshot so labels (Play/Pause, timer) are fresh per opening.
-    }, [tracks, board, ambientSounds, powered, mixer, open]);
+    }, [tracks, tasks, board, ambientSounds, powered, mixer, open]);
 
     const filtered = useMemo(() => items.filter((item) => matchesQuery(item, query)), [items, query]);
     const clampedIndex = Math.min(activeIndex, Math.max(0, filtered.length - 1));

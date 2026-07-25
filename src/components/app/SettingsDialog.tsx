@@ -1,11 +1,17 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
+import { ToggleSwitch } from '@/components/ui/toggle-switch';
+import { usePreferencesQuery, useUpdatePreferencesMutation } from '@/hooks/use-app-data';
+import { useNotificationPermission } from '@/hooks/use-notification-permission';
+import { playTimerChime } from '@/lib/audio/chime';
+import { getNotificationPermission } from '@/lib/notifications';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app-store';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import {
     BarChart3,
+    Bell,
     Check,
     Image as ImageIcon,
     Keyboard,
@@ -59,12 +65,13 @@ const SHORTCUT_GROUPS = [
     },
 ];
 
-type SectionId = 'mode' | 'sound' | 'scene' | 'progress' | 'shortcuts';
+type SectionId = 'mode' | 'sound' | 'scene' | 'alerts' | 'progress' | 'shortcuts';
 
 const SECTIONS: { id: SectionId; label: string; description: string; icon: LucideIcon }[] = [
     { id: 'mode', label: 'Mode', description: 'Shapes what the workspace shows while you work.', icon: Sparkles },
     { id: 'sound', label: 'Sound', description: 'The track playing under your session.', icon: Music },
     { id: 'scene', label: 'Scene', description: 'The backdrop behind your session.', icon: ImageIcon },
+    { id: 'alerts', label: 'Alerts', description: 'How the timer reaches you when a block ends.', icon: Bell },
     { id: 'progress', label: 'Progress', description: 'Your focus, in plain numbers.', icon: BarChart3 },
     {
         id: 'shortcuts',
@@ -73,6 +80,78 @@ const SECTIONS: { id: SectionId; label: string; description: string; icon: Lucid
         icon: Keyboard,
     },
 ];
+
+function AlertsSection() {
+    const preferencesQuery = usePreferencesQuery();
+    const updatePreferences = useUpdatePreferencesMutation();
+    const { permission, request: requestPermission } = useNotificationPermission();
+
+    const preferences = preferencesQuery.data?.preferences;
+    if (!preferences) {
+        return <p className="text-ink-dim text-sm">Loading your preferences…</p>;
+    }
+
+    const handleNotificationsToggle = async (next: boolean) => {
+        // Turning the preference on also asks the browser, inside this gesture.
+        if (next && getNotificationPermission() === 'default') {
+            await requestPermission();
+        }
+        updatePreferences.mutate({ showNotifications: next });
+    };
+
+    return (
+        <div className="space-y-1">
+            <div className="flex items-start justify-between gap-4 rounded-lg px-3 py-2.5">
+                <span>
+                    <span className="text-ink block text-sm font-medium">Chime</span>
+                    <span className="text-ink-dim mt-0.5 block text-xs">
+                        A soft tone at every timer boundary. Plays even when this tab is in the background.
+                    </span>
+                </span>
+                <ToggleSwitch
+                    checked={preferences.timerSound}
+                    onChange={(next) => {
+                        // Preview it on the way in, so the choice is audible rather than abstract.
+                        if (next) playTimerChime('complete');
+                        updatePreferences.mutate({ timerSound: next });
+                    }}
+                    label="Timer chime"
+                />
+            </div>
+
+            <div className="flex items-start justify-between gap-4 rounded-lg px-3 py-2.5">
+                <span>
+                    <span className="text-ink block text-sm font-medium">Browser notification</span>
+                    <span className="text-ink-dim mt-0.5 block text-xs">
+                        A system notification when a block finishes or a Pomodoro phase changes.
+                    </span>
+                    {preferences.showNotifications && permission === 'denied' && (
+                        <span className="mt-1.5 block text-xs text-amber-300">
+                            Blocked in your browser settings.
+                        </span>
+                    )}
+                    {preferences.showNotifications && permission === 'unsupported' && (
+                        <span className="text-ink-dim mt-1.5 block text-xs">Not supported in this browser.</span>
+                    )}
+                    {preferences.showNotifications && permission === 'default' && (
+                        <button
+                            type="button"
+                            onClick={() => void requestPermission()}
+                            className="text-ember focus-visible:outline-ember mt-1.5 block text-xs underline-offset-2 hover:underline focus-visible:outline-2"
+                        >
+                            Allow notifications
+                        </button>
+                    )}
+                </span>
+                <ToggleSwitch
+                    checked={preferences.showNotifications}
+                    onChange={(next) => void handleNotificationsToggle(next)}
+                    label="Timer notifications"
+                />
+            </div>
+        </div>
+    );
+}
 
 export function SettingsDialog() {
     const isMenuOpen = useAppStore((state) => state.isMenuOpen);
@@ -385,6 +464,8 @@ export function SettingsDialog() {
                                     )}
                                 </>
                             )}
+
+                            {activeSection === 'alerts' && <AlertsSection />}
 
                             {activeSection === 'progress' && (
                                 <dl className="grid grid-cols-2 gap-2">

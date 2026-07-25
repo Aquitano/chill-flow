@@ -72,6 +72,10 @@ export const userPreferences = pgTable(
         transitionSpeed: integer('transitionSpeed').notNull().default(300),
         volume: integer('volume').notNull().default(50),
         showNotifications: boolean('showNotifications').notNull().default(true),
+        // A chime at every timer boundary. Independent of showNotifications: browser
+        // notifications need a permission the user may never grant, and show nothing in a
+        // background tab, so the sound is the cue that always arrives.
+        timerSound: boolean('timerSound').notNull().default(true),
         theme: text('theme').notNull().default('dark'),
         timerMode: text('timerMode').notNull().default('focus'),
         timerPreset: text('timerPreset').notNull().default('25m'),
@@ -102,6 +106,9 @@ export const focusSessions = pgTable(
         plannedDurationSeconds: integer('plannedDurationSeconds').notNull(),
         elapsedSeconds: integer('elapsedSeconds').notNull().default(0),
         trackId: text('trackId'),
+        // What the block was for, when the user picked a task to focus on. Not a foreign
+        // key: deleting a task must not erase the focus time that was spent on it.
+        taskId: text('taskId'),
         startedAt: timestamp('startedAt').defaultNow().notNull(),
         completedAt: timestamp('completedAt'),
         canceledAt: timestamp('canceledAt'),
