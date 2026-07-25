@@ -1,3 +1,4 @@
+import { MAX_LIKED_TRACKS, type TrackLikeOutcome } from '@/lib/likes';
 import { tracksInScene } from '@/lib/tracks';
 import { Background, Quote, Task, Track } from '@/models/app';
 import { create } from 'zustand';
@@ -240,7 +241,8 @@ interface AppState {
     setBackgrounds: (backgrounds: Background[]) => void;
     setCurrentTrack: (track: Track | null) => void;
     setLikedTrackIds: (trackIds: string[]) => void;
-    toggleTrackLike: (trackId: string) => void;
+    /** Returns what happened, so callers can explain a like that was refused at the cap. */
+    toggleTrackLike: (trackId: string) => TrackLikeOutcome;
     nextTrack: () => void;
     previousTrack: () => void;
     setActiveScene: (scene: string | null) => void;
@@ -419,16 +421,23 @@ export const useAppStore = create<AppState>()(
                 'setCurrentTrack',
             ),
         setLikedTrackIds: (trackIds) => set({ likedTrackIds: trackIds }, false, 'setLikedTrackIds'),
-        toggleTrackLike: (trackId) =>
-            set(
-                (state) => ({
-                    likedTrackIds: state.likedTrackIds.includes(trackId)
-                        ? state.likedTrackIds.filter((id) => id !== trackId)
-                        : [...state.likedTrackIds, trackId],
-                }),
-                false,
-                'toggleTrackLike',
-            ),
+        toggleTrackLike: (trackId) => {
+            const { likedTrackIds } = get();
+
+            if (likedTrackIds.includes(trackId)) {
+                set({ likedTrackIds: likedTrackIds.filter((id) => id !== trackId) }, false, 'unlikeTrack');
+                return 'unliked';
+            }
+
+            // Refuse at the cap instead of adding a like the server will reject. See
+            // MAX_LIKED_TRACKS for what an over-long list does to later preference saves.
+            if (likedTrackIds.length >= MAX_LIKED_TRACKS) {
+                return 'limit-reached';
+            }
+
+            set({ likedTrackIds: [...likedTrackIds, trackId] }, false, 'likeTrack');
+            return 'liked';
+        },
         nextTrack: () =>
             set(
                 (state) => {

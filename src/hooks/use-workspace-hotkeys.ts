@@ -1,8 +1,10 @@
 'use client';
 
 import { getAmbientMixer } from '@/lib/audio/ambient';
+import { LIKE_LIMIT_TOAST } from '@/lib/likes';
 import { useAppStore } from '@/store/app-store';
 import { useEffect } from 'react';
+import { toast } from 'sonner';
 
 const VOLUME_STEP = 5;
 
@@ -108,7 +110,9 @@ export function useWorkspaceHotkeys() {
                     break;
                 case 'h':
                 case 'H':
-                    if (store.currentTrack) store.toggleTrackLike(store.currentTrack.id);
+                    if (store.currentTrack && store.toggleTrackLike(store.currentTrack.id) === 'limit-reached') {
+                        toast.error(LIKE_LIMIT_TOAST.title, LIKE_LIMIT_TOAST.options);
+                    }
                     break;
                 case 'r':
                 case 'R':

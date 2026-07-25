@@ -6,8 +6,10 @@ import { TrackArt } from '@/components/app/TrackArt';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { useUpdatePreferencesMutation } from '@/hooks/use-app-data';
+import { describeApiError } from '@/lib/api';
 import { useAmbient } from '@/lib/audio/useAmbient';
 import { useAudioEngineState } from '@/lib/audio/useAudioEngine';
+import { LIKE_LIMIT_TOAST } from '@/lib/likes';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app-store';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -61,6 +63,7 @@ export const PlayerDock: React.FC = () => {
     const currentTrack = useAppStore((state) => state.currentTrack);
     const likedTrackIds = useAppStore((state) => state.likedTrackIds);
     const toggleTrackLike = useAppStore((state) => state.toggleTrackLike);
+    const setLikedTrackIds = useAppStore((state) => state.setLikedTrackIds);
     const previousTrack = useAppStore((state) => state.previousTrack);
     const nextTrack = useAppStore((state) => state.nextTrack);
     const repeatEnabled = useAppStore((state) => state.repeatEnabled);
@@ -236,12 +239,30 @@ export const PlayerDock: React.FC = () => {
 
     const handleLikeToggle = () => {
         if (!currentTrack) return;
-        const nextLikes = isLiked
-            ? likedTrackIds.filter((trackId) => trackId !== currentTrack.id)
-            : [...likedTrackIds, currentTrack.id];
 
-        toggleTrackLike(currentTrack.id);
-        updatePreferences.mutate({ likedTrackIds: nextLikes });
+        const previousLikes = likedTrackIds;
+        const outcome = toggleTrackLike(currentTrack.id);
+
+        if (outcome === 'limit-reached') {
+            toast.error(LIKE_LIMIT_TOAST.title, LIKE_LIMIT_TOAST.options);
+            return;
+        }
+
+        const nextLikes =
+            outcome === 'unliked'
+                ? previousLikes.filter((trackId) => trackId !== currentTrack.id)
+                : [...previousLikes, currentTrack.id];
+
+        updatePreferences.mutate(
+            { likedTrackIds: nextLikes },
+            {
+                // Put the heart back rather than leaving a like that was never saved.
+                onError: (error) => {
+                    setLikedTrackIds(previousLikes);
+                    toast.error("Couldn't save that like", { description: describeApiError(error) });
+                },
+            },
+        );
     };
 
     return (

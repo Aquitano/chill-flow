@@ -1,4 +1,5 @@
 import { backgroundCatalog } from '@/lib/backgrounds';
+import { MAX_LIKED_TRACKS } from '@/lib/likes';
 import { z } from 'zod';
 
 const backgroundIds = new Set(backgroundCatalog.map((background) => background.id));
@@ -96,7 +97,7 @@ export const updatePreferencesInputSchema = z.object({
     selectedBackgroundId: nullableBackgroundIdSchema.optional(),
     likedTrackIds: z
         .array(trackIdSchema)
-        .max(25)
+        .max(MAX_LIKED_TRACKS)
         .transform((trackIds) => Array.from(new Set(trackIds)))
         .optional(),
 });

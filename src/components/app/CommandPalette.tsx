@@ -2,6 +2,7 @@
 
 import { ambientCategoryIcon } from '@/components/app/ambient-icons';
 import { useAmbient } from '@/lib/audio/useAmbient';
+import { LIKE_LIMIT_TOAST } from '@/lib/likes';
 import { deriveScenes, tracksInScene } from '@/lib/tracks';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app-store';
@@ -25,6 +26,7 @@ import {
     type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 
 type PaletteItem = {
     id: string;
@@ -183,7 +185,9 @@ export function CommandPalette() {
                           icon: Heart,
                           run: () => {
                               const s = store();
-                              if (s.currentTrack) s.toggleTrackLike(s.currentTrack.id);
+                              if (s.currentTrack && s.toggleTrackLike(s.currentTrack.id) === 'limit-reached') {
+                                  toast.error(LIKE_LIMIT_TOAST.title, LIKE_LIMIT_TOAST.options);
+                              }
                               close();
                           },
                       },

@@ -1,4 +1,5 @@
 import { sessionEventForTransition, type FocusSessionStatus } from '@/lib/focus-session';
+import { MAX_LIKED_TRACKS } from '@/lib/likes';
 import {
     OPEN_ENDED_PRESET,
     defaultModes,
@@ -20,6 +21,34 @@ function resetStore() {
 function atTime(ms: number) {
     vi.setSystemTime(ms);
 }
+
+describe('toggleTrackLike', () => {
+    beforeEach(resetStore);
+
+    it('adds and removes a like', () => {
+        expect(useAppStore.getState().toggleTrackLike('track-1')).toBe('liked');
+        expect(useAppStore.getState().likedTrackIds).toEqual(['track-1']);
+
+        expect(useAppStore.getState().toggleTrackLike('track-1')).toBe('unliked');
+        expect(useAppStore.getState().likedTrackIds).toEqual([]);
+    });
+
+    it('refuses a like past the cap instead of adding one the server would reject', () => {
+        const full = Array.from({ length: MAX_LIKED_TRACKS }, (_, index) => `track-${index}`);
+        useAppStore.setState({ likedTrackIds: full });
+
+        expect(useAppStore.getState().toggleTrackLike('one-too-many')).toBe('limit-reached');
+        expect(useAppStore.getState().likedTrackIds).toEqual(full);
+    });
+
+    it('still unlikes while at the cap', () => {
+        const full = Array.from({ length: MAX_LIKED_TRACKS }, (_, index) => `track-${index}`);
+        useAppStore.setState({ likedTrackIds: full });
+
+        expect(useAppStore.getState().toggleTrackLike('track-0')).toBe('unliked');
+        expect(useAppStore.getState().likedTrackIds).toHaveLength(MAX_LIKED_TRACKS - 1);
+    });
+});
 
 describe('presetToMinutes', () => {
     it('reads the shipped presets', () => {
