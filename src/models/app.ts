@@ -72,34 +72,16 @@ export interface PomodoroSettings {
 
 export interface UserPreferences {
     defaultMode: string;
-    autoPlay: boolean;
-    transitionSpeed: number;
     volume: number;
     showNotifications: boolean;
     timerSound: boolean;
-    theme: 'light' | 'dark' | 'system';
     timerMode: 'focus' | 'pomodoro';
     timerPreset: string;
     customMinutes: string;
     pomodoroSettings: PomodoroSettings;
-    customModes: AppMode[];
     selectedTrackId: string | null;
     selectedBackgroundId: string | null;
     likedTrackIds: string[];
-}
-
-export interface AppMode {
-    id: string;
-    name: string;
-    label: string;
-    settings: {
-        showQuote: boolean;
-        showBackground: boolean;
-        showTasks: boolean;
-        backgroundId?: string;
-        playlistIds?: string[];
-        quoteCategories?: string[];
-    };
 }
 
 export interface FocusSession {

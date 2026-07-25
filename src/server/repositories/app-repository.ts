@@ -101,17 +101,13 @@ export const defaultTasks: Task[] = [
 
 const defaultPreferences: UserPreferences = {
     defaultMode: 'DeepWork',
-    autoPlay: false,
-    transitionSpeed: 300,
     volume: 50,
     showNotifications: true,
     timerSound: true,
-    theme: 'dark',
     timerMode: 'focus',
     timerPreset: '25m',
     customMinutes: '25',
     pomodoroSettings: { ...DEFAULT_POMODORO_SETTINGS },
-    customModes: [],
     // Resolved on the client from the track list (first available) when null; the catalog
     // now lives in the DB so there is no static default to point at here.
     selectedTrackId: null,
@@ -160,19 +156,15 @@ function mapSession(row: typeof focusSessions.$inferSelect): FocusSession {
 function mapPreferences(row: typeof userPreferences.$inferSelect): UserPreferences {
     return {
         defaultMode: row.defaultMode,
-        autoPlay: row.autoPlay,
-        transitionSpeed: row.transitionSpeed,
         volume: row.volume,
         showNotifications: row.showNotifications,
         timerSound: row.timerSound,
-        theme: row.theme as UserPreferences['theme'],
         timerMode: row.timerMode as UserPreferences['timerMode'],
         timerPreset: row.timerPreset,
         customMinutes: row.customMinutes,
         // Merged over the defaults: rows written before a cadence field existed hold the
         // older JSON shape, and a missing key must read as the default rather than undefined.
         pomodoroSettings: { ...DEFAULT_POMODORO_SETTINGS, ...row.pomodoroSettings },
-        customModes: [],
         selectedTrackId: row.selectedTrackId,
         selectedBackgroundId: row.selectedBackgroundId,
         likedTrackIds: row.likedTrackIds,
@@ -195,12 +187,9 @@ async function ensureUserPreferences(database: Database, userId: string) {
         .values({
             userId,
             defaultMode: defaultPreferences.defaultMode,
-            autoPlay: defaultPreferences.autoPlay,
-            transitionSpeed: defaultPreferences.transitionSpeed,
             volume: defaultPreferences.volume,
             showNotifications: defaultPreferences.showNotifications,
             timerSound: defaultPreferences.timerSound,
-            theme: defaultPreferences.theme,
             timerMode: defaultPreferences.timerMode,
             timerPreset: defaultPreferences.timerPreset,
             customMinutes: defaultPreferences.customMinutes,

@@ -74,15 +74,12 @@ export const userPreferences = pgTable(
     {
         userId: text('userId').primaryKey(),
         defaultMode: text('defaultMode').notNull(),
-        autoPlay: boolean('autoPlay').notNull().default(false),
-        transitionSpeed: integer('transitionSpeed').notNull().default(300),
         volume: integer('volume').notNull().default(50),
         showNotifications: boolean('showNotifications').notNull().default(true),
         // A chime at every timer boundary. Independent of showNotifications: browser
         // notifications need a permission the user may never grant, and show nothing in a
         // background tab, so the sound is the cue that always arrives.
         timerSound: boolean('timerSound').notNull().default(true),
-        theme: text('theme').notNull().default('dark'),
         timerMode: text('timerMode').notNull().default('focus'),
         timerPreset: text('timerPreset').notNull().default('25m'),
         customMinutes: text('customMinutes').notNull().default('25'),
