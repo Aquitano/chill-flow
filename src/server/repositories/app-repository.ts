@@ -804,9 +804,10 @@ export const appRepository = {
             // The streak only ever reads back from the newest day until a gap, so a window
             // this wide can never cut one short in practice.
             database
-                .selectDistinct({ day: COMPLETED_DAY })
+                .select({ day: COMPLETED_DAY })
                 .from(focusSessions)
                 .where(completedSessionsOf(userId))
+                .groupBy(COMPLETED_DAY)
                 .orderBy(desc(COMPLETED_DAY))
                 .limit(STREAK_WINDOW_DAYS),
         ]);
