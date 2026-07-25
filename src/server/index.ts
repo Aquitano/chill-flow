@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import { j } from './jstack';
 import { ambientRouter } from './routers/ambient-router';
 import { preferencesRouter } from './routers/preferences-router';
+import { presetsRouter } from './routers/presets-router';
 import { sessionsRouter } from './routers/sessions-router';
 import { tasksRouter } from './routers/tasks-router';
 import { tracksRouter } from './routers/tracks-router';
@@ -32,6 +33,7 @@ const api = j
 const appRouter = j.mergeRouters(api, {
     ambient: ambientRouter,
     preferences: preferencesRouter,
+    presets: presetsRouter,
     sessions: sessionsRouter,
     tasks: tasksRouter,
     tracks: tracksRouter,

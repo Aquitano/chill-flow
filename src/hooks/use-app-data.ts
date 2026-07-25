@@ -1,6 +1,6 @@
 'use client';
 
-import { ApiError, api } from '@/lib/api';
+import { ApiError, api, type WorkspacePresetInput } from '@/lib/api';
 import { Task, UserPreferences } from '@/models/app';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -8,6 +8,7 @@ const queryKeys = {
     tasks: ['tasks'],
     tracks: ['tracks'],
     preferences: ['preferences'],
+    presets: ['presets'],
     sessions: ['sessions'],
     sessionHistory: ['sessions', 'history'],
     ambientSounds: ['ambient', 'sounds'],
@@ -75,6 +76,48 @@ export function useDeleteAmbientMixMutation() {
         mutationFn: (input: { id: string }) => api.ambient.deleteMix(input),
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: queryKeys.ambientMixes });
+        },
+    });
+}
+
+/** Saved workspace presets; pass enabled=false until the picker is showing. */
+export function usePresetsQuery(enabled: boolean) {
+    return useQuery({
+        queryKey: queryKeys.presets,
+        queryFn: api.presets.list,
+        enabled,
+    });
+}
+
+export function useSavePresetMutation() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (input: WorkspacePresetInput) => api.presets.save(input),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: queryKeys.presets });
+        },
+    });
+}
+
+export function useUpdatePresetMutation() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (input: WorkspacePresetInput & { id: string }) => api.presets.update(input),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: queryKeys.presets });
+        },
+    });
+}
+
+export function useDeletePresetMutation() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (input: { id: string }) => api.presets.delete(input),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: queryKeys.presets });
         },
     });
 }

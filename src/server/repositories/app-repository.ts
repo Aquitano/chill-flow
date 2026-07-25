@@ -9,6 +9,7 @@ import {
     Background,
     FocusSession,
     PomodoroSettings,
+    SavedPreset,
     Task,
     Track,
     UserPreferences,
@@ -60,6 +61,18 @@ function mapAmbientSound(row: typeof ambientSounds.$inferSelect): AmbientSound {
 function mapAmbientMix(row: typeof ambientMixes.$inferSelect): AmbientMix {
     return { id: row.id, name: row.name, levels: row.levels };
 }
+
+function mapSavedPreset(row: typeof savedPresets.$inferSelect): SavedPreset {
+    return {
+        id: row.id,
+        name: row.name,
+        trackId: row.trackId,
+        backgroundId: row.backgroundId,
+        mode: row.mode,
+    };
+}
+
+type SavedPresetInput = Omit<SavedPreset, 'id'>;
 
 type TrackWriteInput = {
     id: string;
@@ -458,6 +471,52 @@ export const appRepository = {
             .delete(ambientMixes)
             .where(and(eq(ambientMixes.userId, userId), eq(ambientMixes.id, mixId)))
             .returning({ id: ambientMixes.id });
+
+        return { success: deleted.length > 0 };
+    },
+
+    async listSavedPresets(database: Database, userId: string): Promise<SavedPreset[]> {
+        const rows = await database
+            .select()
+            .from(savedPresets)
+            .where(eq(savedPresets.userId, userId))
+            .orderBy(asc(savedPresets.createdAt));
+        return rows.map(mapSavedPreset);
+    },
+
+    async createSavedPreset(database: Database, userId: string, input: SavedPresetInput): Promise<SavedPreset> {
+        const [created] = await database
+            .insert(savedPresets)
+            .values({ id: crypto.randomUUID(), userId, ...input })
+            .returning();
+
+        if (!created) {
+            throw new Error('Workspace preset could not be created.');
+        }
+
+        return mapSavedPreset(created);
+    },
+
+    async updateSavedPreset(
+        database: Database,
+        userId: string,
+        presetId: string,
+        input: SavedPresetInput,
+    ): Promise<SavedPreset | null> {
+        const [updated] = await database
+            .update(savedPresets)
+            .set(input)
+            .where(and(eq(savedPresets.userId, userId), eq(savedPresets.id, presetId)))
+            .returning();
+
+        return updated ? mapSavedPreset(updated) : null;
+    },
+
+    async deleteSavedPreset(database: Database, userId: string, presetId: string) {
+        const deleted = await database
+            .delete(savedPresets)
+            .where(and(eq(savedPresets.userId, userId), eq(savedPresets.id, presetId)))
+            .returning({ id: savedPresets.id });
 
         return { success: deleted.length > 0 };
     },

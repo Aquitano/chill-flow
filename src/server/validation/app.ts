@@ -175,6 +175,21 @@ export const deleteAmbientMixInputSchema = z.object({
     id: z.uuid(),
 });
 
+export const saveWorkspacePresetInputSchema = z.object({
+    name: z.string().trim().min(1).max(40),
+    trackId: nullableTrackIdSchema,
+    backgroundId: nullableBackgroundIdSchema,
+    mode: modeSchema,
+});
+
+export const updateWorkspacePresetInputSchema = saveWorkspacePresetInputSchema.extend({
+    id: z.uuid(),
+});
+
+export const deleteWorkspacePresetInputSchema = z.object({
+    id: z.uuid(),
+});
+
 const trackAdminIdSchema = z
     .string()
     .trim()

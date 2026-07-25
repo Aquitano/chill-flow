@@ -1,6 +1,7 @@
 'use client';
 
 import { SessionHistory } from '@/components/app/SessionHistory';
+import { WorkspacePresets } from '@/components/app/WorkspacePresets';
 import { Button } from '@/components/ui/button';
 import { ToggleSwitch } from '@/components/ui/toggle-switch';
 import { usePreferencesQuery, useUpdatePreferencesMutation } from '@/hooks/use-app-data';
@@ -13,6 +14,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import {
     BarChart3,
     Bell,
+    Bookmark,
     Check,
     Image as ImageIcon,
     Keyboard,
@@ -66,12 +68,18 @@ const SHORTCUT_GROUPS = [
     },
 ];
 
-type SectionId = 'mode' | 'sound' | 'scene' | 'alerts' | 'progress' | 'shortcuts';
+type SectionId = 'mode' | 'sound' | 'scene' | 'presets' | 'alerts' | 'progress' | 'shortcuts';
 
 const SECTIONS: { id: SectionId; label: string; description: string; icon: LucideIcon }[] = [
     { id: 'mode', label: 'Mode', description: 'Shapes what the workspace shows while you work.', icon: Sparkles },
     { id: 'sound', label: 'Sound', description: 'The track playing under your session.', icon: Music },
     { id: 'scene', label: 'Scene', description: 'The backdrop behind your session.', icon: ImageIcon },
+    {
+        id: 'presets',
+        label: 'Presets',
+        description: 'Mode, sound, and scene together — saved to drop back into.',
+        icon: Bookmark,
+    },
     { id: 'alerts', label: 'Alerts', description: 'How the timer reaches you when a block ends.', icon: Bell },
     { id: 'progress', label: 'Progress', description: 'Your totals, and the blocks behind them.', icon: BarChart3 },
     {
@@ -464,6 +472,10 @@ export function SettingsDialog() {
                                         </p>
                                     )}
                                 </>
+                            )}
+
+                            {activeSection === 'presets' && (
+                                <WorkspacePresets enabled={isMenuOpen && activeSection === 'presets'} />
                             )}
 
                             {activeSection === 'alerts' && <AlertsSection />}

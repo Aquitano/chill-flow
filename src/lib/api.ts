@@ -8,10 +8,13 @@ import {
     Background,
     FocusSession,
     Quote,
+    SavedPreset,
     Task,
     Track,
     UserPreferences,
 } from '@/models/app';
+
+export type WorkspacePresetInput = Omit<SavedPreset, 'id'>;
 
 export type AdminTrackUpdateInput = {
     id: string;
@@ -154,6 +157,13 @@ export const api = {
     preferences: {
         get: () => unwrap<PreferencesPayload>(client.preferences.get.$get()),
         update: (input: Partial<UserPreferences>) => unwrap<UserPreferences>(client.preferences.update.$post(input)),
+    },
+    presets: {
+        list: () => unwrap<SavedPreset[]>(client.presets.list.$get()),
+        save: (input: WorkspacePresetInput) => unwrap<SavedPreset>(client.presets.save.$post(input)),
+        update: (input: WorkspacePresetInput & { id: string }) =>
+            unwrap<SavedPreset | null>(client.presets.update.$post(input)),
+        delete: (input: { id: string }) => unwrap<{ success: boolean }>(client.presets.delete.$post(input)),
     },
     sessions: {
         list: () => unwrap<SessionPayload>(client.sessions.list.$get()),

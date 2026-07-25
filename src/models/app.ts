@@ -32,6 +32,19 @@ export interface AmbientMix {
     levels: Record<string, number>;
 }
 
+/**
+ * A named workspace setup: what's playing, what's behind it, and which mode. Ids that no
+ * longer exist in the catalog are skipped when the preset is applied, so a deleted track
+ * costs the preset its sound rather than making it unusable.
+ */
+export interface SavedPreset {
+    id: string;
+    name: string;
+    trackId: string | null;
+    backgroundId: string | null;
+    mode: string;
+}
+
 export interface Quote {
     id: string;
     text: string;
