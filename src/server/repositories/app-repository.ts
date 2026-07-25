@@ -19,6 +19,7 @@ import {
     ambientMixes,
     ambientSounds,
     focusSessions,
+    savedPresets,
     tasks,
     tracks,
     userPreferences,
@@ -636,6 +637,22 @@ export const appRepository = {
             .returning();
 
         return canceledSession ? mapSession(canceledSession) : null;
+    },
+
+    /**
+     * Erase everything keyed to a user, for the Clerk `user.deleted` webhook. Batched so a
+     * partial failure can't leave personal data behind — neon-http has no interactive
+     * transactions, and batch() is the transactional primitive it does support. Deleting
+     * nothing is a no-op, so webhook redeliveries are safe.
+     */
+    async deleteUserData(database: Database, userId: string) {
+        await database.batch([
+            database.delete(tasks).where(eq(tasks.userId, userId)),
+            database.delete(focusSessions).where(eq(focusSessions.userId, userId)),
+            database.delete(ambientMixes).where(eq(ambientMixes.userId, userId)),
+            database.delete(savedPresets).where(eq(savedPresets.userId, userId)),
+            database.delete(userPreferences).where(eq(userPreferences.userId, userId)),
+        ]);
     },
 
     async getSessionSummary(database: Database, userId: string) {
