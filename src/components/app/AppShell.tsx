@@ -113,6 +113,8 @@ export function AppShell() {
             breakMinutes: preferences.pomodoroSettings.breakMinutes,
             longBreakMinutes: preferences.pomodoroSettings.longBreakMinutes,
             sessionsBeforeLongBreak: preferences.pomodoroSettings.sessionsBeforeLongBreak,
+            autoStartBreaks: preferences.pomodoroSettings.autoStartBreaks,
+            autoStartFocus: preferences.pomodoroSettings.autoStartFocus,
         };
 
         // A ?track= deep link (from /soundscapes) wins over the saved preference for this
@@ -223,6 +225,8 @@ export function AppShell() {
                 breakMinutes: pomodoroSettings.breakMinutes,
                 longBreakMinutes: pomodoroSettings.longBreakMinutes,
                 sessionsBeforeLongBreak: pomodoroSettings.sessionsBeforeLongBreak,
+                autoStartBreaks: pomodoroSettings.autoStartBreaks,
+                autoStartFocus: pomodoroSettings.autoStartFocus,
             },
         };
         const serializedPayload = JSON.stringify(nextPayload);

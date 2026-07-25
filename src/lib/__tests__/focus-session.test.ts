@@ -157,7 +157,7 @@ describe('sessionEventForTransition', () => {
         return {
             wasFocusRunning: true,
             isFocusRunning: false,
-            timerActive: false,
+            isBreak: false,
             timerMode: 'focus',
             timerSeconds: 15 * 60,
             isOpenEnded: false,
@@ -186,7 +186,6 @@ describe('sessionEventForTransition', () => {
             transition({
                 wasFocusRunning: false,
                 isFocusRunning: true,
-                timerActive: true,
                 isOpenEnded: true,
                 timerSeconds: 0,
                 sessionStatus: paused.status,
@@ -202,10 +201,16 @@ describe('sessionEventForTransition', () => {
         expect(sessionEventForTransition(transition({ timerSeconds: 0 }))).toEqual({ type: 'COMPLETE', atMs: 30 * s });
     });
 
-    it('completes a Pomodoro focus block that rolled into its break', () => {
-        const event = sessionEventForTransition(transition({ timerMode: 'pomodoro', timerActive: true }));
+    it('completes a Pomodoro focus block that gave way to a break, started or not', () => {
+        // The break auto-starting is the user's setting, so the block's completion cannot
+        // be inferred from the clock still running.
+        const handover = transition({ timerMode: 'pomodoro', isBreak: true });
 
-        expect(event).toEqual({ type: 'COMPLETE', atMs: 30 * s });
+        expect(sessionEventForTransition(handover)).toEqual({ type: 'COMPLETE', atMs: 30 * s });
+        expect(sessionEventForTransition({ ...handover, timerSeconds: 5 * 60 })).toEqual({
+            type: 'COMPLETE',
+            atMs: 30 * s,
+        });
     });
 
     it('banks the time when an open-ended block is reset, since reset is how one ends', () => {
@@ -225,7 +230,7 @@ describe('sessionEventForTransition', () => {
 
     it('takes reset over the stop it also causes, so a reset never reads as a pause', () => {
         // ⇧S and the palette reset without the dial's own click handler; the reset must
-        // still win over the timerActive transition landing in the same commit.
+        // still win over the run/stop transition landing in the same commit.
         const event = sessionEventForTransition(transition({ isOpenEnded: true, timerSeconds: 0, wasReset: true }));
 
         expect(event).not.toEqual({ type: 'PAUSE', atMs: 30 * s });
@@ -240,7 +245,7 @@ describe('sessionEventForTransition', () => {
     });
 
     it('does not open a session for a block shorter than the recorded minimum', () => {
-        const starting = transition({ wasFocusRunning: false, isFocusRunning: true, timerActive: true });
+        const starting = transition({ wasFocusRunning: false, isFocusRunning: true });
 
         expect(sessionEventForTransition({ ...starting, timerSeconds: MIN_RECORDED_SECONDS - 1 })).toBeNull();
         expect(sessionEventForTransition({ ...starting, timerSeconds: MIN_RECORDED_SECONDS })).toEqual({
@@ -252,6 +257,6 @@ describe('sessionEventForTransition', () => {
 
     it('reports no event when the run state did not change', () => {
         expect(sessionEventForTransition(transition({ wasFocusRunning: false }))).toBeNull();
-        expect(sessionEventForTransition(transition({ isFocusRunning: true, timerActive: true }))).toBeNull();
+        expect(sessionEventForTransition(transition({ isFocusRunning: true }))).toBeNull();
     });
 });

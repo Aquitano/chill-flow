@@ -4,6 +4,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/compon
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ToggleSwitch } from '@/components/ui/toggle-switch';
 import {
     usePreferencesQuery,
     useSessionCancelMutation,
@@ -144,6 +145,23 @@ function CadenceField({
     );
 }
 
+function CadenceToggle({
+    label,
+    checked,
+    onChange,
+}: {
+    label: string;
+    checked: boolean;
+    onChange: (next: boolean) => void;
+}) {
+    return (
+        <div className="flex items-center justify-between gap-3">
+            <span className="text-ink-mid text-xs">{label}</span>
+            <ToggleSwitch checked={checked} onChange={onChange} label={label} />
+        </div>
+    );
+}
+
 export const TimerDial: React.FC = () => {
     const currentMode = useAppStore((state) => state.currentMode);
 
@@ -193,6 +211,9 @@ export const TimerDial: React.FC = () => {
     const prevResetCountRef = useRef(timerResetCount);
     const prevTimerSecondsRef = useRef(timerSeconds);
     const prevIsBreakRef = useRef(pomodoroSettings.isBreak);
+    // Set by handleSkipBreak so the boundary effect can tell an explicit skip from a break
+    // that ran out; the two differ in wording and in whether the user is present.
+    const skippedBreakRef = useRef(false);
 
     const [customHours, setCustomHours] = useState('0');
     const [customMins, setCustomMins] = useState('25');
@@ -317,8 +338,7 @@ export const TimerDial: React.FC = () => {
     // phase" is any running focus countdown — finite or infinite focus mode, or a
     // Pomodoro focus block (not a break).
     useEffect(() => {
-        const isFocusPhase = timerMode === 'focus' || (timerMode === 'pomodoro' && !pomodoroSettings.isBreak);
-        const focusRunning = timerActive && isFocusPhase;
+        const focusRunning = timerActive && !isBreak;
         const wasFocusRunning = prevFocusRunningRef.current;
         const wasReset = timerResetCount !== prevResetCountRef.current;
         const now = Date.now();
@@ -326,21 +346,16 @@ export const TimerDial: React.FC = () => {
         prevFocusRunningRef.current = focusRunning;
         prevResetCountRef.current = timerResetCount;
 
-        // Re-entering a Pomodoro focus phase only happens when the break countdown
-        // finished, so a block waiting on its break is now a full completed cycle.
-        if (!wasFocusRunning && focusRunning && timerMode === 'pomodoro' && pendingCycleSessionIdRef.current) {
-            mutationsRef.current.completeCycle.mutate({ id: pendingCycleSessionIdRef.current });
-            pendingCycleSessionIdRef.current = null;
-        }
-        // A focus block rolling into its break completes here; its cycle completes with the break.
-        if (wasFocusRunning && !focusRunning && timerActive) {
+        // A focus phase that gave way to a break finished, whether or not the break started
+        // itself. Its cycle completes when the break does.
+        if (wasFocusRunning && !focusRunning && isBreak) {
             pendingCycleSessionIdRef.current = activeSessionIdRef.current;
         }
 
         const event = sessionEventForTransition({
             wasFocusRunning,
             isFocusRunning: focusRunning,
-            timerActive,
+            isBreak,
             timerMode,
             timerSeconds,
             isOpenEnded,
@@ -352,7 +367,7 @@ export const TimerDial: React.FC = () => {
         if (event) {
             dispatchSession(event);
         }
-    }, [timerActive, timerMode, pomodoroSettings.isBreak, timerSeconds, isOpenEnded, timerResetCount, dispatchSession]);
+    }, [timerActive, timerMode, isBreak, timerSeconds, isOpenEnded, timerResetCount, dispatchSession]);
 
     // Best-effort flush when the tab is being closed/navigated away mid-session so the
     // focus time isn't silently lost. (Hard closes may not always deliver the request.)
@@ -402,8 +417,9 @@ export const TimerDial: React.FC = () => {
         promptFocusTask();
     }, [timerSeconds, timerMode, isOpenEnded, showNotificationsPref, timerSoundPref, promptFocusTask]);
 
-    // Announce Pomodoro phase changes. `isBreak` only flips via advancePomodoroPhase
-    // (a real phase boundary), so watching it covers focus→break and break→focus.
+    // Pomodoro phase boundaries. `isBreak` only flips via advancePomodoroPhase (a real
+    // boundary), so watching it covers focus→break and break→focus regardless of whether
+    // the next phase started itself.
     useEffect(() => {
         const prevIsBreak = prevIsBreakRef.current;
         prevIsBreakRef.current = pomodoroSettings.isBreak;
@@ -415,10 +431,26 @@ export const TimerDial: React.FC = () => {
             if (timerSoundPref) playTimerChime('complete');
             if (showNotificationsPref) showTimerNotification('Break time', 'Focus block done — take your break.');
             promptFocusTask();
-        } else {
-            setAnnouncement('Break over. Back to focus.');
-            if (timerSoundPref) playTimerChime('resume');
-            if (showNotificationsPref) showTimerNotification('Back to focus', 'Break over — back into the flow.');
+            return;
+        }
+
+        const skipped = skippedBreakRef.current;
+        skippedBreakRef.current = false;
+
+        // The break ran out, so the block that was waiting on it is a full focus-plus-break
+        // cycle — earned by the break finishing, not by the next block being started. A skip
+        // clears the pending mark before reaching here, so it earns nothing.
+        if (pendingCycleSessionIdRef.current) {
+            mutationsRef.current.completeCycle.mutate({ id: pendingCycleSessionIdRef.current });
+            pendingCycleSessionIdRef.current = null;
+        }
+        // This effect owns the announcement for both boundaries; handleSkipBreak setting its
+        // own would be overwritten here on the very next commit.
+        setAnnouncement(skipped ? 'Break skipped. Back to focus.' : 'Break over. Back to focus.');
+        if (timerSoundPref) playTimerChime('resume');
+        // No notification for a skip: the user just pressed the button, so they are here.
+        if (showNotificationsPref && !skipped) {
+            showTimerNotification('Back to focus', 'Break over — back into the flow.');
         }
     }, [pomodoroSettings.isBreak, showNotificationsPref, timerSoundPref, timerMode, promptFocusTask]);
 
@@ -471,8 +503,11 @@ export const TimerDial: React.FC = () => {
         // A skipped break is not a completed focus-plus-break cycle, so the block waiting
         // on this break never earns its cycle mark.
         pendingCycleSessionIdRef.current = null;
-        setAnnouncement('Break skipped. Back to focus.');
+        skippedBreakRef.current = true;
         advancePomodoroPhase();
+        // Skipping is an explicit "back to work now", so it runs even for someone who
+        // starts their focus blocks by hand.
+        startTimer();
     };
 
     const displaySeconds = isOpenEnded ? countUpSeconds : timerSeconds;
@@ -619,6 +654,19 @@ export const TimerDial: React.FC = () => {
                                     updatePomodoroSettings({ sessionsBeforeLongBreak })
                                 }
                             />
+
+                            <div className="space-y-2 border-t border-white/10 pt-2">
+                                <CadenceToggle
+                                    label="Start breaks automatically"
+                                    checked={pomodoroSettings.autoStartBreaks}
+                                    onChange={(autoStartBreaks) => updatePomodoroSettings({ autoStartBreaks })}
+                                />
+                                <CadenceToggle
+                                    label="Start focus automatically"
+                                    checked={pomodoroSettings.autoStartFocus}
+                                    onChange={(autoStartFocus) => updatePomodoroSettings({ autoStartFocus })}
+                                />
+                            </div>
                         </DropdownMenuContent>
                     </DropdownMenu>
                 ) : (

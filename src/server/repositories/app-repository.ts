@@ -7,6 +7,7 @@ import {
     AmbientSound,
     Background,
     FocusSession,
+    PomodoroSettings,
     Task,
     Track,
     UserPreferences,
@@ -166,7 +167,9 @@ function mapPreferences(row: typeof userPreferences.$inferSelect): UserPreferenc
         timerMode: row.timerMode as UserPreferences['timerMode'],
         timerPreset: row.timerPreset,
         customMinutes: row.customMinutes,
-        pomodoroSettings: row.pomodoroSettings,
+        // Merged over the defaults: rows written before a cadence field existed hold the
+        // older JSON shape, and a missing key must read as the default rather than undefined.
+        pomodoroSettings: { ...DEFAULT_POMODORO_SETTINGS, ...row.pomodoroSettings },
         customModes: [],
         selectedTrackId: row.selectedTrackId,
         selectedBackgroundId: row.selectedBackgroundId,
@@ -480,13 +483,31 @@ export const appRepository = {
         };
     },
 
-    async updatePreferences(database: Database, userId: string, input: Partial<UserPreferences>) {
-        await ensureUserPreferences(database, userId);
+    async updatePreferences(
+        database: Database,
+        userId: string,
+        input: Omit<Partial<UserPreferences>, 'pomodoroSettings'> & { pomodoroSettings?: Partial<PomodoroSettings> },
+    ) {
+        const storedPreferences = await ensureUserPreferences(database, userId);
+        const { pomodoroSettings: cadencePatch, ...rest } = input;
 
         const [updatedPreferences] = await database
             .update(userPreferences)
             .set({
-                ...input,
+                ...rest,
+                // pomodoroSettings is a single JSON column, so a write replaces it whole.
+                // Layering the patch over the stored row keeps a client that posts only the
+                // shape it knows from resetting fields added since — an older tab's next
+                // preference save would otherwise undo a deliberate setting.
+                ...(cadencePatch
+                    ? {
+                          pomodoroSettings: {
+                              ...DEFAULT_POMODORO_SETTINGS,
+                              ...storedPreferences.pomodoroSettings,
+                              ...cadencePatch,
+                          },
+                      }
+                    : {}),
                 updatedAt: new Date(),
             })
             .where(eq(userPreferences.userId, userId))
