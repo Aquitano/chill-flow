@@ -229,6 +229,20 @@ async function ensureUserPreferences(database: Database, userId: string) {
     return storedPreferences;
 }
 
+/** Timestamps are stored in UTC, so the day a session lands on is a plain format. */
+const COMPLETED_DAY = sql<string>`to_char(${focusSessions.completedAt}, 'YYYY-MM-DD')`;
+
+/** Bound on the day list behind the streak; longer than any streak worth reporting. */
+const STREAK_WINDOW_DAYS = 366;
+
+function completedSessionsOf(userId: string) {
+    return and(
+        eq(focusSessions.userId, userId),
+        eq(focusSessions.status, 'completed'),
+        isNotNull(focusSessions.completedAt),
+    );
+}
+
 function calculateCurrentStreak(sessionDates: string[]) {
     if (sessionDates.length === 0) {
         return 0;
@@ -708,31 +722,33 @@ export const appRepository = {
     },
 
     async getSessionSummary(database: Database, userId: string) {
-        const storedSessions = await database
-            .select({
-                elapsedSeconds: focusSessions.elapsedSeconds,
-                completedAt: focusSessions.completedAt,
-                cycleCompletedAt: focusSessions.cycleCompletedAt,
-            })
-            .from(focusSessions)
-            .where(
-                and(
-                    eq(focusSessions.userId, userId),
-                    eq(focusSessions.status, 'completed'),
-                    isNotNull(focusSessions.completedAt),
-                ),
-            );
-
-        const totalSessions = storedSessions.length;
-        const totalMinutes = Math.round(storedSessions.reduce((sum, session) => sum + session.elapsedSeconds, 0) / 60);
-        const completedCycles = storedSessions.filter((session) => session.cycleCompletedAt !== null).length;
-        const distinctDays = storedSessions.map((session) => asIsoString(session.completedAt).slice(0, 10));
+        // Four numbers, so let the database produce four numbers. Pulling every completed
+        // row back to count it in JS grew with the user's whole history, which is exactly
+        // the payload that gets heaviest for the people who use the product most.
+        const [totals, activeDays] = await Promise.all([
+            database
+                .select({
+                    totalSessions: sql<number>`count(*)::int`,
+                    totalSeconds: sql<number>`coalesce(sum(${focusSessions.elapsedSeconds}), 0)::int`,
+                    completedCycles: sql<number>`count(${focusSessions.cycleCompletedAt})::int`,
+                })
+                .from(focusSessions)
+                .where(completedSessionsOf(userId)),
+            // The streak only ever reads back from the newest day until a gap, so a window
+            // this wide can never cut one short in practice.
+            database
+                .selectDistinct({ day: COMPLETED_DAY })
+                .from(focusSessions)
+                .where(completedSessionsOf(userId))
+                .orderBy(desc(COMPLETED_DAY))
+                .limit(STREAK_WINDOW_DAYS),
+        ]);
 
         return {
-            totalSessions,
-            totalMinutes,
-            completedCycles,
-            currentStreak: calculateCurrentStreak(distinctDays),
+            totalSessions: totals[0]?.totalSessions ?? 0,
+            totalMinutes: Math.round((totals[0]?.totalSeconds ?? 0) / 60),
+            completedCycles: totals[0]?.completedCycles ?? 0,
+            currentStreak: calculateCurrentStreak(activeDays.map((row) => row.day)),
         };
     },
 };
