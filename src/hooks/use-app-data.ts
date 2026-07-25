@@ -1,6 +1,6 @@
 'use client';
 
-import { api } from '@/lib/api';
+import { ApiError, api } from '@/lib/api';
 import { Task, UserPreferences } from '@/models/app';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -90,6 +90,15 @@ export function useSessionsQuery() {
         queryKey: queryKeys.sessions,
         queryFn: api.sessions.list,
     });
+}
+
+/**
+ * Retry once on a dropped connection or a server fault, never on a rejected request: a 4xx
+ * fails the same way twice, and retrying a 429 only digs the rate limit deeper. Used by the
+ * session writes, where a lost request costs the user their recorded focus time.
+ */
+function retryTransientOnce(failureCount: number, error: Error) {
+    return failureCount < 1 && !(error instanceof ApiError && error.status < 500);
 }
 
 type TaskListContext = { previous?: Task[] };
@@ -233,6 +242,7 @@ export function useSessionStartMutation() {
             trackId: string | null;
             taskId: string | null;
         }) => api.sessions.start(input),
+        retry: retryTransientOnce,
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
         },
@@ -244,6 +254,7 @@ export function useSessionCompleteMutation() {
 
     return useMutation({
         mutationFn: (input: { id: string; elapsedSeconds: number }) => api.sessions.complete(input),
+        retry: retryTransientOnce,
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
         },

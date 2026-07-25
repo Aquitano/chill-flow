@@ -101,6 +101,13 @@ export const updatePreferencesInputSchema = z.object({
         .optional(),
 });
 
+const sessionIdSchema = z.uuid();
+const elapsedSecondsSchema = z
+    .number()
+    .int()
+    .min(0)
+    .max(12 * 60 * 60);
+
 export const startSessionInputSchema = z.object({
     mode: modeSchema,
     timerKind: z.enum(['focus', 'pomodoro']).default('focus'),
@@ -114,20 +121,34 @@ export const startSessionInputSchema = z.object({
 });
 
 export const completeSessionInputSchema = z.object({
-    id: taskIdSchema,
-    elapsedSeconds: z
-        .number()
-        .int()
-        .min(0)
-        .max(12 * 60 * 60),
+    id: sessionIdSchema,
+    elapsedSeconds: elapsedSecondsSchema,
 });
 
 export const cancelSessionInputSchema = z.object({
-    id: taskIdSchema,
+    id: sessionIdSchema,
 });
 
 export const completeCycleInputSchema = z.object({
-    id: taskIdSchema,
+    id: sessionIdSchema,
+});
+
+/**
+ * Body of the unload beacon. It carries the lifecycle reducer's verdict rather than raw
+ * timings, so what counts as recordable focus time stays decided in one place.
+ */
+export const flushSessionInputSchema = z.discriminatedUnion('outcome', [
+    z.object({
+        outcome: z.literal('completed'),
+        id: sessionIdSchema,
+        elapsedSeconds: elapsedSecondsSchema,
+    }),
+    z.object({ outcome: z.literal('canceled'), id: sessionIdSchema }),
+]);
+
+/** Focus time this device can prove from its local timer snapshot after a hard reload. */
+export const recoverSessionInputSchema = z.object({
+    elapsedSeconds: elapsedSecondsSchema,
 });
 
 export const trackLookupInputSchema = z.object({
