@@ -1,6 +1,6 @@
 'use client';
 
-import { api } from '@/lib/api';
+import { ApiError, api, type WorkspacePresetInput } from '@/lib/api';
 import { Task, UserPreferences } from '@/models/app';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -8,7 +8,9 @@ const queryKeys = {
     tasks: ['tasks'],
     tracks: ['tracks'],
     preferences: ['preferences'],
+    presets: ['presets'],
     sessions: ['sessions'],
+    sessionHistory: ['sessions', 'history'],
     ambientSounds: ['ambient', 'sounds'],
     ambientMixes: ['ambient', 'mixes'],
 };
@@ -78,6 +80,48 @@ export function useDeleteAmbientMixMutation() {
     });
 }
 
+/** Saved workspace presets; pass enabled=false until the picker is showing. */
+export function usePresetsQuery(enabled: boolean) {
+    return useQuery({
+        queryKey: queryKeys.presets,
+        queryFn: api.presets.list,
+        enabled,
+    });
+}
+
+export function useSavePresetMutation() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (input: WorkspacePresetInput) => api.presets.save(input),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: queryKeys.presets });
+        },
+    });
+}
+
+export function useUpdatePresetMutation() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (input: WorkspacePresetInput & { id: string }) => api.presets.update(input),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: queryKeys.presets });
+        },
+    });
+}
+
+export function useDeletePresetMutation() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (input: { id: string }) => api.presets.delete(input),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: queryKeys.presets });
+        },
+    });
+}
+
 export function usePreferencesQuery() {
     return useQuery({
         queryKey: queryKeys.preferences,
@@ -90,6 +134,27 @@ export function useSessionsQuery() {
         queryKey: queryKeys.sessions,
         queryFn: api.sessions.list,
     });
+}
+
+/**
+ * Recent completed blocks. Keyed under `sessions` so finishing a block invalidates the
+ * history along with the totals; pass enabled=false until the progress panel is showing.
+ */
+export function useSessionHistoryQuery(enabled: boolean) {
+    return useQuery({
+        queryKey: queryKeys.sessionHistory,
+        queryFn: api.sessions.history,
+        enabled,
+    });
+}
+
+/**
+ * Retry once on a dropped connection or a server fault, never on a rejected request: a 4xx
+ * fails the same way twice, and retrying a 429 only digs the rate limit deeper. Used by the
+ * session writes, where a lost request costs the user their recorded focus time.
+ */
+function retryTransientOnce(failureCount: number, error: Error) {
+    return failureCount < 1 && !(error instanceof ApiError && error.status < 500);
 }
 
 type TaskListContext = { previous?: Task[] };
@@ -233,6 +298,7 @@ export function useSessionStartMutation() {
             trackId: string | null;
             taskId: string | null;
         }) => api.sessions.start(input),
+        retry: retryTransientOnce,
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
         },
@@ -244,6 +310,7 @@ export function useSessionCompleteMutation() {
 
     return useMutation({
         mutationFn: (input: { id: string; elapsedSeconds: number }) => api.sessions.complete(input),
+        retry: retryTransientOnce,
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
         },
@@ -255,6 +322,19 @@ export function useSessionCycleCompleteMutation() {
 
     return useMutation({
         mutationFn: (input: { id: string }) => api.sessions.completeCycle(input),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
+        },
+    });
+}
+
+export function useSessionRecoverMutation() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: (input: { id: string; elapsedSeconds: number; savedAtMs: number }) =>
+            api.sessions.recover(input),
+        retry: retryTransientOnce,
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
         },

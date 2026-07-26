@@ -5,6 +5,7 @@ import {
     cancelSessionInputSchema,
     completeCycleInputSchema,
     completeSessionInputSchema,
+    recoverSessionInputSchema,
     startSessionInputSchema,
 } from '../validation/app';
 
@@ -13,6 +14,12 @@ export const sessionsRouter = j.router({
     // session is an unbounded payload nothing reads.
     list: protectedDataProcedure.query(async ({ c, ctx }) => {
         return c.superjson({ summary: await appRepository.getSessionSummary(ctx.db, ctx.userId) });
+    }),
+
+    // Loaded on demand by the progress panel, so the workspace's first paint stays four
+    // numbers rather than a list nothing is showing yet.
+    history: protectedDataProcedure.query(async ({ c, ctx }) => {
+        return c.superjson(await appRepository.listRecentSessions(ctx.db, ctx.userId));
     }),
 
     start: protectedMutationProcedure
@@ -41,5 +48,21 @@ export const sessionsRouter = j.router({
         .input(cancelSessionInputSchema)
         .mutation(async ({ c, ctx, input }) => {
             return c.superjson(await appRepository.cancelSession(ctx.db, ctx.userId, input.id));
+        }),
+
+    // Fires once per workspace load, only when the device left a block open.
+    recover: protectedMutationProcedure
+        .use(createRateLimitMiddleware({ key: 'sessions:recover', limit: 10, windowMs: 60_000 }))
+        .input(recoverSessionInputSchema)
+        .mutation(async ({ c, ctx, input }) => {
+            return c.superjson(
+                await appRepository.recoverSession(
+                    ctx.db,
+                    ctx.userId,
+                    input.id,
+                    input.elapsedSeconds,
+                    input.savedAtMs,
+                ),
+            );
         }),
 });

@@ -85,6 +85,13 @@
       "when": 1784920364681,
       "tag": "0011_bumpy_doctor_doom",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1785005781413,
+      "tag": "0012_dry_wildside",
+      "breakpoints": true
     }
   ]
 }

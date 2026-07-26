@@ -16,15 +16,36 @@ import {
 import {
     FocusSessionEvent,
     FocusSessionState,
+    MIN_RECORDED_SECONDS,
     focusSessionReducer,
     initialFocusSessionState,
     sessionEventForTransition,
 } from '@/lib/focus-session';
 import { playTimerChime } from '@/lib/audio/chime';
+import { FocusChannel, openFocusChannel } from '@/lib/focus-channel';
 import { getNotificationPermission, requestNotificationPermission, showTimerNotification } from '@/lib/notifications';
+import { flushSessionBeacon } from '@/lib/session-beacon';
+import {
+    RecorderEffect,
+    RecorderResult,
+    RecorderState,
+    idleRecorder,
+    recordedSessionId,
+    recorderFinish,
+    recorderStartFailed,
+    recorderStarted,
+    recorderStarting,
+} from '@/lib/session-recorder';
 import { writeTimerSnapshot } from '@/lib/timer-persistence';
 import { cn } from '@/lib/utils';
-import { OPEN_ENDED_PRESET, TimerMode, phaseDurationSeconds, timerSnapshotOf, useAppStore } from '@/store/app-store';
+import {
+    OPEN_ENDED_PRESET,
+    TimerMode,
+    liveTimerSeconds,
+    phaseDurationSeconds,
+    timerSnapshotOf,
+    useAppStore,
+} from '@/store/app-store';
 import { motion } from 'framer-motion';
 import {
     Clock,
@@ -52,6 +73,16 @@ const FOCUS_PRESETS: { label: string; icon: LucideIcon }[] = [
 
 /** Mirrors the 12-hour cap the server applies to a session's planned duration. */
 const MAX_CUSTOM_MINUTES = 12 * 60;
+
+/**
+ * How often a running block re-stamps its snapshot. Recovery can only credit focus up to
+ * the last write, so this bounds what a crash costs; every path the browser warns us about
+ * (hide, unload) writes one of its own.
+ */
+const SNAPSHOT_REFRESH_MS = 15_000;
+
+/** How a lifecycle command reaches the server: a normal mutation, or the unload beacon. */
+type SessionTransport = 'mutation' | 'beacon';
 
 const TICK_COUNT = 72;
 const TICKS = Array.from({ length: TICK_COUNT }, (_, index) => {
@@ -202,7 +233,8 @@ export const TimerDial: React.FC = () => {
     const isOpenEnded = timerMode === 'focus' && selectedPreset === OPEN_ENDED_PRESET;
     const isBreak = timerMode === 'pomodoro' && pomodoroSettings.isBreak;
 
-    const activeSessionIdRef = useRef<string | null>(null);
+    const recorderRef = useRef<RecorderState>(idleRecorder);
+    const focusChannelRef = useRef<FocusChannel | null>(null);
     // A completed Pomodoro focus block waiting for its break to finish; once it does,
     // the block is marked as a full focus-plus-break cycle.
     const pendingCycleSessionIdRef = useRef<string | null>(null);
@@ -246,59 +278,136 @@ export const TimerDial: React.FC = () => {
     });
     contextRef.current = { mode: currentMode, timerKind, trackId: currentTrack?.id ?? null, taskId: focusTaskId };
 
-    // Single entry point for the focus-session lifecycle: feed an event to the pure
-    // reducer, persist the next state, and execute the resulting API command.
-    const dispatchSession = useCallback((event: FocusSessionEvent) => {
-        const { state, command } = focusSessionReducer(sessionStateRef.current, event);
-        sessionStateRef.current = state;
+    const runRecorderEffect = useCallback((effect: RecorderEffect, transport: SessionTransport) => {
+        if (effect.type === 'NONE') return;
 
-        const { start, complete, cancel } = mutationsRef.current;
-        switch (command.type) {
-            case 'START_SESSION':
-                start.mutate(
-                    {
-                        mode: contextRef.current.mode,
-                        timerKind: contextRef.current.timerKind,
-                        plannedDurationSeconds: command.plannedSeconds,
-                        trackId: contextRef.current.trackId,
-                        taskId: contextRef.current.taskId,
-                    },
-                    {
-                        onSuccess: (session) => {
-                            activeSessionIdRef.current = session.id;
-                        },
-                    },
-                );
-                break;
-            case 'COMPLETE_SESSION':
-                if (activeSessionIdRef.current) {
-                    complete.mutate(
-                        { id: activeSessionIdRef.current, elapsedSeconds: command.elapsedSeconds },
+        if (transport === 'beacon') {
+            flushSessionBeacon(effect);
+            return;
+        }
+
+        const { complete, cancel } = mutationsRef.current;
+
+        if (effect.type === 'CANCEL') {
+            cancel.mutate({ id: effect.id });
+            return;
+        }
+
+        complete.mutate(
+            { id: effect.id, elapsedSeconds: effect.elapsedSeconds },
+            {
+                // A null result means no row was updated — already recorded, or truly gone.
+                // Surface it instead of silently dropping the time.
+                onSuccess: (session) => {
+                    if (!session) {
+                        toast.warning("Couldn't save your focus time", {
+                            description: 'This session may have been replaced in another tab.',
+                        });
+                    }
+                },
+                onError: () => {
+                    toast.error("Couldn't save your focus time", {
+                        description: 'Check your connection — this block was not recorded.',
+                    });
+                },
+            },
+        );
+    }, []);
+
+    // Keep a device-local snapshot of the dial so closing the tab mid-block doesn't throw
+    // the position away. It names the open session row too, so the next load can settle
+    // exactly the block this device abandoned.
+    const saveTimerSnapshot = useCallback(() => {
+        writeTimerSnapshot(timerSnapshotOf(useAppStore.getState(), Date.now(), recordedSessionId(recorderRef.current)));
+    }, []);
+
+    // Single entry point for the focus-session lifecycle: feed an event to the pure reducer,
+    // persist the next state, and execute the resulting API command. `sessions.start` is a
+    // round trip, so the recorder holds a finish that lands before the row's id does.
+    const dispatchSession = useCallback(
+        (event: FocusSessionEvent, transport: SessionTransport = 'mutation') => {
+            const { state, command } = focusSessionReducer(sessionStateRef.current, event);
+            sessionStateRef.current = state;
+
+            const settle = (result: RecorderResult) => {
+                recorderRef.current = result.state;
+                runRecorderEffect(result.effect, transport);
+            };
+
+            switch (command.type) {
+                case 'START_SESSION':
+                    recorderRef.current = recorderStarting();
+                    focusChannelRef.current?.announceStart();
+                    mutationsRef.current.start.mutate(
                         {
-                            // A null result means no row was recorded (already completed, or
-                            // truly gone) — surface it instead of silently dropping the time.
+                            mode: contextRef.current.mode,
+                            timerKind: contextRef.current.timerKind,
+                            plannedDurationSeconds: command.plannedSeconds,
+                            trackId: contextRef.current.trackId,
+                            taskId: contextRef.current.taskId,
+                        },
+                        {
                             onSuccess: (session) => {
-                                if (!session) {
-                                    toast.warning("Couldn't save your focus time", {
-                                        description: 'This session may have been replaced in another tab.',
-                                    });
-                                }
+                                settle(recorderStarted(recorderRef.current, session.id));
+                                // Nothing the snapshot effect watches changes when the id
+                                // lands, so without this a block that runs straight through
+                                // to a crash leaves a snapshot naming no session at all.
+                                saveTimerSnapshot();
+                            },
+                            onError: () => {
+                                settle(recorderStartFailed());
+                                toast.error('This block is not being recorded', {
+                                    description: "We couldn't reach the server when it started.",
+                                });
                             },
                         },
                     );
-                    activeSessionIdRef.current = null;
-                }
-                break;
-            case 'CANCEL_SESSION':
-                if (activeSessionIdRef.current) {
-                    cancel.mutate({ id: activeSessionIdRef.current });
-                    activeSessionIdRef.current = null;
-                }
-                break;
-            default:
-                break;
-        }
-    }, []);
+                    break;
+                case 'COMPLETE_SESSION':
+                    settle(
+                        recorderFinish(recorderRef.current, {
+                            type: 'complete',
+                            elapsedSeconds: command.elapsedSeconds,
+                        }),
+                    );
+                    break;
+                case 'CANCEL_SESSION':
+                    settle(recorderFinish(recorderRef.current, { type: 'cancel' }));
+                    break;
+                default:
+                    break;
+            }
+        },
+        [runRecorderEffect, saveTimerSnapshot],
+    );
+
+    // Two jobs on one channel. A remote start means the server has already canceled this
+    // tab's row, so bank what this block earned before the handover and stop the clock
+    // rather than letting two dials count the same minutes. An ownership query means some
+    // tab is deciding whether to recover a row; answering keeps this block from being
+    // completed out from under it.
+    useEffect(() => {
+        const channel = openFocusChannel({
+            onRemoteStart: () => {
+                if (sessionStateRef.current.status !== 'running') return;
+
+                dispatchSession({ type: 'COMPLETE', atMs: Date.now() });
+                pauseTimer();
+                toast('Focus moved to another tab', {
+                    id: 'focus-handover',
+                    description: 'This block was saved, so the time is only counted once.',
+                    action: { label: 'Take over', onClick: () => startTimer() },
+                });
+            },
+            ownsSession: (sessionId) => recordedSessionId(recorderRef.current) === sessionId,
+        });
+        focusChannelRef.current = channel;
+
+        return () => {
+            focusChannelRef.current = null;
+            channel.close();
+        };
+    }, [dispatchSession, pauseTimer, startTimer]);
 
     // The dial is derived from a wall-clock deadline, so this interval only repaints it.
     // Background tabs throttle (and sleeping machines stop) timers, so also resync the
@@ -319,20 +428,30 @@ export const TimerDial: React.FC = () => {
         };
     }, [timerActive, tickTimer]);
 
-    // Keep a device-local snapshot of the dial so closing the tab mid-block doesn't throw
-    // the position away. Rewritten as the page goes away, when the remaining time is exact.
     useEffect(() => {
-        const save = () => writeTimerSnapshot(timerSnapshotOf(useAppStore.getState(), Date.now()));
+        saveTimerSnapshot();
+        document.addEventListener('visibilitychange', saveTimerSnapshot);
 
-        save();
-        window.addEventListener('pagehide', save);
-        document.addEventListener('visibilitychange', save);
+        return () => document.removeEventListener('visibilitychange', saveTimerSnapshot);
+    }, [
+        saveTimerSnapshot,
+        timerActive,
+        timerMode,
+        selectedPreset,
+        customMinutes,
+        pomodoroSettings.isBreak,
+        pomodoroSettings.currentSession,
+    ]);
 
-        return () => {
-            window.removeEventListener('pagehide', save);
-            document.removeEventListener('visibilitychange', save);
-        };
-    }, [timerActive, timerMode, selectedPreset, customMinutes, pomodoroSettings.isBreak, pomodoroSettings.currentSession]);
+    // A block that runs uninterrupted changes none of the state above, so nothing else
+    // re-stamps the snapshot between its start and the crash recovery is there for — and
+    // the countdown it holds would still read as the full duration.
+    useEffect(() => {
+        if (!timerActive) return;
+
+        const interval = setInterval(saveTimerSnapshot, SNAPSHOT_REFRESH_MS);
+        return () => clearInterval(interval);
+    }, [timerActive, saveTimerSnapshot]);
 
     // Translate timer-state transitions into focus-session lifecycle events. A "focus
     // phase" is any running focus countdown — finite or infinite focus mode, or a
@@ -349,7 +468,7 @@ export const TimerDial: React.FC = () => {
         // A focus phase that gave way to a break finished, whether or not the break started
         // itself. Its cycle completes when the break does.
         if (wasFocusRunning && !focusRunning && isBreak) {
-            pendingCycleSessionIdRef.current = activeSessionIdRef.current;
+            pendingCycleSessionIdRef.current = recordedSessionId(recorderRef.current);
         }
 
         const event = sessionEventForTransition({
@@ -369,18 +488,40 @@ export const TimerDial: React.FC = () => {
         }
     }, [timerActive, timerMode, isBreak, timerSeconds, isOpenEnded, timerResetCount, dispatchSession]);
 
-    // Best-effort flush when the tab is being closed/navigated away mid-session so the
-    // focus time isn't silently lost. (Hard closes may not always deliver the request.)
+    // Close the block out when the tab goes away, over a transport the browser won't abandon
+    // mid-flight. A bfcache restore then brings the dial back with no session behind it, so
+    // pageshow opens a fresh one for the time still to come.
     useEffect(() => {
         const handlePageHide = () => {
-            if (sessionStateRef.current.status === 'idle' || !activeSessionIdRef.current) {
-                return;
-            }
-            dispatchSession({ type: 'COMPLETE', atMs: Date.now() });
+            // Snapshot first: the flush clears the recorder, and the snapshot needs the id
+            // so a beacon that never arrives can still be settled on the next load.
+            saveTimerSnapshot();
+            if (sessionStateRef.current.status === 'idle') return;
+            dispatchSession({ type: 'COMPLETE', atMs: Date.now() }, 'beacon');
         };
+
+        const handlePageShow = (event: PageTransitionEvent) => {
+            if (!event.persisted || sessionStateRef.current.status !== 'idle') return;
+
+            const state = useAppStore.getState();
+            const onBreak = state.timerMode === 'pomodoro' && state.pomodoroSettings.isBreak;
+            if (!state.timerActive || onBreak) return;
+
+            const openEnded = state.timerMode === 'focus' && state.selectedPreset === OPEN_ENDED_PRESET;
+            const remaining = liveTimerSeconds(state, Date.now());
+            // A sub-minute remainder would never be recorded, so leave it alone.
+            if (!openEnded && remaining < MIN_RECORDED_SECONDS) return;
+
+            dispatchSession({ type: 'START', plannedSeconds: openEnded ? 0 : remaining, atMs: Date.now() });
+        };
+
         window.addEventListener('pagehide', handlePageHide);
-        return () => window.removeEventListener('pagehide', handlePageHide);
-    }, [dispatchSession]);
+        window.addEventListener('pageshow', handlePageShow);
+        return () => {
+            window.removeEventListener('pagehide', handlePageHide);
+            window.removeEventListener('pageshow', handlePageShow);
+        };
+    }, [dispatchSession, saveTimerSnapshot]);
 
     // Closes the loop between the two halves of the workspace: a block aimed at a task
     // ends by asking whether that task is done, instead of the list and the dial never

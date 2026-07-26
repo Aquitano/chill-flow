@@ -1,3 +1,4 @@
+import { MAX_LIKED_TRACKS, type TrackLikeOutcome } from '@/lib/likes';
 import { tracksInScene } from '@/lib/tracks';
 import { Background, Quote, Task, Track } from '@/models/app';
 import { create } from 'zustand';
@@ -112,7 +113,7 @@ function timerDurationPatch(mode: TimerMode, seconds: number) {
  * always lands *paused* where the user left off, never crediting time the app was closed.
  */
 export interface TimerSnapshot {
-    version: 1;
+    version: 2;
     savedAt: number;
     timerMode: TimerMode;
     selectedPreset: string;
@@ -124,14 +125,20 @@ export interface TimerSnapshot {
     elapsedSeconds: number;
     pomodoroSession: number;
     pomodoroIsBreak: boolean;
+    /**
+     * The session row this device left open, so a reload can settle that specific block.
+     * Every tab shares this storage, so the id alone says nothing about who still owns the
+     * row — see `askSessionOwner`, which recovery asks before touching it.
+     */
+    sessionId: string | null;
 }
 
 export type TimerRestoreOutcome = 'ignored' | 'restored' | 'finished';
 
-export function timerSnapshotOf(state: AppState, nowMs: number): TimerSnapshot {
+export function timerSnapshotOf(state: AppState, nowMs: number, sessionId: string | null): TimerSnapshot {
     const openEnded = isOpenEnded(state);
     return {
-        version: 1,
+        version: 2,
         savedAt: nowMs,
         timerMode: state.timerMode,
         selectedPreset: state.selectedPreset,
@@ -141,6 +148,7 @@ export function timerSnapshotOf(state: AppState, nowMs: number): TimerSnapshot {
         elapsedSeconds: openEnded ? countUpSecondsAt(state, nowMs) : 0,
         pomodoroSession: state.pomodoroSettings.currentSession,
         pomodoroIsBreak: state.pomodoroSettings.isBreak,
+        sessionId,
     };
 }
 
@@ -234,7 +242,8 @@ interface AppState {
     setBackgrounds: (backgrounds: Background[]) => void;
     setCurrentTrack: (track: Track | null) => void;
     setLikedTrackIds: (trackIds: string[]) => void;
-    toggleTrackLike: (trackId: string) => void;
+    /** Returns what happened, so callers can explain a like that was refused at the cap. */
+    toggleTrackLike: (trackId: string) => TrackLikeOutcome;
     nextTrack: () => void;
     previousTrack: () => void;
     setActiveScene: (scene: string | null) => void;
@@ -413,16 +422,23 @@ export const useAppStore = create<AppState>()(
                 'setCurrentTrack',
             ),
         setLikedTrackIds: (trackIds) => set({ likedTrackIds: trackIds }, false, 'setLikedTrackIds'),
-        toggleTrackLike: (trackId) =>
-            set(
-                (state) => ({
-                    likedTrackIds: state.likedTrackIds.includes(trackId)
-                        ? state.likedTrackIds.filter((id) => id !== trackId)
-                        : [...state.likedTrackIds, trackId],
-                }),
-                false,
-                'toggleTrackLike',
-            ),
+        toggleTrackLike: (trackId) => {
+            const { likedTrackIds } = get();
+
+            if (likedTrackIds.includes(trackId)) {
+                set({ likedTrackIds: likedTrackIds.filter((id) => id !== trackId) }, false, 'unlikeTrack');
+                return 'unliked';
+            }
+
+            // Refuse at the cap instead of adding a like the server will reject. See
+            // MAX_LIKED_TRACKS for what an over-long list does to later preference saves.
+            if (likedTrackIds.length >= MAX_LIKED_TRACKS) {
+                return 'limit-reached';
+            }
+
+            set({ likedTrackIds: [...likedTrackIds, trackId] }, false, 'likeTrack');
+            return 'liked';
+        },
         nextTrack: () =>
             set(
                 (state) => {
@@ -572,7 +588,7 @@ export const useAppStore = create<AppState>()(
             // The account's saved preset wins over a device-local snapshot that no longer
             // matches it — the workspace should open the way the user last configured it.
             if (
-                snapshot.version !== 1 ||
+                snapshot.version !== 2 ||
                 snapshot.timerMode !== state.timerMode ||
                 snapshot.selectedPreset !== state.selectedPreset
             ) {

@@ -8,10 +8,13 @@ import {
     Background,
     FocusSession,
     Quote,
+    SavedPreset,
     Task,
     Track,
     UserPreferences,
 } from '@/models/app';
+
+export type WorkspacePresetInput = Omit<SavedPreset, 'id'>;
 
 export type AdminTrackUpdateInput = {
     id: string;
@@ -108,6 +111,12 @@ export type SessionPayload = {
     };
 };
 
+/** What became of a block this device left open: recorded, discarded, or already settled. */
+export type SessionRecovery = {
+    outcome: 'completed' | 'canceled' | 'none';
+    elapsedSeconds: number;
+};
+
 export const api = {
     tasks: {
         list: () => unwrap<Task[]>(client.tasks.list.$get()),
@@ -149,8 +158,16 @@ export const api = {
         get: () => unwrap<PreferencesPayload>(client.preferences.get.$get()),
         update: (input: Partial<UserPreferences>) => unwrap<UserPreferences>(client.preferences.update.$post(input)),
     },
+    presets: {
+        list: () => unwrap<SavedPreset[]>(client.presets.list.$get()),
+        save: (input: WorkspacePresetInput) => unwrap<SavedPreset>(client.presets.save.$post(input)),
+        update: (input: WorkspacePresetInput & { id: string }) =>
+            unwrap<SavedPreset | null>(client.presets.update.$post(input)),
+        delete: (input: { id: string }) => unwrap<{ success: boolean }>(client.presets.delete.$post(input)),
+    },
     sessions: {
         list: () => unwrap<SessionPayload>(client.sessions.list.$get()),
+        history: () => unwrap<FocusSession[]>(client.sessions.history.$get()),
         start: (input: {
             mode: string;
             timerKind: FocusSession['timerKind'];
@@ -163,5 +180,7 @@ export const api = {
         completeCycle: (input: { id: string }) =>
             unwrap<FocusSession | null>(client.sessions.completeCycle.$post(input)),
         cancel: (input: { id: string }) => unwrap<FocusSession | null>(client.sessions.cancel.$post(input)),
+        recover: (input: { id: string; elapsedSeconds: number; savedAtMs: number }) =>
+            unwrap<SessionRecovery>(client.sessions.recover.$post(input)),
     },
 };

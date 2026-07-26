@@ -36,6 +36,9 @@ live deployment.
    # PowerShell
    $env:DATABASE_URL='postgres://...neon.tech/...'; bun run db:migrate
    ```
+3. A migration that **drops** a column runs after the deploy that stops reading it, never
+   before — the previous release is still serving traffic and selects every column it knows
+   about. Additive migrations go first, as usual.
 
 ## 2. Audio storage (Cloudflare R2)
 
@@ -61,6 +64,10 @@ live deployment.
 1. In the Clerk dashboard, use the **production instance** publishable + secret keys.
 2. After your first sign-in (step 6), grant yourself admin: Clerk → Users → your user →
    Metadata → Public → `{ "role": "admin" }`.
+3. Clerk → Webhooks → add an endpoint at `https://<your-domain>/api/webhooks/clerk`
+   subscribed to **`user.deleted`**, and copy its signing secret into
+   `CLERK_WEBHOOK_SIGNING_SECRET`. Clerk owns identity, so this event is the only signal
+   that a deleted account's tasks, sessions, and preferences should be erased with it.
 
 ## 4. Publish the initial catalog
 
@@ -85,6 +92,7 @@ Import the repo and set the environment variables below, then deploy.
 | --- | --- | --- |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | yes | Clerk production publishable key |
 | `CLERK_SECRET_KEY` | yes | Clerk production secret key |
+| `CLERK_WEBHOOK_SIGNING_SECRET` | yes | Signing secret of the `/api/webhooks/clerk` endpoint |
 | `DATABASE_URL` | yes | Neon connection string (server-only) |
 | `AUDIO_BASE_URL` | yes | R2 public base URL (e.g. `https://cdn.chillflow.app`) |
 | `ALLOWED_CORS_ORIGINS` | yes | Your production origin(s), comma-separated |
@@ -108,6 +116,9 @@ Import the repo and set the environment variables below, then deploy.
 - [ ] Create / complete / delete a task; start and complete a focus session (stats update).
 - [ ] `/admin` (as an admin) lists tracks; import a track and confirm it plays.
 - [ ] Reload after sign-out/in — preferences persist.
+- [ ] Send a test `user.deleted` delivery from Clerk → Webhooks; the endpoint answers `204`
+      and that user's rows are gone from `tasks`, `focus_sessions`, `user_preferences`,
+      `ambient_mixes`, and `saved_presets`.
 
 ## Backups
 

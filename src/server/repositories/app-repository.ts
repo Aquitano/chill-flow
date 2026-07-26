@@ -1,5 +1,6 @@
 import { appEnv } from '@/lib/env';
 import { backgroundCatalog } from '@/lib/backgrounds';
+import { MIN_RECORDED_SECONDS } from '@/lib/focus-session';
 import { quotes } from '@/lib/quotes';
 import {
     AdminTrack,
@@ -8,6 +9,7 @@ import {
     Background,
     FocusSession,
     PomodoroSettings,
+    SavedPreset,
     Task,
     Track,
     UserPreferences,
@@ -19,6 +21,7 @@ import {
     ambientMixes,
     ambientSounds,
     focusSessions,
+    savedPresets,
     tasks,
     tracks,
     userPreferences,
@@ -58,6 +61,18 @@ function mapAmbientSound(row: typeof ambientSounds.$inferSelect): AmbientSound {
 function mapAmbientMix(row: typeof ambientMixes.$inferSelect): AmbientMix {
     return { id: row.id, name: row.name, levels: row.levels };
 }
+
+function mapSavedPreset(row: typeof savedPresets.$inferSelect): SavedPreset {
+    return {
+        id: row.id,
+        name: row.name,
+        trackId: row.trackId,
+        backgroundId: row.backgroundId,
+        mode: row.mode,
+    };
+}
+
+type SavedPresetInput = Omit<SavedPreset, 'id'>;
 
 type TrackWriteInput = {
     id: string;
@@ -99,17 +114,13 @@ export const defaultTasks: Task[] = [
 
 const defaultPreferences: UserPreferences = {
     defaultMode: 'DeepWork',
-    autoPlay: false,
-    transitionSpeed: 300,
     volume: 50,
     showNotifications: true,
     timerSound: true,
-    theme: 'dark',
     timerMode: 'focus',
     timerPreset: '25m',
     customMinutes: '25',
     pomodoroSettings: { ...DEFAULT_POMODORO_SETTINGS },
-    customModes: [],
     // Resolved on the client from the track list (first available) when null; the catalog
     // now lives in the DB so there is no static default to point at here.
     selectedTrackId: null,
@@ -158,19 +169,15 @@ function mapSession(row: typeof focusSessions.$inferSelect): FocusSession {
 function mapPreferences(row: typeof userPreferences.$inferSelect): UserPreferences {
     return {
         defaultMode: row.defaultMode,
-        autoPlay: row.autoPlay,
-        transitionSpeed: row.transitionSpeed,
         volume: row.volume,
         showNotifications: row.showNotifications,
         timerSound: row.timerSound,
-        theme: row.theme as UserPreferences['theme'],
         timerMode: row.timerMode as UserPreferences['timerMode'],
         timerPreset: row.timerPreset,
         customMinutes: row.customMinutes,
         // Merged over the defaults: rows written before a cadence field existed hold the
         // older JSON shape, and a missing key must read as the default rather than undefined.
         pomodoroSettings: { ...DEFAULT_POMODORO_SETTINGS, ...row.pomodoroSettings },
-        customModes: [],
         selectedTrackId: row.selectedTrackId,
         selectedBackgroundId: row.selectedBackgroundId,
         likedTrackIds: row.likedTrackIds,
@@ -193,12 +200,9 @@ async function ensureUserPreferences(database: Database, userId: string) {
         .values({
             userId,
             defaultMode: defaultPreferences.defaultMode,
-            autoPlay: defaultPreferences.autoPlay,
-            transitionSpeed: defaultPreferences.transitionSpeed,
             volume: defaultPreferences.volume,
             showNotifications: defaultPreferences.showNotifications,
             timerSound: defaultPreferences.timerSound,
-            theme: defaultPreferences.theme,
             timerMode: defaultPreferences.timerMode,
             timerPreset: defaultPreferences.timerPreset,
             customMinutes: defaultPreferences.customMinutes,
@@ -225,6 +229,23 @@ async function ensureUserPreferences(database: Database, userId: string) {
     }
 
     return storedPreferences;
+}
+
+/** Timestamps are stored in UTC, so the day a session lands on is a plain format. */
+const COMPLETED_DAY = sql<string>`to_char(${focusSessions.completedAt}, 'YYYY-MM-DD')`;
+
+/** Bound on the day list behind the streak; longer than any streak worth reporting. */
+const STREAK_WINDOW_DAYS = 366;
+
+/** How far back the progress panel's history list reaches. */
+const SESSION_HISTORY_LIMIT = 50;
+
+function completedSessionsOf(userId: string) {
+    return and(
+        eq(focusSessions.userId, userId),
+        eq(focusSessions.status, 'completed'),
+        isNotNull(focusSessions.completedAt),
+    );
 }
 
 function calculateCurrentStreak(sessionDates: string[]) {
@@ -262,6 +283,66 @@ function taskDueTimePatch(
     }
 
     return {};
+}
+
+/**
+ * Record a finished block. Matches by id even when the row is no longer 'active' — a
+ * concurrent startSession in another tab may have flipped it to 'canceled'. That focus time
+ * is real and must still be recorded, but only the part that ran *before* the handover:
+ * without the clamp, two tabs running in parallel each bank the whole overlap. Every SET
+ * expression reads the pre-update row, so canceledAt is still readable here.
+ *
+ * The `status != 'completed'` guard keeps this idempotent — a re-complete, such as the
+ * unload beacon racing the in-app write, matches no row and returns null.
+ *
+ * Module-level rather than a method so session recovery can reuse it without the repository
+ * referring to itself.
+ */
+async function completeSession(database: Database, userId: string, sessionId: string, elapsedSeconds: number) {
+    const [completedSession] = await database
+        .update(focusSessions)
+        .set({
+            status: 'completed',
+            completedAt: new Date(),
+            canceledAt: null,
+            elapsedSeconds: sql<number>`case
+                when ${focusSessions.status} = 'canceled' and ${focusSessions.canceledAt} is not null
+                    then least(
+                        ${elapsedSeconds}::int,
+                        greatest(0, floor(extract(epoch from (${focusSessions.canceledAt} - ${focusSessions.startedAt})))::int)
+                    )
+                else ${elapsedSeconds}::int
+            end`,
+        })
+        .where(
+            and(
+                eq(focusSessions.userId, userId),
+                eq(focusSessions.id, sessionId),
+                ne(focusSessions.status, 'completed'),
+            ),
+        )
+        .returning();
+
+    return completedSession ? mapSession(completedSession) : null;
+}
+
+async function cancelSession(database: Database, userId: string, sessionId: string) {
+    const [canceledSession] = await database
+        .update(focusSessions)
+        .set({
+            status: 'canceled',
+            canceledAt: new Date(),
+        })
+        .where(
+            and(
+                eq(focusSessions.userId, userId),
+                eq(focusSessions.id, sessionId),
+                eq(focusSessions.status, 'active'),
+            ),
+        )
+        .returning();
+
+    return canceledSession ? mapSession(canceledSession) : null;
 }
 
 export const appRepository = {
@@ -390,6 +471,52 @@ export const appRepository = {
             .delete(ambientMixes)
             .where(and(eq(ambientMixes.userId, userId), eq(ambientMixes.id, mixId)))
             .returning({ id: ambientMixes.id });
+
+        return { success: deleted.length > 0 };
+    },
+
+    async listSavedPresets(database: Database, userId: string): Promise<SavedPreset[]> {
+        const rows = await database
+            .select()
+            .from(savedPresets)
+            .where(eq(savedPresets.userId, userId))
+            .orderBy(asc(savedPresets.createdAt));
+        return rows.map(mapSavedPreset);
+    },
+
+    async createSavedPreset(database: Database, userId: string, input: SavedPresetInput): Promise<SavedPreset> {
+        const [created] = await database
+            .insert(savedPresets)
+            .values({ id: crypto.randomUUID(), userId, ...input })
+            .returning();
+
+        if (!created) {
+            throw new Error('Workspace preset could not be created.');
+        }
+
+        return mapSavedPreset(created);
+    },
+
+    async updateSavedPreset(
+        database: Database,
+        userId: string,
+        presetId: string,
+        input: SavedPresetInput,
+    ): Promise<SavedPreset | null> {
+        const [updated] = await database
+            .update(savedPresets)
+            .set(input)
+            .where(and(eq(savedPresets.userId, userId), eq(savedPresets.id, presetId)))
+            .returning();
+
+        return updated ? mapSavedPreset(updated) : null;
+    },
+
+    async deleteSavedPreset(database: Database, userId: string, presetId: string) {
+        const deleted = await database
+            .delete(savedPresets)
+            .where(and(eq(savedPresets.userId, userId), eq(savedPresets.id, presetId)))
+            .returning({ id: savedPresets.id });
 
         return { success: deleted.length > 0 };
     },
@@ -564,29 +691,60 @@ export const appRepository = {
         return mapSession(createdSession);
     },
 
-    async completeSession(database: Database, userId: string, sessionId: string, elapsedSeconds: number) {
-        // Match by id even when the row is no longer 'active' — a concurrent startSession
-        // in another tab may have flipped it to 'canceled'. That focus time is real and
-        // must still be recorded. The `status != 'completed'` guard keeps this idempotent
-        // (a re-complete, e.g. from the pagehide flush, matches no row and returns null).
-        const [completedSession] = await database
-            .update(focusSessions)
-            .set({
-                status: 'completed',
-                completedAt: new Date(),
-                canceledAt: null,
-                elapsedSeconds,
-            })
+    completeSession,
+
+    /**
+     * Settle the session a device left open after a hard reload — a crash, a kill, a dead
+     * battery — where the unload beacon never got to run.
+     *
+     * The client names the row from its own timer snapshot rather than asking for "the
+     * active one", so opening a second tab can never close a session still running in the
+     * first. A block too short to record is canceled instead.
+     *
+     * Its claim is never taken at face value: the block can't have outlasted its planned
+     * duration, nor the wall time between starting and the device's last snapshot. That
+     * second bound is what keeps a stale claim honest — a preset retuned between the crash
+     * and the reload would otherwise let the client derive elapsed time from the wrong phase
+     * length, and reopening days later leaves `now` far too generous a ceiling.
+     */
+    async recoverSession(
+        database: Database,
+        userId: string,
+        sessionId: string,
+        provenElapsedSeconds: number,
+        snapshotSavedAtMs: number,
+    ) {
+        const [openSession] = await database
+            .select()
+            .from(focusSessions)
             .where(
                 and(
                     eq(focusSessions.userId, userId),
                     eq(focusSessions.id, sessionId),
-                    ne(focusSessions.status, 'completed'),
+                    eq(focusSessions.status, 'active'),
                 ),
             )
-            .returning();
+            .limit(1);
 
-        return completedSession ? mapSession(completedSession) : null;
+        if (!openSession) {
+            return { outcome: 'none' as const, elapsedSeconds: 0 };
+        }
+
+        // A clock ahead of ours would otherwise widen its own ceiling.
+        const lastAliveMs = Math.min(snapshotSavedAtMs, Date.now());
+        const aliveSeconds = Math.floor((lastAliveMs - openSession.startedAt.getTime()) / 1000);
+        const elapsedSeconds = Math.max(
+            0,
+            Math.min(provenElapsedSeconds, openSession.plannedDurationSeconds, aliveSeconds),
+        );
+
+        if (elapsedSeconds < MIN_RECORDED_SECONDS) {
+            await cancelSession(database, userId, sessionId);
+            return { outcome: 'canceled' as const, elapsedSeconds: 0 };
+        }
+
+        const recovered = await completeSession(database, userId, sessionId, elapsedSeconds);
+        return { outcome: 'completed' as const, elapsedSeconds: recovered?.elapsedSeconds ?? elapsedSeconds };
     },
 
     async completeSessionCycle(database: Database, userId: string, sessionId: string) {
@@ -609,51 +767,69 @@ export const appRepository = {
         return markedSession ? mapSession(markedSession) : null;
     },
 
-    async cancelSession(database: Database, userId: string, sessionId: string) {
-        const [canceledSession] = await database
-            .update(focusSessions)
-            .set({
-                status: 'canceled',
-                canceledAt: new Date(),
-            })
-            .where(
-                and(
-                    eq(focusSessions.userId, userId),
-                    eq(focusSessions.id, sessionId),
-                    eq(focusSessions.status, 'active'),
-                ),
-            )
-            .returning();
+    cancelSession,
 
-        return canceledSession ? mapSession(canceledSession) : null;
+    /**
+     * Erase everything keyed to a user, for the Clerk `user.deleted` webhook. Batched so a
+     * partial failure can't leave personal data behind — neon-http has no interactive
+     * transactions, and batch() is the transactional primitive it does support. Deleting
+     * nothing is a no-op, so webhook redeliveries are safe.
+     */
+    async deleteUserData(database: Database, userId: string) {
+        await database.batch([
+            database.delete(tasks).where(eq(tasks.userId, userId)),
+            database.delete(focusSessions).where(eq(focusSessions.userId, userId)),
+            database.delete(ambientMixes).where(eq(ambientMixes.userId, userId)),
+            database.delete(savedPresets).where(eq(savedPresets.userId, userId)),
+            database.delete(userPreferences).where(eq(userPreferences.userId, userId)),
+        ]);
+    },
+
+    /**
+     * Recent blocks for the progress panel. Bounded on the server rather than by a client
+     * parameter: this is a "what have I been doing lately" list, and no caller has a reason
+     * to ask for a user's entire history.
+     */
+    async listRecentSessions(database: Database, userId: string) {
+        const recentSessions = await database
+            .select()
+            .from(focusSessions)
+            .where(completedSessionsOf(userId))
+            .orderBy(desc(focusSessions.completedAt))
+            .limit(SESSION_HISTORY_LIMIT);
+
+        return recentSessions.map(mapSession);
     },
 
     async getSessionSummary(database: Database, userId: string) {
-        const storedSessions = await database
-            .select({
-                elapsedSeconds: focusSessions.elapsedSeconds,
-                completedAt: focusSessions.completedAt,
-                cycleCompletedAt: focusSessions.cycleCompletedAt,
-            })
-            .from(focusSessions)
-            .where(
-                and(
-                    eq(focusSessions.userId, userId),
-                    eq(focusSessions.status, 'completed'),
-                    isNotNull(focusSessions.completedAt),
-                ),
-            );
-
-        const totalSessions = storedSessions.length;
-        const totalMinutes = Math.round(storedSessions.reduce((sum, session) => sum + session.elapsedSeconds, 0) / 60);
-        const completedCycles = storedSessions.filter((session) => session.cycleCompletedAt !== null).length;
-        const distinctDays = storedSessions.map((session) => asIsoString(session.completedAt).slice(0, 10));
+        // Four numbers, so let the database produce four numbers. Pulling every completed
+        // row back to count it in JS grew with the user's whole history, which is exactly
+        // the payload that gets heaviest for the people who use the product most.
+        const [totals, activeDays] = await Promise.all([
+            database
+                .select({
+                    totalSessions: sql<number>`count(*)::int`,
+                    totalSeconds: sql<number>`coalesce(sum(${focusSessions.elapsedSeconds}), 0)::int`,
+                    completedCycles: sql<number>`count(${focusSessions.cycleCompletedAt})::int`,
+                })
+                .from(focusSessions)
+                .where(completedSessionsOf(userId)),
+            // The streak only ever reads back from the newest day until a gap, so a window
+            // this wide can never cut one short in practice.
+            database
+                .select({ day: COMPLETED_DAY })
+                .from(focusSessions)
+                .where(completedSessionsOf(userId))
+                .groupBy(COMPLETED_DAY)
+                .orderBy(desc(COMPLETED_DAY))
+                .limit(STREAK_WINDOW_DAYS),
+        ]);
 
         return {
-            totalSessions,
-            totalMinutes,
-            completedCycles,
-            currentStreak: calculateCurrentStreak(distinctDays),
+            totalSessions: totals[0]?.totalSessions ?? 0,
+            totalMinutes: Math.round((totals[0]?.totalSeconds ?? 0) / 60),
+            completedCycles: totals[0]?.completedCycles ?? 0,
+            currentStreak: calculateCurrentStreak(activeDays.map((row) => row.day)),
         };
     },
 };

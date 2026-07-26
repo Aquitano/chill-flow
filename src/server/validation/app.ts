@@ -1,4 +1,5 @@
 import { backgroundCatalog } from '@/lib/backgrounds';
+import { MAX_LIKED_TRACKS } from '@/lib/likes';
 import { z } from 'zod';
 
 const backgroundIds = new Set(backgroundCatalog.map((background) => background.id));
@@ -78,12 +79,9 @@ const pomodoroSettingsSchema = z.object({
 
 export const updatePreferencesInputSchema = z.object({
     defaultMode: modeSchema.optional(),
-    autoPlay: z.boolean().optional(),
-    transitionSpeed: z.number().int().min(100).max(2000).optional(),
     volume: z.number().int().min(0).max(100).optional(),
     showNotifications: z.boolean().optional(),
     timerSound: z.boolean().optional(),
-    theme: z.enum(['light', 'dark', 'system']).optional(),
     timerMode: z.enum(['focus', 'pomodoro']).optional(),
     timerPreset: z.string().trim().min(1).max(16).optional(),
     customMinutes: z
@@ -96,10 +94,17 @@ export const updatePreferencesInputSchema = z.object({
     selectedBackgroundId: nullableBackgroundIdSchema.optional(),
     likedTrackIds: z
         .array(trackIdSchema)
-        .max(25)
+        .max(MAX_LIKED_TRACKS)
         .transform((trackIds) => Array.from(new Set(trackIds)))
         .optional(),
 });
+
+const sessionIdSchema = z.uuid();
+const elapsedSecondsSchema = z
+    .number()
+    .int()
+    .min(0)
+    .max(12 * 60 * 60);
 
 export const startSessionInputSchema = z.object({
     mode: modeSchema,
@@ -114,20 +119,40 @@ export const startSessionInputSchema = z.object({
 });
 
 export const completeSessionInputSchema = z.object({
-    id: taskIdSchema,
-    elapsedSeconds: z
-        .number()
-        .int()
-        .min(0)
-        .max(12 * 60 * 60),
+    id: sessionIdSchema,
+    elapsedSeconds: elapsedSecondsSchema,
 });
 
 export const cancelSessionInputSchema = z.object({
-    id: taskIdSchema,
+    id: sessionIdSchema,
 });
 
 export const completeCycleInputSchema = z.object({
-    id: taskIdSchema,
+    id: sessionIdSchema,
+});
+
+/**
+ * Body of the unload beacon. It carries the lifecycle reducer's verdict rather than raw
+ * timings, so what counts as recordable focus time stays decided in one place.
+ */
+export const flushSessionInputSchema = z.discriminatedUnion('outcome', [
+    z.object({
+        outcome: z.literal('completed'),
+        id: sessionIdSchema,
+        elapsedSeconds: elapsedSecondsSchema,
+    }),
+    z.object({ outcome: z.literal('canceled'), id: sessionIdSchema }),
+]);
+
+/**
+ * The block a device left open, plus the focus time it can still prove from its local timer
+ * snapshot. Naming the row keeps recovery off a session running in another tab.
+ */
+export const recoverSessionInputSchema = z.object({
+    id: sessionIdSchema,
+    elapsedSeconds: elapsedSecondsSchema,
+    /** When the device last wrote that snapshot — the moment it stopped being able to focus. */
+    savedAtMs: z.number().int().positive(),
 });
 
 export const trackLookupInputSchema = z.object({
@@ -149,6 +174,21 @@ export const updateAmbientMixInputSchema = saveAmbientMixInputSchema.extend({
 });
 
 export const deleteAmbientMixInputSchema = z.object({
+    id: z.uuid(),
+});
+
+export const saveWorkspacePresetInputSchema = z.object({
+    name: z.string().trim().min(1).max(40),
+    trackId: nullableTrackIdSchema,
+    backgroundId: nullableBackgroundIdSchema,
+    mode: modeSchema,
+});
+
+export const updateWorkspacePresetInputSchema = saveWorkspacePresetInputSchema.extend({
+    id: z.uuid(),
+});
+
+export const deleteWorkspacePresetInputSchema = z.object({
     id: z.uuid(),
 });
 

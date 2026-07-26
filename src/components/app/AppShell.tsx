@@ -8,15 +8,17 @@ import { PlayerDock } from '@/components/app/PlayerDock';
 import { SettingsDialog } from '@/components/app/SettingsDialog';
 import {
     usePreferencesQuery,
+    useSessionRecoverMutation,
     useSessionsQuery,
     useTracksQuery,
     useUpdatePreferencesMutation,
     useTasksQuery,
 } from '@/hooks/use-app-data';
+import { askSessionOwner } from '@/lib/focus-channel';
 import { selectQuoteForMode } from '@/lib/quotes';
 import { readTimerSnapshot } from '@/lib/timer-persistence';
 import { useWorkspaceHotkeys } from '@/hooks/use-workspace-hotkeys';
-import { PomodoroCadence, TimerMode, useAppStore } from '@/store/app-store';
+import { PomodoroCadence, TimerMode, TimerSnapshot, phaseDurationSeconds, useAppStore } from '@/store/app-store';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
@@ -35,6 +37,20 @@ type WorkspacePersistPayload = {
     customMinutes: string;
     pomodoroSettings: PomodoroCadence;
 };
+
+/**
+ * Focus seconds this device can vouch for from its last snapshot: what the countdown had
+ * already burned through, or the time an open-ended block had counted up. Call it after
+ * restoreTimer, once the store holds the phase the snapshot describes.
+ */
+function provenFocusSeconds(snapshot: TimerSnapshot): number {
+    if (snapshot.openEnded) {
+        return snapshot.elapsedSeconds;
+    }
+
+    const phaseSeconds = phaseDurationSeconds(useAppStore.getState()) ?? 0;
+    return Math.max(0, phaseSeconds - snapshot.remainingSeconds);
+}
 
 export function AppShell() {
     const currentMode = useAppStore((state) => state.currentMode);
@@ -67,6 +83,7 @@ export function AppShell() {
     const preferencesQuery = usePreferencesQuery();
     const sessionsQuery = useSessionsQuery();
     const updatePreferences = useUpdatePreferencesMutation();
+    const recoverSession = useSessionRecoverMutation();
 
     useWorkspaceHotkeys();
 
@@ -179,6 +196,38 @@ export function AppShell() {
                 toast('Picked up where you left off', {
                     id: 'timer-restore',
                     description: 'Your timer is paused — press play when you are ready.',
+                });
+            }
+
+            // A crash or a killed tab leaves the session row open, because the unload flush
+            // never ran. Settle that specific block with the focus time this device can still
+            // prove; anything it can't is never credited. Reuses the restore toast slot so a
+            // reload reports one thing, not two.
+            if (snapshot.sessionId && outcome !== 'ignored') {
+                const openSessionId = snapshot.sessionId;
+                // Read the store now: the answer below is a round trip, and the phase this
+                // snapshot describes is only on the store until the user retunes the dial.
+                const elapsedSeconds = provenFocusSeconds(snapshot);
+
+                // The snapshot is shared with every other tab, so it may well name a block
+                // still running in one of them. Recovering that row would cut it short, so
+                // only settle rows no live tab answers for.
+                void askSessionOwner(openSessionId).then((ownedElsewhere) => {
+                    if (ownedElsewhere) return;
+
+                    recoverSession.mutate(
+                        { id: openSessionId, elapsedSeconds, savedAtMs: snapshot.savedAt },
+                        {
+                            onSuccess: (recovery) => {
+                                if (recovery.outcome !== 'completed') return;
+                                const minutes = Math.max(1, Math.round(recovery.elapsedSeconds / 60));
+                                toast('Your last block was saved', {
+                                    id: 'timer-restore',
+                                    description: `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} of focus were recorded.`,
+                                });
+                            },
+                        },
+                    );
                 });
             }
         }

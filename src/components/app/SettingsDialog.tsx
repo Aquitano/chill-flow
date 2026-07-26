@@ -1,5 +1,7 @@
 'use client';
 
+import { SessionHistory } from '@/components/app/SessionHistory';
+import { WorkspacePresets } from '@/components/app/WorkspacePresets';
 import { Button } from '@/components/ui/button';
 import { ToggleSwitch } from '@/components/ui/toggle-switch';
 import { usePreferencesQuery, useUpdatePreferencesMutation } from '@/hooks/use-app-data';
@@ -12,6 +14,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import {
     BarChart3,
     Bell,
+    Bookmark,
     Check,
     Image as ImageIcon,
     Keyboard,
@@ -65,14 +68,20 @@ const SHORTCUT_GROUPS = [
     },
 ];
 
-type SectionId = 'mode' | 'sound' | 'scene' | 'alerts' | 'progress' | 'shortcuts';
+type SectionId = 'mode' | 'sound' | 'scene' | 'presets' | 'alerts' | 'progress' | 'shortcuts';
 
 const SECTIONS: { id: SectionId; label: string; description: string; icon: LucideIcon }[] = [
     { id: 'mode', label: 'Mode', description: 'Shapes what the workspace shows while you work.', icon: Sparkles },
     { id: 'sound', label: 'Sound', description: 'The track playing under your session.', icon: Music },
     { id: 'scene', label: 'Scene', description: 'The backdrop behind your session.', icon: ImageIcon },
+    {
+        id: 'presets',
+        label: 'Presets',
+        description: 'Mode, sound, and scene together — saved to drop back into.',
+        icon: Bookmark,
+    },
     { id: 'alerts', label: 'Alerts', description: 'How the timer reaches you when a block ends.', icon: Bell },
-    { id: 'progress', label: 'Progress', description: 'Your focus, in plain numbers.', icon: BarChart3 },
+    { id: 'progress', label: 'Progress', description: 'Your totals, and the blocks behind them.', icon: BarChart3 },
     {
         id: 'shortcuts',
         label: 'Shortcuts',
@@ -465,27 +474,35 @@ export function SettingsDialog() {
                                 </>
                             )}
 
+                            {activeSection === 'presets' && (
+                                <WorkspacePresets enabled={isMenuOpen && activeSection === 'presets'} />
+                            )}
+
                             {activeSection === 'alerts' && <AlertsSection />}
 
                             {activeSection === 'progress' && (
-                                <dl className="grid grid-cols-2 gap-2">
-                                    {[
-                                        { value: sessionSummary.totalMinutes, label: 'minutes focused' },
-                                        { value: sessionSummary.totalSessions, label: 'sessions' },
-                                        { value: sessionSummary.completedCycles, label: 'pomodoro cycles' },
-                                        { value: sessionSummary.currentStreak, label: 'day streak' },
-                                    ].map((stat) => (
-                                        <div
-                                            key={stat.label}
-                                            className="rounded-xl border border-white/10 bg-white/5 px-3 py-3.5 text-center"
-                                        >
-                                            <dd className="text-ink text-xl font-semibold tabular-nums">
-                                                {stat.value}
-                                            </dd>
-                                            <dt className="text-ink-dim mt-0.5 text-xs">{stat.label}</dt>
-                                        </div>
-                                    ))}
-                                </dl>
+                                <div className="space-y-6">
+                                    <dl className="grid grid-cols-2 gap-2">
+                                        {[
+                                            { value: sessionSummary.totalMinutes, label: 'minutes focused' },
+                                            { value: sessionSummary.totalSessions, label: 'sessions' },
+                                            { value: sessionSummary.completedCycles, label: 'pomodoro cycles' },
+                                            { value: sessionSummary.currentStreak, label: 'day streak' },
+                                        ].map((stat) => (
+                                            <div
+                                                key={stat.label}
+                                                className="rounded-xl border border-white/10 bg-white/5 px-3 py-3.5 text-center"
+                                            >
+                                                <dd className="text-ink text-xl font-semibold tabular-nums">
+                                                    {stat.value}
+                                                </dd>
+                                                <dt className="text-ink-dim mt-0.5 text-xs">{stat.label}</dt>
+                                            </div>
+                                        ))}
+                                    </dl>
+
+                                    <SessionHistory enabled={isMenuOpen && activeSection === 'progress'} />
+                                </div>
                             )}
 
                             {activeSection === 'shortcuts' && (
