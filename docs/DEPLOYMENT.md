@@ -36,6 +36,9 @@ live deployment.
    # PowerShell
    $env:DATABASE_URL='postgres://...neon.tech/...'; bun run db:migrate
    ```
+3. A migration that **drops** a column runs after the deploy that stops reading it, never
+   before — the previous release is still serving traffic and selects every column it knows
+   about. Additive migrations go first, as usual.
 
 ## 2. Audio storage (Cloudflare R2)
 

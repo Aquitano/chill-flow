@@ -175,7 +175,17 @@ export function WorkspacePresets({ enabled }: { enabled: boolean }) {
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => deletePreset.mutate({ id: preset.id })}
+                                    onClick={() =>
+                                        deletePreset.mutate(
+                                            { id: preset.id },
+                                            {
+                                                onError: (error) =>
+                                                    toast.error("Couldn't delete that preset", {
+                                                        description: describeApiError(error),
+                                                    }),
+                                            },
+                                        )
+                                    }
                                     className="text-ink-dim rounded p-1 transition hover:bg-white/10 hover:text-rose-300"
                                     aria-label={`Delete ${preset.name}`}
                                 >

@@ -127,7 +127,8 @@ export interface TimerSnapshot {
     pomodoroIsBreak: boolean;
     /**
      * The session row this device left open, so a reload can settle that specific block.
-     * Naming it keeps recovery off a live session running in another tab.
+     * Every tab shares this storage, so the id alone says nothing about who still owns the
+     * row — see `askSessionOwner`, which recovery asks before touching it.
      */
     sessionId: string | null;
 }

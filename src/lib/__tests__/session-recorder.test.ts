@@ -46,7 +46,9 @@ describe('sessionRecorder', () => {
     });
 
     it('drops a queued finish when the start never produced a row', () => {
-        recorderFinish(recorderStarting(), { type: 'complete', elapsedSeconds: 900 });
+        const queued = recorderFinish(recorderStarting(), { type: 'complete', elapsedSeconds: 900 });
+        expect(queued.state).toEqual({ status: 'starting', queued: { type: 'complete', elapsedSeconds: 900 } });
+
         const failed = recorderStartFailed();
 
         expect(failed.effect).toEqual({ type: 'NONE' });

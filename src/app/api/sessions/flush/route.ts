@@ -2,6 +2,7 @@ import { appEnv } from '@/lib/env';
 import { getDatabase } from '@/server/db/client';
 import { appRepository } from '@/server/repositories/app-repository';
 import { isTrustedOrigin } from '@/server/security/origin';
+import { consumeRateLimit } from '@/server/security/rate-limit';
 import { flushSessionInputSchema } from '@/server/validation/app';
 import { auth } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
@@ -36,6 +37,20 @@ export async function POST(request: Request) {
     }
 
     const input = parsed.data;
+
+    // Draw from the same bucket as the jstack mutation this stands in for, rather than
+    // handing every user a second 30/min allowance for the identical write. The middleware
+    // can't be reused here: it throws, and a plain route handler has nothing to catch it.
+    try {
+        consumeRateLimit(userId, {
+            key: input.outcome === 'completed' ? 'sessions:complete' : 'sessions:cancel',
+            limit: 30,
+            windowMs: 60_000,
+        });
+    } catch {
+        return NextResponse.json({ message: 'Too many requests. Please retry later.' }, { status: 429 });
+    }
+
     if (input.outcome === 'completed') {
         await appRepository.completeSession(database, userId, input.id, input.elapsedSeconds);
     } else {

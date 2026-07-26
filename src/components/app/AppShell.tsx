@@ -14,6 +14,7 @@ import {
     useUpdatePreferencesMutation,
     useTasksQuery,
 } from '@/hooks/use-app-data';
+import { askSessionOwner } from '@/lib/focus-channel';
 import { selectQuoteForMode } from '@/lib/quotes';
 import { readTimerSnapshot } from '@/lib/timer-persistence';
 import { useWorkspaceHotkeys } from '@/hooks/use-workspace-hotkeys';
@@ -203,23 +204,31 @@ export function AppShell() {
             // prove; anything it can't is never credited. Reuses the restore toast slot so a
             // reload reports one thing, not two.
             if (snapshot.sessionId && outcome !== 'ignored') {
-                recoverSession.mutate(
-                    {
-                        id: snapshot.sessionId,
-                        elapsedSeconds: provenFocusSeconds(snapshot),
-                        savedAtMs: snapshot.savedAt,
-                    },
-                    {
-                        onSuccess: (recovery) => {
-                            if (recovery.outcome !== 'completed') return;
-                            const minutes = Math.max(1, Math.round(recovery.elapsedSeconds / 60));
-                            toast('Your last block was saved', {
-                                id: 'timer-restore',
-                                description: `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} of focus were recorded.`,
-                            });
+                const openSessionId = snapshot.sessionId;
+                // Read the store now: the answer below is a round trip, and the phase this
+                // snapshot describes is only on the store until the user retunes the dial.
+                const elapsedSeconds = provenFocusSeconds(snapshot);
+
+                // The snapshot is shared with every other tab, so it may well name a block
+                // still running in one of them. Recovering that row would cut it short, so
+                // only settle rows no live tab answers for.
+                void askSessionOwner(openSessionId).then((ownedElsewhere) => {
+                    if (ownedElsewhere) return;
+
+                    recoverSession.mutate(
+                        { id: openSessionId, elapsedSeconds, savedAtMs: snapshot.savedAt },
+                        {
+                            onSuccess: (recovery) => {
+                                if (recovery.outcome !== 'completed') return;
+                                const minutes = Math.max(1, Math.round(recovery.elapsedSeconds / 60));
+                                toast('Your last block was saved', {
+                                    id: 'timer-restore',
+                                    description: `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} of focus were recorded.`,
+                                });
+                            },
                         },
-                    },
-                );
+                    );
+                });
             }
         }
 

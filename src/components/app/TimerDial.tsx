@@ -74,6 +74,13 @@ const FOCUS_PRESETS: { label: string; icon: LucideIcon }[] = [
 /** Mirrors the 12-hour cap the server applies to a session's planned duration. */
 const MAX_CUSTOM_MINUTES = 12 * 60;
 
+/**
+ * How often a running block re-stamps its snapshot. Recovery can only credit focus up to
+ * the last write, so this bounds what a crash costs; every path the browser warns us about
+ * (hide, unload) writes one of its own.
+ */
+const SNAPSHOT_REFRESH_MS = 15_000;
+
 /** How a lifecycle command reaches the server: a normal mutation, or the unload beacon. */
 type SessionTransport = 'mutation' | 'beacon';
 
@@ -307,6 +314,13 @@ export const TimerDial: React.FC = () => {
         );
     }, []);
 
+    // Keep a device-local snapshot of the dial so closing the tab mid-block doesn't throw
+    // the position away. It names the open session row too, so the next load can settle
+    // exactly the block this device abandoned.
+    const saveTimerSnapshot = useCallback(() => {
+        writeTimerSnapshot(timerSnapshotOf(useAppStore.getState(), Date.now(), recordedSessionId(recorderRef.current)));
+    }, []);
+
     // Single entry point for the focus-session lifecycle: feed an event to the pure reducer,
     // persist the next state, and execute the resulting API command. `sessions.start` is a
     // round trip, so the recorder holds a finish that lands before the row's id does.
@@ -333,7 +347,13 @@ export const TimerDial: React.FC = () => {
                             taskId: contextRef.current.taskId,
                         },
                         {
-                            onSuccess: (session) => settle(recorderStarted(recorderRef.current, session.id)),
+                            onSuccess: (session) => {
+                                settle(recorderStarted(recorderRef.current, session.id));
+                                // Nothing the snapshot effect watches changes when the id
+                                // lands, so without this a block that runs straight through
+                                // to a crash leaves a snapshot naming no session at all.
+                                saveTimerSnapshot();
+                            },
                             onError: () => {
                                 settle(recorderStartFailed());
                                 toast.error('This block is not being recorded', {
@@ -358,23 +378,28 @@ export const TimerDial: React.FC = () => {
                     break;
             }
         },
-        [runRecorderEffect],
+        [runRecorderEffect, saveTimerSnapshot],
     );
 
-    // Another tab claimed the focus session, which means the server has already canceled this
-    // tab's row. Bank what this block earned before the handover and stop the clock, rather
-    // than letting two dials count the same minutes.
+    // Two jobs on one channel. A remote start means the server has already canceled this
+    // tab's row, so bank what this block earned before the handover and stop the clock
+    // rather than letting two dials count the same minutes. An ownership query means some
+    // tab is deciding whether to recover a row; answering keeps this block from being
+    // completed out from under it.
     useEffect(() => {
-        const channel = openFocusChannel(() => {
-            if (sessionStateRef.current.status !== 'running') return;
+        const channel = openFocusChannel({
+            onRemoteStart: () => {
+                if (sessionStateRef.current.status !== 'running') return;
 
-            dispatchSession({ type: 'COMPLETE', atMs: Date.now() });
-            pauseTimer();
-            toast('Focus moved to another tab', {
-                id: 'focus-handover',
-                description: 'This block was saved, so the time is only counted once.',
-                action: { label: 'Take over', onClick: () => startTimer() },
-            });
+                dispatchSession({ type: 'COMPLETE', atMs: Date.now() });
+                pauseTimer();
+                toast('Focus moved to another tab', {
+                    id: 'focus-handover',
+                    description: 'This block was saved, so the time is only counted once.',
+                    action: { label: 'Take over', onClick: () => startTimer() },
+                });
+            },
+            ownsSession: (sessionId) => recordedSessionId(recorderRef.current) === sessionId,
         });
         focusChannelRef.current = channel;
 
@@ -403,13 +428,6 @@ export const TimerDial: React.FC = () => {
         };
     }, [timerActive, tickTimer]);
 
-    // Keep a device-local snapshot of the dial so closing the tab mid-block doesn't throw
-    // the position away. It names the open session row too, so the next load can settle
-    // exactly the block this device abandoned.
-    const saveTimerSnapshot = useCallback(() => {
-        writeTimerSnapshot(timerSnapshotOf(useAppStore.getState(), Date.now(), recordedSessionId(recorderRef.current)));
-    }, []);
-
     useEffect(() => {
         saveTimerSnapshot();
         document.addEventListener('visibilitychange', saveTimerSnapshot);
@@ -424,6 +442,16 @@ export const TimerDial: React.FC = () => {
         pomodoroSettings.isBreak,
         pomodoroSettings.currentSession,
     ]);
+
+    // A block that runs uninterrupted changes none of the state above, so nothing else
+    // re-stamps the snapshot between its start and the crash recovery is there for — and
+    // the countdown it holds would still read as the full duration.
+    useEffect(() => {
+        if (!timerActive) return;
+
+        const interval = setInterval(saveTimerSnapshot, SNAPSHOT_REFRESH_MS);
+        return () => clearInterval(interval);
+    }, [timerActive, saveTimerSnapshot]);
 
     // Translate timer-state transitions into focus-session lifecycle events. A "focus
     // phase" is any running focus countdown — finite or infinite focus mode, or a
