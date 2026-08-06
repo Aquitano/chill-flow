@@ -16,6 +16,7 @@ import {
     UserPreferences,
 } from '@/models/app';
 import { and, asc, desc, eq, isNotNull, isNull, ne, sql } from 'drizzle-orm';
+import { EXPORT_SCHEMA_VERSION, type UserDataExport } from '../account-export';
 import { Database } from '../db/client';
 import { calculateCurrentStreak, dayKeyInZone } from '../streak';
 import {
@@ -132,6 +133,11 @@ const defaultPreferences: UserPreferences = {
 
 function clone<T>(value: T): T {
     return structuredClone(value) as T;
+}
+
+/** Unlike asIsoString, keeps a missing timestamp missing — the export must not invent one. */
+function toIsoOrNull(value: Date | null) {
+    return value ? value.toISOString() : null;
 }
 
 function asIsoString(value: Date | string | null | undefined) {
@@ -768,6 +774,76 @@ export const appRepository = {
             database.delete(savedPresets).where(eq(savedPresets.userId, userId)),
             database.delete(userPreferences).where(eq(userPreferences.userId, userId)),
         ]);
+    },
+
+    /**
+     * Everything keyed to a user, for the account data export.
+     *
+     * Reads exactly the five tables deleteUserData erases: what the product destroys on
+     * account deletion is what it has to be able to hand back. Deliberately unbounded —
+     * a partial export would be a worse answer than a slow one, and this runs at most a
+     * few times per account.
+     */
+    async exportUserData(database: Database, userId: string): Promise<UserDataExport> {
+        const [exportedTasks, exportedSessions, exportedMixes, exportedPresets, storedPreferences] = await Promise.all([
+            database.select().from(tasks).where(eq(tasks.userId, userId)).orderBy(asc(tasks.createdAt)),
+            database
+                .select({ session: focusSessions, taskText: tasks.text })
+                .from(focusSessions)
+                // Left, not inner: a session outlives the task it named, and losing those
+                // rows would quietly drop focus time the user actually spent.
+                .leftJoin(tasks, eq(tasks.id, focusSessions.taskId))
+                .where(eq(focusSessions.userId, userId))
+                .orderBy(asc(focusSessions.startedAt)),
+            database.select().from(ambientMixes).where(eq(ambientMixes.userId, userId)).orderBy(asc(ambientMixes.createdAt)),
+            database.select().from(savedPresets).where(eq(savedPresets.userId, userId)).orderBy(asc(savedPresets.createdAt)),
+            database.select().from(userPreferences).where(eq(userPreferences.userId, userId)).limit(1),
+        ]);
+
+        return {
+            exportedAt: new Date().toISOString(),
+            schemaVersion: EXPORT_SCHEMA_VERSION,
+            tasks: exportedTasks.map((row) => ({
+                id: row.id,
+                text: row.text,
+                priority: row.priority,
+                isCompleted: row.isCompleted,
+                dueAt: toIsoOrNull(row.dueAt),
+                dueHasTime: row.dueHasTime,
+                createdAt: row.createdAt.toISOString(),
+                updatedAt: row.updatedAt.toISOString(),
+            })),
+            focusSessions: exportedSessions.map(({ session, taskText }) => ({
+                id: session.id,
+                mode: session.mode,
+                timerKind: session.timerKind,
+                status: session.status,
+                plannedDurationSeconds: session.plannedDurationSeconds,
+                elapsedSeconds: session.elapsedSeconds,
+                trackId: session.trackId,
+                taskId: session.taskId,
+                taskText,
+                startedAt: session.startedAt.toISOString(),
+                completedAt: toIsoOrNull(session.completedAt),
+                canceledAt: toIsoOrNull(session.canceledAt),
+                cycleCompletedAt: toIsoOrNull(session.cycleCompletedAt),
+            })),
+            preferences: storedPreferences[0] ? mapPreferences(storedPreferences[0]) : null,
+            ambientMixes: exportedMixes.map((row) => ({
+                id: row.id,
+                name: row.name,
+                levels: row.levels,
+                createdAt: row.createdAt.toISOString(),
+            })),
+            savedPresets: exportedPresets.map((row) => ({
+                id: row.id,
+                name: row.name,
+                trackId: row.trackId,
+                backgroundId: row.backgroundId,
+                mode: row.mode,
+                createdAt: row.createdAt.toISOString(),
+            })),
+        };
     },
 
     /**

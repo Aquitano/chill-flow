@@ -5,14 +5,62 @@ import { Slider } from '@/components/ui/slider';
 import { usePreferencesQuery, useUpdatePreferencesMutation } from '@/hooks/use-app-data';
 import { ToggleSwitch } from '@/components/ui/toggle-switch';
 import { useNotificationPermission } from '@/hooks/use-notification-permission';
+import { apiErrorFrom, describeApiError } from '@/lib/api';
 import { playTimerChime } from '@/lib/audio/chime';
 import { getNotificationPermission } from '@/lib/notifications';
 import { UserPreferences } from '@/models/app';
 import { useAppStore } from '@/store/app-store';
 import { UserButton, useUser } from '@clerk/nextjs';
-import { Bell, BellOff, Volume2, VolumeX } from 'lucide-react';
+import { Bell, BellOff, Download, Volume2, VolumeX } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
+
+type ExportFormat = 'json' | 'csv';
+
+/**
+ * Saves the export the browser just downloaded. Goes through fetch rather than a plain
+ * download link so a rejected request lands in a toast like every other failure here,
+ * instead of navigating the user to a page of raw JSON.
+ */
+function useDataExport() {
+    const [pendingFormat, setPendingFormat] = useState<ExportFormat | null>(null);
+
+    const download = async (format: ExportFormat) => {
+        setPendingFormat(format);
+
+        try {
+            const response = await fetch(`/api/account/export?format=${format}`);
+
+            if (!response.ok) {
+                throw await apiErrorFrom(response);
+            }
+
+            const blob = await response.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = objectUrl;
+            link.download = filenameFrom(response) ?? `chillflow-export.${format}`;
+            link.click();
+            // Revoking in the same tick cancels the download the click just started in
+            // some browsers; the save has taken its own reference by the next one.
+            setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+
+            toast.success('Your data is downloading.');
+        } catch (error) {
+            toast.error("Couldn't export your data", { description: describeApiError(error) });
+        } finally {
+            setPendingFormat(null);
+        }
+    };
+
+    return { pendingFormat, download };
+}
+
+/** The server names the file; reading it back keeps that rule in one place. */
+function filenameFrom(response: Response): string | null {
+    const disposition = response.headers.get('content-disposition');
+    return disposition?.match(/filename="([^"]+)"/)?.[1] ?? null;
+}
 
 function SettingRow({
     title,
@@ -40,6 +88,7 @@ export function AccountSettings() {
     const updatePreferences = useUpdatePreferencesMutation();
     const modes = useAppStore((state) => state.modes);
     const { permission, request: requestPermission } = useNotificationPermission();
+    const { pendingFormat, download } = useDataExport();
 
     const preferences = preferencesQuery.data?.preferences;
 
@@ -198,6 +247,34 @@ export function AccountSettings() {
                     {notificationsOn && permission === 'unsupported' && (
                         <p className="text-xs text-neutral-400">Not supported in this browser.</p>
                     )}
+                </div>
+            </SettingRow>
+
+            <SettingRow
+                title="Export your data"
+                description="Download everything this account holds — tasks, focus sessions, preferences, saved mixes, and presets. The CSV covers focus sessions alone, for a spreadsheet."
+            >
+                <div className="flex flex-wrap gap-2">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={pendingFormat !== null}
+                        onClick={() => download('json')}
+                        className="border-white/15 bg-white/5 text-white/80 hover:bg-white/10"
+                    >
+                        <Download size={14} />
+                        {pendingFormat === 'json' ? 'Preparing…' : 'Everything (JSON)'}
+                    </Button>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={pendingFormat !== null}
+                        onClick={() => download('csv')}
+                        className="border-white/15 bg-white/5 text-white/80 hover:bg-white/10"
+                    >
+                        <Download size={14} />
+                        {pendingFormat === 'csv' ? 'Preparing…' : 'Sessions (CSV)'}
+                    </Button>
                 </div>
             </SettingRow>
         </div>
