@@ -129,10 +129,15 @@ export function usePreferencesQuery() {
     });
 }
 
+/**
+ * Totals plus the day streak. The zone travels with the request because the streak is
+ * counted in the user's calendar days, and only the browser knows which those are. Resolved
+ * inside the query function so it reads the client's zone, never the server's during SSR.
+ */
 export function useSessionsQuery() {
     return useQuery({
         queryKey: queryKeys.sessions,
-        queryFn: api.sessions.list,
+        queryFn: () => api.sessions.list({ timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
     });
 }
 

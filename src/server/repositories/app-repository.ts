@@ -16,6 +16,7 @@ import {
 } from '@/models/app';
 import { and, asc, desc, eq, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import { Database } from '../db/client';
+import { calculateCurrentStreak, dayKeyInZone } from '../streak';
 import {
     DEFAULT_POMODORO_SETTINGS,
     ambientMixes,
@@ -231,8 +232,14 @@ async function ensureUserPreferences(database: Database, userId: string) {
     return storedPreferences;
 }
 
-/** Timestamps are stored in UTC, so the day a session lands on is a plain format. */
-const COMPLETED_DAY = sql<string>`to_char(${focusSessions.completedAt}, 'YYYY-MM-DD')`;
+/**
+ * The calendar day a session lands on *for the user*. `completedAt` is a `timestamp`
+ * without a zone holding UTC, so it has to be pinned to UTC before it can be converted —
+ * a bare `AT TIME ZONE` would read it as local server time instead.
+ */
+function completedDayInZone(timeZone: string) {
+    return sql<string>`to_char((${focusSessions.completedAt} AT TIME ZONE 'UTC') AT TIME ZONE ${timeZone}, 'YYYY-MM-DD')`;
+}
 
 /** Bound on the day list behind the streak; longer than any streak worth reporting. */
 const STREAK_WINDOW_DAYS = 366;
@@ -246,29 +253,6 @@ function completedSessionsOf(userId: string) {
         eq(focusSessions.status, 'completed'),
         isNotNull(focusSessions.completedAt),
     );
-}
-
-function calculateCurrentStreak(sessionDates: string[]) {
-    if (sessionDates.length === 0) {
-        return 0;
-    }
-
-    const sortedDays = Array.from(new Set(sessionDates)).sort((left, right) => right.localeCompare(left));
-    let streak = 1;
-    let cursor = new Date(`${sortedDays[0]}T00:00:00.000Z`);
-
-    for (let index = 1; index < sortedDays.length; index += 1) {
-        const nextDate = new Date(`${sortedDays[index]}T00:00:00.000Z`);
-        cursor.setUTCDate(cursor.getUTCDate() - 1);
-
-        if (nextDate.getTime() !== cursor.getTime()) {
-            break;
-        }
-
-        streak += 1;
-    }
-
-    return streak;
 }
 
 function taskDueTimePatch(
@@ -801,7 +785,9 @@ export const appRepository = {
         return recentSessions.map(mapSession);
     },
 
-    async getSessionSummary(database: Database, userId: string) {
+    async getSessionSummary(database: Database, userId: string, timeZone: string) {
+        const completedDay = completedDayInZone(timeZone);
+
         // Four numbers, so let the database produce four numbers. Pulling every completed
         // row back to count it in JS grew with the user's whole history, which is exactly
         // the payload that gets heaviest for the people who use the product most.
@@ -817,11 +803,11 @@ export const appRepository = {
             // The streak only ever reads back from the newest day until a gap, so a window
             // this wide can never cut one short in practice.
             database
-                .select({ day: COMPLETED_DAY })
+                .select({ day: completedDay })
                 .from(focusSessions)
                 .where(completedSessionsOf(userId))
-                .groupBy(COMPLETED_DAY)
-                .orderBy(desc(COMPLETED_DAY))
+                .groupBy(completedDay)
+                .orderBy(desc(completedDay))
                 .limit(STREAK_WINDOW_DAYS),
         ]);
 
@@ -829,7 +815,10 @@ export const appRepository = {
             totalSessions: totals[0]?.totalSessions ?? 0,
             totalMinutes: Math.round((totals[0]?.totalSeconds ?? 0) / 60),
             completedCycles: totals[0]?.completedCycles ?? 0,
-            currentStreak: calculateCurrentStreak(activeDays.map((row) => row.day)),
+            currentStreak: calculateCurrentStreak(
+                activeDays.map((row) => row.day),
+                dayKeyInZone(new Date(), timeZone),
+            ),
         };
     },
 };

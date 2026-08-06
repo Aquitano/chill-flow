@@ -32,8 +32,9 @@ interface HistoryDay {
 }
 
 /**
- * Grouped by the user's own day, not the UTC one the streak counts in — "Today" has to mean
- * today where they are. The server already orders newest first, so each day keeps that order.
+ * Grouped by the user's own day, matching the zone the streak is counted in — "Today" has to
+ * mean today where they are. The server already orders newest first, so each day keeps that
+ * order.
  */
 function groupByDay(sessions: FocusSession[]): HistoryDay[] {
     const todayStart = startOfLocalDay(new Date());

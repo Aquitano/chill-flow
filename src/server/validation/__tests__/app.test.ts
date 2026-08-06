@@ -4,6 +4,7 @@ import {
     completeCycleInputSchema,
     completeSessionInputSchema,
     createTaskInputSchema,
+    sessionSummaryInputSchema,
     startSessionInputSchema,
     trackLookupInputSchema,
     updatePreferencesInputSchema,
@@ -185,5 +186,18 @@ describe('backend validation', () => {
     it('validates cycle completion payloads', () => {
         expect(completeCycleInputSchema.safeParse({ id: crypto.randomUUID() }).success).toBe(true);
         expect(completeCycleInputSchema.safeParse({ id: 'not-a-uuid' }).success).toBe(false);
+    });
+
+    it('keeps a usable time zone on the session summary and falls back to UTC otherwise', () => {
+        expect(sessionSummaryInputSchema.parse({ timeZone: 'America/Los_Angeles' }).timeZone).toBe(
+            'America/Los_Angeles',
+        );
+
+        // The summary carries three zone-independent totals alongside the streak, so a bad
+        // zone degrades to UTC rather than failing the whole query.
+        expect(sessionSummaryInputSchema.parse({ timeZone: 'Mars/Olympus_Mons' }).timeZone).toBe('UTC');
+        expect(sessionSummaryInputSchema.parse({}).timeZone).toBe('UTC');
+        expect(sessionSummaryInputSchema.parse({ timeZone: 42 }).timeZone).toBe('UTC');
+        expect(sessionSummaryInputSchema.parse({ timeZone: 'x'.repeat(200) }).timeZone).toBe('UTC');
     });
 });

@@ -24,6 +24,14 @@ const setupItems = [
         icon: Database,
         envVars: 'DATABASE_URL',
     },
+    {
+        label: 'Clerk account-deletion webhook',
+        description:
+            'Clerk owns identity, so this endpoint is the only signal to erase a deleted account. Without it, their tasks, sessions, and preferences stay behind.',
+        configured: appEnv.isClerkWebhookConfigured,
+        icon: ShieldAlert,
+        envVars: 'CLERK_WEBHOOK_SIGNING_SECRET',
+    },
 ];
 
 function PageHeader({ isWorkspaceReady }: { isWorkspaceReady: boolean }) {

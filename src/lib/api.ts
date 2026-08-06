@@ -166,7 +166,7 @@ export const api = {
         delete: (input: { id: string }) => unwrap<{ success: boolean }>(client.presets.delete.$post(input)),
     },
     sessions: {
-        list: () => unwrap<SessionPayload>(client.sessions.list.$get()),
+        list: (input: { timeZone: string }) => unwrap<SessionPayload>(client.sessions.list.$get(input)),
         history: () => unwrap<FocusSession[]>(client.sessions.history.$get()),
         start: (input: {
             mode: string;
