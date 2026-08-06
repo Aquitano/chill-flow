@@ -34,6 +34,29 @@ const setupItems = [
     },
 ];
 
+/**
+ * The setup list below only renders while Clerk or Postgres is missing, so a workspace that
+ * is otherwise ready would hide the one prerequisite a signed-in user is affected by: without
+ * the webhook, deleting the Clerk account leaves everything on this page behind.
+ */
+function WebhookNotice() {
+    return (
+        <div className="mb-6 flex items-start gap-3 rounded-lg border border-amber-400/20 bg-amber-400/[0.06] p-4">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" aria-hidden />
+            <div className="text-sm leading-6 text-amber-100">
+                <p className="font-medium">Account deletion is incomplete on this deployment.</p>
+                <p className="mt-1 text-amber-100/80">
+                    Deleting your account removes the sign-in, but{' '}
+                    <code className="rounded bg-black/30 px-1 py-0.5 text-xs">CLERK_WEBHOOK_SIGNING_SECRET</code> is
+                    unset, so this workspace never hears about it and your tasks, sessions, and preferences stay in the
+                    database. Export your data below before deleting, and ask whoever runs this instance to finish
+                    setup.
+                </p>
+            </div>
+        </div>
+    );
+}
+
 function PageHeader({ isWorkspaceReady }: { isWorkspaceReady: boolean }) {
     return (
         <div className="mb-10 flex items-center justify-between gap-4">
@@ -74,6 +97,7 @@ export default async function AccountPage() {
                         )}
                     </div>
                     <h1 className="mb-8 text-4xl font-semibold leading-tight md:text-5xl">Settings</h1>
+                    {!appEnv.isClerkWebhookConfigured && <WebhookNotice />}
                     <AccountSettings />
                 </div>
             </main>

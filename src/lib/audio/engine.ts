@@ -214,25 +214,34 @@ class AudioEngineImpl {
         return deck;
     }
 
+    /**
+     * Settles as soon as the deck can play, or the load is superseded by a newer one. A
+     * superseded load resolves rather than rejecting: being replaced is not a failure the
+     * user should hear about, and `loadMainTrack` rechecks the token before it touches a
+     * deck the newer load now owns. Leaving it pending instead would strand the caller's
+     * promise and leave these listeners on an element the newer load is about to reuse.
+     */
     private waitUntilReady(deck: Deck, loadToken: number): Promise<void> {
         return new Promise((resolve, reject) => {
             const el = deck.element;
+            const isSuperseded = () => loadToken !== this.loadToken;
             const onCanPlay = () => {
-                if (loadToken !== this.loadToken) return;
                 cleanup();
                 resolve();
             };
             const onLoadedData = () => {
-                if (loadToken !== this.loadToken) return;
-                if (el.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+                if (isSuperseded() || el.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
                     cleanup();
                     resolve();
                 }
             };
             const onErr = () => {
-                if (loadToken !== this.loadToken) return;
-                const err = el.error ?? null;
                 cleanup();
+                if (isSuperseded()) {
+                    resolve();
+                    return;
+                }
+                const err = el.error ?? null;
                 reject(new Error(this.mediaErrorMessage(err as MediaError | null)));
             };
             const cleanup = () => {
@@ -260,8 +269,23 @@ class AudioEngineImpl {
         }
 
         for (const deck of this.decks) {
-            if (deck !== this.activeDeck) this.parkDeck(deck);
+            if (deck === this.activeDeck) {
+                this.openDeck(deck);
+            } else {
+                this.parkDeck(deck);
+            }
         }
+    }
+
+    /**
+     * Brings a deck to full gain, dropping any fade still scheduled against it. A curve keeps
+     * advancing in audio-context time whether or not the element is playing, so a deck left on
+     * one would come back at partial gain when playback resumes.
+     */
+    private openDeck(deck: Deck): void {
+        if (!deck.gainNode) return;
+        deck.gainNode.gain.cancelScheduledValues(this.audioContext?.currentTime ?? 0);
+        deck.gainNode.gain.value = 1;
     }
 
     /** Silences a deck and rewinds it, so the lane is clean before it is reused. */
@@ -394,12 +418,15 @@ class AudioEngineImpl {
 
             await this.waitUntilReady(incoming, myToken);
 
+            // A newer load arrived while this one was buffering; the decks are its business now.
+            if (myToken !== this.loadToken) return;
+
             if (shouldCrossfade) {
                 await incoming.element.play();
                 this.crossfade(incoming, outgoing);
-            } else if (incoming.gainNode) {
+            } else {
                 // Nothing to blend with, so the lane simply opens.
-                incoming.gainNode.gain.value = 1;
+                this.openDeck(incoming);
             }
 
             this.debugLogger.debug('TrackLoader', 'Track loaded successfully');
@@ -493,10 +520,6 @@ class AudioEngineImpl {
         this.endCrossfade();
         active.element.pause();
         active.element.currentTime = 0;
-        if (active.gainNode) {
-            active.gainNode.gain.cancelScheduledValues(this.audioContext?.currentTime ?? 0);
-            active.gainNode.gain.value = 1;
-        }
 
         this.debugLogger.debug('Playback', 'Stop completed', {
             currentTime: active.element.currentTime,
@@ -720,6 +743,14 @@ class AudioEngineImpl {
                 this.debugLogger.warn('Engine', 'Failed to close audio context', err);
             });
         }
+
+        // ensureContext() short-circuits on a non-null context, so anything the singleton
+        // still points at here is a graph a later caller would silently build on top of.
+        this.decks = [];
+        this.activeDeckIndex = 0;
+        this.masterGainNode = null;
+        this.audioContext = null;
+        this.isPlaying = false;
 
         this.debugLogger.info('Engine', 'Audio engine destroyed');
     }

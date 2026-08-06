@@ -12,12 +12,13 @@ class FakeGainNode {
 }
 
 class FakeAudioContext {
-    state: 'running' | 'suspended' = 'running';
+    state: 'running' | 'suspended' | 'closed' = 'running';
     currentTime = 0;
     destination = {};
     createGain() { return new FakeGainNode() as unknown as GainNode; }
     createMediaElementSource(_: HTMLAudioElement) { return { connect: vi.fn() } as unknown as MediaElementAudioSourceNode; }
     resume = vi.fn(async () => { this.state = 'running'; });
+    close = vi.fn(async () => { this.state = 'closed'; });
 }
 
 class FakeBuffered {

@@ -161,14 +161,18 @@ export const recoverSessionInputSchema = z.object({
  * an unknown or missing zone falls back to UTC rather than failing the summary, since the
  * three other totals it carries don't depend on the zone at all.
  */
-export const sessionSummaryInputSchema = z.object({
-    timeZone: z
-        .string()
-        .max(64)
-        .catch(FALLBACK_TIME_ZONE)
-        .transform((value) => (isSupportedTimeZone(value) ? value : FALLBACK_TIME_ZONE))
-        .default(FALLBACK_TIME_ZONE),
-});
+export const sessionSummaryInputSchema = z
+    .object({
+        timeZone: z
+            .string()
+            .max(64)
+            .catch(FALLBACK_TIME_ZONE)
+            .transform((value) => (isSupportedTimeZone(value) ? value : FALLBACK_TIME_ZONE))
+            .default(FALLBACK_TIME_ZONE),
+    })
+    // A caller that sends no payload at all reads as an empty one. prefault rather than
+    // default so the empty object still runs the rules above; default would return it as-is.
+    .prefault({});
 
 export const trackLookupInputSchema = z.object({
     id: trackIdSchema,

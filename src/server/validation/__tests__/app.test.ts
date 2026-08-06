@@ -197,6 +197,7 @@ describe('backend validation', () => {
         // zone degrades to UTC rather than failing the whole query.
         expect(sessionSummaryInputSchema.parse({ timeZone: 'Mars/Olympus_Mons' }).timeZone).toBe('UTC');
         expect(sessionSummaryInputSchema.parse({}).timeZone).toBe('UTC');
+        expect(sessionSummaryInputSchema.parse(undefined).timeZone).toBe('UTC');
         expect(sessionSummaryInputSchema.parse({ timeZone: 42 }).timeZone).toBe('UTC');
         expect(sessionSummaryInputSchema.parse({ timeZone: 'x'.repeat(200) }).timeZone).toBe('UTC');
     });
