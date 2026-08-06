@@ -10,6 +10,7 @@ import {
     Quote,
     SavedPreset,
     Task,
+    TaskFocusTotal,
     Track,
     UserPreferences,
 } from '@/models/app';
@@ -168,6 +169,7 @@ export const api = {
     sessions: {
         list: (input: { timeZone: string }) => unwrap<SessionPayload>(client.sessions.list.$get(input)),
         history: () => unwrap<FocusSession[]>(client.sessions.history.$get()),
+        taskTotals: () => unwrap<TaskFocusTotal[]>(client.sessions.taskTotals.$get()),
         start: (input: {
             mode: string;
             timerKind: FocusSession['timerKind'];

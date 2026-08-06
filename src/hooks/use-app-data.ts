@@ -11,6 +11,7 @@ const queryKeys = {
     presets: ['presets'],
     sessions: ['sessions'],
     sessionHistory: ['sessions', 'history'],
+    taskFocusTotals: ['sessions', 'task-totals'],
     ambientSounds: ['ambient', 'sounds'],
     ambientMixes: ['ambient', 'mixes'],
 };
@@ -150,6 +151,18 @@ export function useSessionHistoryQuery(enabled: boolean) {
         queryKey: queryKeys.sessionHistory,
         queryFn: api.sessions.history,
         enabled,
+    });
+}
+
+/**
+ * Focus time per task, for the task list. Keyed under `sessions` so finishing a block
+ * refreshes it along with the totals; its only consumer mounts with the tasks panel, which
+ * is gate enough without an `enabled` flag.
+ */
+export function useTaskFocusTotalsQuery() {
+    return useQuery({
+        queryKey: queryKeys.taskFocusTotals,
+        queryFn: api.sessions.taskTotals,
     });
 }
 

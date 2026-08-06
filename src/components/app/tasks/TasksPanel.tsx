@@ -10,17 +10,19 @@ import {
 import {
     useClearCompletedTasksMutation,
     useDeleteTaskMutation,
+    useTaskFocusTotalsQuery,
     useUpdateTaskMutation,
 } from '@/hooks/use-app-data';
 import { describeApiError } from '@/lib/api';
+import { formatFocusDuration } from '@/lib/focus-duration';
 import { dueState, formatDue, quickDueOptions, type DueState } from '@/lib/task-dates';
 import type { TaskPriority } from '@/lib/task-parser';
 import { cn } from '@/lib/utils';
-import type { Task } from '@/models/app';
+import type { Task, TaskFocusTotal } from '@/models/app';
 import { useAppStore } from '@/store/app-store';
 import { AnimatePresence, motion } from 'framer-motion';
-import { CalendarDays, Check, Flag, Target, Trash2, X } from 'lucide-react';
-import { useState } from 'react';
+import { CalendarDays, Check, Flag, Target, Timer, Trash2, X } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { DUE_TEXT } from './due-meta';
 import { PRIORITY_META, PRIORITY_OPTIONS } from './priority-meta';
@@ -72,7 +74,12 @@ function plural(count: number, noun: string) {
     return count === 1 ? noun : `${noun}s`;
 }
 
-function TaskRow({ task }: { task: Task }) {
+/** The row has space for the duration alone; the block count rides along in the full label. */
+function focusLabelOf(total: TaskFocusTotal) {
+    return `${formatFocusDuration(total.totalSeconds)} focused across ${total.sessionCount} ${plural(total.sessionCount, 'block')}`;
+}
+
+function TaskRow({ task, focusTotal }: { task: Task; focusTotal?: TaskFocusTotal }) {
     const updateTask = useUpdateTaskMutation();
     const deleteTask = useDeleteTaskMutation();
     const setFocusTask = useAppStore((state) => state.setFocusTask);
@@ -173,27 +180,41 @@ function TaskRow({ task }: { task: Task }) {
                         className="focus-visible:outline-ember text-ink block w-full rounded bg-white/5 px-1 py-0.5 text-sm outline-none focus-visible:outline-2"
                     />
                 )}
-                {task.dueAt && (
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <button
-                                type="button"
-                                className={cn(
-                                    'mt-0.5 flex items-center gap-1 text-[11px] transition hover:underline',
-                                    task.isCompleted
-                                        ? 'text-ink-dim'
-                                        : DUE_TEXT[dueState(task.dueAt, task.dueHasTime)],
-                                )}
-                                aria-label={`Due ${formatDue(task.dueAt, task.dueHasTime)} — change due date`}
+                {(task.dueAt || focusTotal) && (
+                    <span className="mt-0.5 flex items-center gap-2">
+                        {task.dueAt && (
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <button
+                                        type="button"
+                                        className={cn(
+                                            'flex items-center gap-1 text-[11px] transition hover:underline',
+                                            task.isCompleted
+                                                ? 'text-ink-dim'
+                                                : DUE_TEXT[dueState(task.dueAt, task.dueHasTime)],
+                                        )}
+                                        aria-label={`Due ${formatDue(task.dueAt, task.dueHasTime)} — change due date`}
+                                    >
+                                        <CalendarDays className="h-3 w-3" aria-hidden />
+                                        {formatDue(task.dueAt, task.dueHasTime)}
+                                    </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="start" className="bg-black/90 backdrop-blur-md">
+                                    {dueMenuItems}
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                        )}
+                        {focusTotal && (
+                            <span
+                                className="text-ink-dim flex items-center gap-1 text-[11px]"
+                                title={focusLabelOf(focusTotal)}
                             >
-                                <CalendarDays className="h-3 w-3" aria-hidden />
-                                {formatDue(task.dueAt, task.dueHasTime)}
-                            </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start" className="bg-black/90 backdrop-blur-md">
-                            {dueMenuItems}
-                        </DropdownMenuContent>
-                    </DropdownMenu>
+                                <Timer className="h-3 w-3" aria-hidden />
+                                <span aria-hidden>{formatFocusDuration(focusTotal.totalSeconds)}</span>
+                                <span className="sr-only">{focusLabelOf(focusTotal)}</span>
+                            </span>
+                        )}
+                    </span>
                 )}
             </span>
 
@@ -327,6 +348,12 @@ export function TasksPanel({ panel }: { panel: ResizablePanel }) {
     const { enabled: resizable, size, resizing, onResizeStart } = panel;
     const groups = groupTasks(tasks);
 
+    const focusTotalsQuery = useTaskFocusTotalsQuery();
+    const focusTotals = useMemo(
+        () => new Map((focusTotalsQuery.data ?? []).map((total) => [total.taskId, total])),
+        [focusTotalsQuery.data],
+    );
+
     return (
         <motion.aside
             key="tasks-panel"
@@ -398,7 +425,9 @@ export function TasksPanel({ panel }: { panel: ResizablePanel }) {
                                       </motion.li>,
                                   ]
                                 : []),
-                            ...group.tasks.map((task) => <TaskRow key={task.id} task={task} />),
+                            ...group.tasks.map((task) => (
+                                <TaskRow key={task.id} task={task} focusTotal={focusTotals.get(task.id)} />
+                            )),
                         ])}
                     </AnimatePresence>
                 </ul>

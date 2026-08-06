@@ -11,6 +11,7 @@ import {
     PomodoroSettings,
     SavedPreset,
     Task,
+    TaskFocusTotal,
     Track,
     UserPreferences,
 } from '@/models/app';
@@ -783,6 +784,25 @@ export const appRepository = {
             .limit(SESSION_HISTORY_LIMIT);
 
         return recentSessions.map(mapSession);
+    },
+
+    /**
+     * Focus time banked against each task, for the task list. Inner-joined to `tasks` rather
+     * than grouped on `focusSessions.taskId` alone: sessions deliberately outlive the task
+     * they named, and totals for tasks the user has since deleted are payload no caller can
+     * render — that residue would otherwise grow with every task ever deleted.
+     */
+    async listTaskFocusTotals(database: Database, userId: string): Promise<TaskFocusTotal[]> {
+        return database
+            .select({
+                taskId: tasks.id,
+                totalSeconds: sql<number>`coalesce(sum(${focusSessions.elapsedSeconds}), 0)::int`,
+                sessionCount: sql<number>`count(*)::int`,
+            })
+            .from(focusSessions)
+            .innerJoin(tasks, eq(tasks.id, focusSessions.taskId))
+            .where(and(completedSessionsOf(userId), eq(tasks.userId, userId)))
+            .groupBy(tasks.id);
     },
 
     async getSessionSummary(database: Database, userId: string, timeZone: string) {

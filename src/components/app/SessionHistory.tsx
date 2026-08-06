@@ -1,18 +1,9 @@
 'use client';
 
 import { useSessionHistoryQuery } from '@/hooks/use-app-data';
+import { formatFocusDuration } from '@/lib/focus-duration';
 import type { FocusSession } from '@/models/app';
 import { useAppStore } from '@/store/app-store';
-
-/** Past an hour of focus, "1h 20m" reads faster than "80m". */
-function formatDuration(seconds: number): string {
-    const minutes = Math.max(1, Math.round(seconds / 60));
-    if (minutes < 60) return `${minutes}m`;
-
-    const hours = Math.floor(minutes / 60);
-    const remainder = minutes % 60;
-    return remainder === 0 ? `${hours}h` : `${hours}h ${remainder}m`;
-}
 
 function startOfLocalDay(date: Date): number {
     return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
@@ -82,7 +73,7 @@ export function SessionHistory({ enabled }: { enabled: boolean }) {
                 <section key={day.dayStart}>
                     <header className="flex items-baseline justify-between border-b border-white/8 pb-1.5">
                         <h4 className="text-ink-dim text-[10px] font-medium tracking-wide uppercase">{day.label}</h4>
-                        <span className="text-ink-mid text-xs tabular-nums">{formatDuration(day.totalSeconds)}</span>
+                        <span className="text-ink-mid text-xs tabular-nums">{formatFocusDuration(day.totalSeconds)}</span>
                     </header>
 
                     <ul>
@@ -108,7 +99,7 @@ export function SessionHistory({ enabled }: { enabled: boolean }) {
                                         </>
                                     )}
                                     <span className="text-ink shrink-0 text-xs tabular-nums">
-                                        {formatDuration(session.elapsedSeconds)}
+                                        {formatFocusDuration(session.elapsedSeconds)}
                                     </span>
                                 </li>
                             );

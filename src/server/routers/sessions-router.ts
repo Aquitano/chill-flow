@@ -23,6 +23,12 @@ export const sessionsRouter = j.router({
         return c.superjson(await appRepository.listRecentSessions(ctx.db, ctx.userId));
     }),
 
+    // Per-task focus time for the task list. Grouped in the database over the user's whole
+    // history rather than summed from `history`, which only reaches back a fixed window.
+    taskTotals: protectedDataProcedure.query(async ({ c, ctx }) => {
+        return c.superjson(await appRepository.listTaskFocusTotals(ctx.db, ctx.userId));
+    }),
+
     start: protectedMutationProcedure
         .use(createRateLimitMiddleware({ key: 'sessions:start', limit: 15, windowMs: 60_000 }))
         .input(startSessionInputSchema)
