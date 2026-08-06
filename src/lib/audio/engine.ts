@@ -11,14 +11,60 @@ type AudioEventMap = {
 };
 
 /**
+ * How long one track takes to hand over to the next when a track is swapped mid-playback.
+ *
+ * This covers a swap over live audio — a skip, or picking something else from the library.
+ * A track that runs out on its own has already stopped by the time the next one is handed
+ * over, and fading there would mean holding the queue's next URL before the current track
+ * ends, which the engine is never told.
+ */
+const CROSSFADE_MS = 1500;
+
+const FADE_CURVE_POINTS = 64;
+
+/**
+ * Equal-power fade curves. Two linear ramps would sag audibly at the midpoint: uncorrelated
+ * tracks sum in power rather than amplitude, so both sitting at half gain is quieter than
+ * either at full. The sin/cos pair keeps the sum constant right across the handover.
+ */
+export function equalPowerCurves(points: number): { fadeIn: Float32Array; fadeOut: Float32Array } {
+    const fadeIn = new Float32Array(points);
+    const fadeOut = new Float32Array(points);
+
+    for (let index = 0; index < points; index += 1) {
+        const position = (index / (points - 1)) * (Math.PI / 2);
+        fadeIn[index] = Math.sin(position);
+        fadeOut[index] = Math.cos(position);
+    }
+
+    return { fadeIn, fadeOut };
+}
+
+const { fadeIn: FADE_IN_CURVE, fadeOut: FADE_OUT_CURVE } = equalPowerCurves(FADE_CURVE_POINTS);
+
+/**
+ * One playback lane. Two of them alternate so an outgoing track can still be heard while the
+ * incoming one is already playing — a single element can only hold one source at a time, and
+ * `createMediaElementSource` may only ever be called once per element, so the lanes are
+ * built up front and reused rather than created per track.
+ */
+interface Deck {
+    element: HTMLAudioElement;
+    sourceNode: MediaElementAudioSourceNode | null;
+    gainNode: GainNode | null;
+}
+
+/**
  * Simple client-side audio engine for streaming one main track and controlling master volume.
  * Uses HTMLAudioElement for streaming and pipes it through Web Audio for gain control.
  */
 class AudioEngineImpl {
     private audioContext: AudioContext | null = null;
     private masterGainNode: GainNode | null = null;
-    private mediaElement: HTMLAudioElement | null = null;
-    private mediaSourceNode: MediaElementAudioSourceNode | null = null;
+    private decks: Deck[] = [];
+    private activeDeckIndex = 0;
+    /** Parks the outgoing deck once its fade has finished; null when no fade is running. */
+    private fadeOutTimer: ReturnType<typeof setTimeout> | null = null;
 
     private eventTarget = new EventTarget();
     private isPlaying = false;
@@ -28,6 +74,14 @@ class AudioEngineImpl {
     private loadToken = 0;
 
     private debugLogger = getAudioDebugLogger();
+
+    private get activeDeck(): Deck | null {
+        return this.decks[this.activeDeckIndex] ?? null;
+    }
+
+    private get mediaElement(): HTMLAudioElement | null {
+        return this.activeDeck?.element ?? null;
+    }
 
     private ensureContext(): void {
         if (this.audioContext) {
@@ -81,6 +135,8 @@ class AudioEngineImpl {
                 muted: this.muted,
             });
 
+            this.ensureDecks();
+
         } catch (err) {
             this.debugLogger.error('AudioContext', 'Failed to initialize context', err);
             throw err;
@@ -98,9 +154,13 @@ class AudioEngineImpl {
         return v * v;
     }
 
-    private ensureMediaElement(): HTMLAudioElement {
-        if (this.mediaElement) return this.mediaElement;
+    private ensureDecks(): void {
+        if (this.decks.length > 0) return;
+        this.decks = [this.createDeck(), this.createDeck()];
+        this.debugLogger.info('AudioGraph', 'Created playback decks', { count: this.decks.length });
+    }
 
+    private createDeck(): Deck {
         const el = new Audio();
         el.crossOrigin = 'anonymous';
         el.preload = 'auto';
@@ -108,40 +168,55 @@ class AudioEngineImpl {
         // @ts-expect-error playsInline may be missing in lib dom types
         el.playsInline = true;
 
-        el.addEventListener('timeupdate', () => this.dispatchTime());
+        const deck: Deck = { element: el, sourceNode: null, gainNode: null };
+
+        if (this.audioContext && this.masterGainNode) {
+            deck.gainNode = this.audioContext.createGain();
+            // Silent until it takes over; the deck that is live opens itself to 1 below.
+            deck.gainNode.gain.value = 0;
+            deck.gainNode.connect(this.masterGainNode);
+            deck.sourceNode = this.audioContext.createMediaElementSource(el);
+            deck.sourceNode.connect(deck.gainNode);
+        }
+
+        // Only the deck currently on air speaks for the engine. The other one is mid-fade or
+        // parked, and its timeupdate/pause/ended events are not the playback the user sees.
+        const isOnAir = () => this.activeDeck === deck;
+
+        el.addEventListener('timeupdate', () => {
+            if (isOnAir()) this.dispatchTime();
+        });
         el.addEventListener('ended', () => {
+            if (!isOnAir()) return;
             this.isPlaying = false;
             this.dispatch('statechange', { isPlaying: this.isPlaying });
             this.dispatch('ended', {});
         });
         el.addEventListener('play', () => {
+            if (!isOnAir()) return;
             this.isPlaying = true;
             this.dispatch('statechange', { isPlaying: this.isPlaying });
         });
         el.addEventListener('pause', () => {
+            if (!isOnAir()) return;
             this.isPlaying = false;
             this.dispatch('statechange', { isPlaying: this.isPlaying });
         });
         el.addEventListener('error', () => {
+            if (!isOnAir()) return;
             const err = el.error ?? null;
             this.dispatch('error', { message: this.mediaErrorMessage(err as MediaError | null) });
         });
-        el.addEventListener('loadedmetadata', () => this.dispatchTime());
+        el.addEventListener('loadedmetadata', () => {
+            if (isOnAir()) this.dispatchTime();
+        });
 
-        this.mediaElement = el;
-        return el;
+        return deck;
     }
 
-    private connectGraphIfNeeded(): void {
-        if (!this.audioContext || !this.masterGainNode || !this.mediaElement) return;
-        if (this.mediaSourceNode) return;
-        this.mediaSourceNode = this.audioContext.createMediaElementSource(this.mediaElement);
-        this.mediaSourceNode.connect(this.masterGainNode);
-    }
-
-    private waitUntilReady(loadToken: number): Promise<void> {
+    private waitUntilReady(deck: Deck, loadToken: number): Promise<void> {
         return new Promise((resolve, reject) => {
-            if (!this.mediaElement) return reject(new Error('Media element not initialized'));
+            const el = deck.element;
             const onCanPlay = () => {
                 if (loadToken !== this.loadToken) return;
                 cleanup();
@@ -149,7 +224,6 @@ class AudioEngineImpl {
             };
             const onLoadedData = () => {
                 if (loadToken !== this.loadToken) return;
-                const el = this.mediaElement!;
                 if (el.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
                     cleanup();
                     resolve();
@@ -157,21 +231,82 @@ class AudioEngineImpl {
             };
             const onErr = () => {
                 if (loadToken !== this.loadToken) return;
-                const err = this.mediaElement?.error ?? null;
+                const err = el.error ?? null;
                 cleanup();
                 reject(new Error(this.mediaErrorMessage(err as MediaError | null)));
             };
             const cleanup = () => {
-                this.mediaElement?.removeEventListener('canplay', onCanPlay);
-                this.mediaElement?.removeEventListener('loadeddata', onLoadedData);
-                this.mediaElement?.removeEventListener('error', onErr);
+                el.removeEventListener('canplay', onCanPlay);
+                el.removeEventListener('loadeddata', onLoadedData);
+                el.removeEventListener('error', onErr);
             };
-            this.mediaElement.addEventListener('canplay', onCanPlay);
-            this.mediaElement.addEventListener('loadeddata', onLoadedData);
-            this.mediaElement.addEventListener('error', onErr);
+            el.addEventListener('canplay', onCanPlay);
+            el.addEventListener('loadeddata', onLoadedData);
+            el.addEventListener('error', onErr);
             // In case already buffered
             setTimeout(onLoadedData, 0);
         });
+    }
+
+    /**
+     * Cuts any handover still in flight short and silences every lane but the one on air.
+     * Anything that stops or redirects playback has to go through here first, or the fade's
+     * own timer will later park a deck that has since been given a new track.
+     */
+    private endCrossfade(): void {
+        if (this.fadeOutTimer) {
+            clearTimeout(this.fadeOutTimer);
+            this.fadeOutTimer = null;
+        }
+
+        for (const deck of this.decks) {
+            if (deck !== this.activeDeck) this.parkDeck(deck);
+        }
+    }
+
+    /** Silences a deck and rewinds it, so the lane is clean before it is reused. */
+    private parkDeck(deck: Deck): void {
+        deck.element.pause();
+        deck.element.currentTime = 0;
+        if (deck.gainNode) {
+            deck.gainNode.gain.cancelScheduledValues(this.audioContext?.currentTime ?? 0);
+            deck.gainNode.gain.value = 0;
+        }
+    }
+
+    private scheduleFade(deck: Deck, curve: Float32Array, startTime: number, seconds: number): void {
+        const param = deck.gainNode?.gain;
+        if (!param) return;
+
+        param.cancelScheduledValues(startTime);
+
+        if (typeof param.setValueCurveAtTime === 'function') {
+            param.setValueCurveAtTime(curve, startTime, seconds);
+        } else {
+            param.value = curve[curve.length - 1] ?? 0;
+        }
+    }
+
+    /**
+     * Hands playback from the deck on air to the one holding the incoming track. The swap
+     * lands before the fade is scheduled so the new track owns the engine's events for its
+     * whole entrance — the outgoing deck is still audible, but it is no longer the playback
+     * the UI reports on.
+     */
+    private crossfade(incoming: Deck, outgoing: Deck): void {
+        this.activeDeckIndex = this.decks.indexOf(incoming);
+
+        const seconds = CROSSFADE_MS / 1000;
+        const startTime = this.audioContext?.currentTime ?? 0;
+        this.scheduleFade(incoming, FADE_IN_CURVE, startTime, seconds);
+        this.scheduleFade(outgoing, FADE_OUT_CURVE, startTime, seconds);
+
+        this.fadeOutTimer = setTimeout(() => {
+            this.fadeOutTimer = null;
+            this.parkDeck(outgoing);
+        }, CROSSFADE_MS);
+
+        this.debugLogger.info('TrackLoader', 'Crossfading to the incoming track', { ms: CROSSFADE_MS });
     }
 
     /**
@@ -236,21 +371,36 @@ class AudioEngineImpl {
 
         const endTimer = this.debugLogger.time('TrackLoader', 'Track loading');
         this.ensureContext();
+        this.ensureDecks();
         const myToken = ++this.loadToken;
 
         this.debugLogger.debug('TrackLoader', 'Load token assigned', { token: myToken });
 
         try {
-            if (!this.mediaElement) this.ensureMediaElement();
+            const outgoing = this.activeDeck;
+            if (!outgoing) throw new Error('Media element not initialized');
 
-            this.debugLogger.debug('MediaElement', 'Setting source and loading', { url });
-            const el = this.mediaElement!;
-            el.src = url;
-            el.load();
+            // Only worth a fade when something is actually playing — there is no seam to
+            // cover on the first load, or while the player sits paused.
+            const shouldCrossfade = this.isPlaying && Boolean(outgoing.element.src);
+            const incoming = shouldCrossfade ? this.idleDeck(outgoing) : outgoing;
 
-            this.connectGraphIfNeeded();
+            // A fade still running owns the lane we are about to reuse, so retire it first.
+            this.endCrossfade();
 
-            await this.waitUntilReady(myToken);
+            this.debugLogger.debug('MediaElement', 'Setting source and loading', { url, crossfade: shouldCrossfade });
+            incoming.element.src = url;
+            incoming.element.load();
+
+            await this.waitUntilReady(incoming, myToken);
+
+            if (shouldCrossfade) {
+                await incoming.element.play();
+                this.crossfade(incoming, outgoing);
+            } else if (incoming.gainNode) {
+                // Nothing to blend with, so the lane simply opens.
+                incoming.gainNode.gain.value = 1;
+            }
 
             this.debugLogger.debug('TrackLoader', 'Track loaded successfully');
             this.debugLogger.logMediaElementState(this.mediaElement);
@@ -263,6 +413,10 @@ class AudioEngineImpl {
         }
     }
 
+    private idleDeck(active: Deck): Deck {
+        return this.decks.find((deck) => deck !== active) ?? active;
+    }
+
     async play(): Promise<void> {
         this.debugLogger.debug('Playback', 'Play requested');
         const endTimer = this.debugLogger.time('Playback', 'Play operation');
@@ -270,7 +424,9 @@ class AudioEngineImpl {
         try {
             this.ensureContext();
 
-            if (!this.mediaElement) {
+            // The decks exist from the moment the context does, so a loaded source — not a
+            // live element — is what says there is anything to play.
+            if (!this.mediaElement || !this.hasMainTrack()) {
                 this.debugLogger.error('Playback', 'No main track loaded');
                 throw new Error('No main track loaded');
             }
@@ -319,20 +475,31 @@ class AudioEngineImpl {
             this.debugLogger.warn('Playback', 'Cannot pause - no media element');
             return;
         }
+        // Otherwise the outgoing track of a fade in flight keeps playing under a paused
+        // player until its timer catches up.
+        this.endCrossfade();
         this.mediaElement.pause();
         this.debugLogger.debug('Playback', 'Pause completed');
     }
 
     stop(): void {
         this.debugLogger.debug('Playback', 'Stop requested');
-        if (!this.mediaElement) {
+        const active = this.activeDeck;
+        if (!active) {
             this.debugLogger.warn('Playback', 'Cannot stop - no media element');
             return;
         }
-        this.mediaElement.pause();
-        this.mediaElement.currentTime = 0;
+
+        this.endCrossfade();
+        active.element.pause();
+        active.element.currentTime = 0;
+        if (active.gainNode) {
+            active.gainNode.gain.cancelScheduledValues(this.audioContext?.currentTime ?? 0);
+            active.gainNode.gain.value = 1;
+        }
+
         this.debugLogger.debug('Playback', 'Stop completed', {
-            currentTime: this.mediaElement.currentTime,
+            currentTime: active.element.currentTime,
         });
     }
 
@@ -388,8 +555,10 @@ class AudioEngineImpl {
      */
     setLoop(value: boolean): void {
         this.loopEnabled = value;
-        if (this.mediaElement) {
-            this.mediaElement.loop = value;
+        // Both lanes, so the setting survives the next handover rather than reverting to
+        // whatever the incoming deck was built with.
+        for (const deck of this.decks) {
+            deck.element.loop = value;
         }
         this.debugLogger.debug('Playback', 'Loop set', { loop: value });
     }
@@ -536,11 +705,13 @@ class AudioEngineImpl {
     destroy(): void {
         this.debugLogger.info('Engine', 'Destroying audio engine');
 
-        if (this.mediaElement) {
+        this.endCrossfade();
+
+        for (const deck of this.decks) {
             this.debugLogger.debug('Engine', 'Cleaning up media element');
-            this.mediaElement.pause();
-            this.mediaElement.src = '';
-            this.mediaElement.load();
+            deck.element.pause();
+            deck.element.src = '';
+            deck.element.load();
         }
 
         if (this.audioContext && this.audioContext.state !== 'closed') {
@@ -559,7 +730,9 @@ class AudioEngineImpl {
             audioContextState: this.audioContext?.state,
             hasMediaElement: !!this.mediaElement,
             hasGainNode: !!this.masterGainNode,
-            hasSourceNode: !!this.mediaSourceNode,
+            hasSourceNode: this.decks.every((deck) => !!deck.sourceNode),
+            activeDeckIndex: this.activeDeckIndex,
+            isCrossfading: this.fadeOutTimer !== null,
             isPlaying: this.isPlaying,
             volumeNormalized: this.volumeNormalized,
             muted: this.muted,

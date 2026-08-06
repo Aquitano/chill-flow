@@ -1,5 +1,15 @@
-import { describe, expect, it } from 'vitest';
-import { getAudioEngine } from '../engine';
+import { describe, expect, it, vi } from 'vitest';
+import { equalPowerCurves, getAudioEngine } from '../engine';
+
+/**
+ * The fake media element resolves its readiness through a zero-delay timer, so a load only
+ * settles once the clock is advanced.
+ */
+async function loadTrack(engine: ReturnType<typeof getAudioEngine>, url: string): Promise<void> {
+    const loading = engine.loadMainTrack(url);
+    await vi.advanceTimersByTimeAsync(1);
+    return loading;
+}
 
 describe('AudioEngine', () => {
     it('initializes and exposes engine methods', async () => {
@@ -53,6 +63,69 @@ describe('AudioEngine', () => {
         expect(volEvents[volEvents.length - 1]!.muted).toBe(false);
     });
 
+    it('hands over to the incoming track instead of cutting to it', async () => {
+        vi.useFakeTimers();
+        try {
+            const engine = getAudioEngine();
+            await engine.init();
+            await loadTrack(engine, 'https://example.com/first.webm');
+            await engine.play();
+
+            const beforeSwap = engine.getDebugState();
+            await loadTrack(engine, 'https://example.com/second.webm');
+            const duringFade = engine.getDebugState();
+
+            // The incoming track takes the other lane and owns playback immediately, while
+            // the outgoing one is still audible underneath it.
+            expect(duringFade.activeDeckIndex).not.toBe(beforeSwap.activeDeckIndex);
+            expect(duringFade.isCrossfading).toBe(true);
+            expect(engine.hasMainTrack()).toBe(true);
+
+            await vi.advanceTimersByTimeAsync(2000);
+            expect(engine.getDebugState().isCrossfading).toBe(false);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('cuts a fade short on pause, so the outgoing track stops with the player', async () => {
+        vi.useFakeTimers();
+        try {
+            const engine = getAudioEngine();
+            await engine.init();
+            await loadTrack(engine, 'https://example.com/first.webm');
+            await engine.play();
+            await loadTrack(engine, 'https://example.com/second.webm');
+            expect(engine.getDebugState().isCrossfading).toBe(true);
+
+            engine.pause();
+            expect(engine.getDebugState().isCrossfading).toBe(false);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('swaps without a fade when nothing is playing', async () => {
+        vi.useFakeTimers();
+        try {
+            const engine = getAudioEngine();
+            await engine.init();
+            await loadTrack(engine, 'https://example.com/first.webm');
+            await engine.play();
+            engine.pause();
+
+            const beforeSwap = engine.getDebugState();
+            await loadTrack(engine, 'https://example.com/second.webm');
+            const afterSwap = engine.getDebugState();
+
+            // No seam to cover while paused, so the track loads into the lane already on air.
+            expect(afterSwap.activeDeckIndex).toBe(beforeSwap.activeDeckIndex);
+            expect(afterSwap.isCrossfading).toBe(false);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it('time event includes currentTime, duration, bufferedPercent', async () => {
         const engine = getAudioEngine();
         await engine.init();
@@ -65,5 +138,22 @@ describe('AudioEngine', () => {
         expect(times[0]!.duration).toBeGreaterThan(0);
         expect(times[0]!.bufferedPercent).toBeGreaterThanOrEqual(0);
         expect(times[0]!.bufferedPercent).toBeLessThanOrEqual(1);
+    });
+});
+
+describe('equalPowerCurves', () => {
+    it('runs a full swap from one track to the other', () => {
+        const { fadeIn, fadeOut } = equalPowerCurves(64);
+        expect(fadeIn[0]).toBeCloseTo(0, 6);
+        expect(fadeIn[fadeIn.length - 1]).toBeCloseTo(1, 6);
+        expect(fadeOut[0]).toBeCloseTo(1, 6);
+        expect(fadeOut[fadeOut.length - 1]).toBeCloseTo(0, 6);
+    });
+
+    it('holds constant power throughout, which is what stops the midpoint sagging', () => {
+        const { fadeIn, fadeOut } = equalPowerCurves(64);
+        for (let index = 0; index < fadeIn.length; index += 1) {
+            expect(fadeIn[index]! ** 2 + fadeOut[index]! ** 2).toBeCloseTo(1, 6);
+        }
     });
 });

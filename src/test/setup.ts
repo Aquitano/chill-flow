@@ -1,7 +1,13 @@
 import { beforeEach, vi } from 'vitest';
 
 class FakeGainNode {
-    gain = { value: 1, cancelScheduledValues: vi.fn(), setTargetAtTime: vi.fn(), linearRampToValueAtTime: vi.fn() };
+    gain = {
+        value: 1,
+        cancelScheduledValues: vi.fn(),
+        setTargetAtTime: vi.fn(),
+        linearRampToValueAtTime: vi.fn(),
+        setValueCurveAtTime: vi.fn(),
+    };
     connect = vi.fn();
 }
 
