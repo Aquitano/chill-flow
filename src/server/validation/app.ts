@@ -1,5 +1,6 @@
 import { backgroundCatalog } from '@/lib/backgrounds';
 import { MAX_LIKED_TRACKS } from '@/lib/likes';
+import { FALLBACK_TIME_ZONE, isSupportedTimeZone } from '@/server/streak';
 import { z } from 'zod';
 
 const backgroundIds = new Set(backgroundCatalog.map((background) => background.id));
@@ -154,6 +155,24 @@ export const recoverSessionInputSchema = z.object({
     /** When the device last wrote that snapshot — the moment it stopped being able to focus. */
     savedAtMs: z.number().int().positive(),
 });
+
+/**
+ * The zone the streak is counted in. Sent by the workspace from the browser's own setting;
+ * an unknown or missing zone falls back to UTC rather than failing the summary, since the
+ * three other totals it carries don't depend on the zone at all.
+ */
+export const sessionSummaryInputSchema = z
+    .object({
+        timeZone: z
+            .string()
+            .max(64)
+            .catch(FALLBACK_TIME_ZONE)
+            .transform((value) => (isSupportedTimeZone(value) ? value : FALLBACK_TIME_ZONE))
+            .default(FALLBACK_TIME_ZONE),
+    })
+    // A caller that sends no payload at all reads as an empty one. prefault rather than
+    // default so the empty object still runs the rules above; default would return it as-is.
+    .prefault({});
 
 export const trackLookupInputSchema = z.object({
     id: trackIdSchema,

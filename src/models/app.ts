@@ -97,6 +97,13 @@ export interface UserPreferences {
     likedTrackIds: string[];
 }
 
+/** Completed focus time banked against one task, across every block that named it. */
+export interface TaskFocusTotal {
+    taskId: string;
+    totalSeconds: number;
+    sessionCount: number;
+}
+
 export interface FocusSession {
     id: string;
     mode: string;

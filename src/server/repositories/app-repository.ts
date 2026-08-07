@@ -11,11 +11,14 @@ import {
     PomodoroSettings,
     SavedPreset,
     Task,
+    TaskFocusTotal,
     Track,
     UserPreferences,
 } from '@/models/app';
 import { and, asc, desc, eq, isNotNull, isNull, ne, sql } from 'drizzle-orm';
+import { EXPORT_SCHEMA_VERSION, type UserDataExport } from '../account-export';
 import { Database } from '../db/client';
+import { calculateCurrentStreak, dayKeyInZone } from '../streak';
 import {
     DEFAULT_POMODORO_SETTINGS,
     ambientMixes,
@@ -132,6 +135,11 @@ function clone<T>(value: T): T {
     return structuredClone(value) as T;
 }
 
+/** Unlike asIsoString, keeps a missing timestamp missing — the export must not invent one. */
+function toIsoOrNull(value: Date | null) {
+    return value ? value.toISOString() : null;
+}
+
 function asIsoString(value: Date | string | null | undefined) {
     if (!value) {
         return new Date().toISOString();
@@ -231,8 +239,14 @@ async function ensureUserPreferences(database: Database, userId: string) {
     return storedPreferences;
 }
 
-/** Timestamps are stored in UTC, so the day a session lands on is a plain format. */
-const COMPLETED_DAY = sql<string>`to_char(${focusSessions.completedAt}, 'YYYY-MM-DD')`;
+/**
+ * The calendar day a session lands on *for the user*. `completedAt` is a `timestamp`
+ * without a zone holding UTC, so it has to be pinned to UTC before it can be converted —
+ * a bare `AT TIME ZONE` would read it as local server time instead.
+ */
+function completedDayInZone(timeZone: string) {
+    return sql<string>`to_char((${focusSessions.completedAt} AT TIME ZONE 'UTC') AT TIME ZONE ${timeZone}, 'YYYY-MM-DD')`;
+}
 
 /** Bound on the day list behind the streak; longer than any streak worth reporting. */
 const STREAK_WINDOW_DAYS = 366;
@@ -246,29 +260,6 @@ function completedSessionsOf(userId: string) {
         eq(focusSessions.status, 'completed'),
         isNotNull(focusSessions.completedAt),
     );
-}
-
-function calculateCurrentStreak(sessionDates: string[]) {
-    if (sessionDates.length === 0) {
-        return 0;
-    }
-
-    const sortedDays = Array.from(new Set(sessionDates)).sort((left, right) => right.localeCompare(left));
-    let streak = 1;
-    let cursor = new Date(`${sortedDays[0]}T00:00:00.000Z`);
-
-    for (let index = 1; index < sortedDays.length; index += 1) {
-        const nextDate = new Date(`${sortedDays[index]}T00:00:00.000Z`);
-        cursor.setUTCDate(cursor.getUTCDate() - 1);
-
-        if (nextDate.getTime() !== cursor.getTime()) {
-            break;
-        }
-
-        streak += 1;
-    }
-
-    return streak;
 }
 
 function taskDueTimePatch(
@@ -786,6 +777,76 @@ export const appRepository = {
     },
 
     /**
+     * Everything keyed to a user, for the account data export.
+     *
+     * Reads exactly the five tables deleteUserData erases: what the product destroys on
+     * account deletion is what it has to be able to hand back. Deliberately unbounded —
+     * a partial export would be a worse answer than a slow one, and this runs at most a
+     * few times per account.
+     */
+    async exportUserData(database: Database, userId: string): Promise<UserDataExport> {
+        const [exportedTasks, exportedSessions, exportedMixes, exportedPresets, storedPreferences] = await Promise.all([
+            database.select().from(tasks).where(eq(tasks.userId, userId)).orderBy(asc(tasks.createdAt)),
+            database
+                .select({ session: focusSessions, taskText: tasks.text })
+                .from(focusSessions)
+                // Left, not inner: a session outlives the task it named, and losing those
+                // rows would quietly drop focus time the user actually spent.
+                .leftJoin(tasks, eq(tasks.id, focusSessions.taskId))
+                .where(eq(focusSessions.userId, userId))
+                .orderBy(asc(focusSessions.startedAt)),
+            database.select().from(ambientMixes).where(eq(ambientMixes.userId, userId)).orderBy(asc(ambientMixes.createdAt)),
+            database.select().from(savedPresets).where(eq(savedPresets.userId, userId)).orderBy(asc(savedPresets.createdAt)),
+            database.select().from(userPreferences).where(eq(userPreferences.userId, userId)).limit(1),
+        ]);
+
+        return {
+            exportedAt: new Date().toISOString(),
+            schemaVersion: EXPORT_SCHEMA_VERSION,
+            tasks: exportedTasks.map((row) => ({
+                id: row.id,
+                text: row.text,
+                priority: row.priority,
+                isCompleted: row.isCompleted,
+                dueAt: toIsoOrNull(row.dueAt),
+                dueHasTime: row.dueHasTime,
+                createdAt: row.createdAt.toISOString(),
+                updatedAt: row.updatedAt.toISOString(),
+            })),
+            focusSessions: exportedSessions.map(({ session, taskText }) => ({
+                id: session.id,
+                mode: session.mode,
+                timerKind: session.timerKind,
+                status: session.status,
+                plannedDurationSeconds: session.plannedDurationSeconds,
+                elapsedSeconds: session.elapsedSeconds,
+                trackId: session.trackId,
+                taskId: session.taskId,
+                taskText,
+                startedAt: session.startedAt.toISOString(),
+                completedAt: toIsoOrNull(session.completedAt),
+                canceledAt: toIsoOrNull(session.canceledAt),
+                cycleCompletedAt: toIsoOrNull(session.cycleCompletedAt),
+            })),
+            preferences: storedPreferences[0] ? mapPreferences(storedPreferences[0]) : null,
+            ambientMixes: exportedMixes.map((row) => ({
+                id: row.id,
+                name: row.name,
+                levels: row.levels,
+                createdAt: row.createdAt.toISOString(),
+            })),
+            savedPresets: exportedPresets.map((row) => ({
+                id: row.id,
+                name: row.name,
+                trackId: row.trackId,
+                backgroundId: row.backgroundId,
+                mode: row.mode,
+                createdAt: row.createdAt.toISOString(),
+            })),
+        };
+    },
+
+    /**
      * Recent blocks for the progress panel. Bounded on the server rather than by a client
      * parameter: this is a "what have I been doing lately" list, and no caller has a reason
      * to ask for a user's entire history.
@@ -801,7 +862,28 @@ export const appRepository = {
         return recentSessions.map(mapSession);
     },
 
-    async getSessionSummary(database: Database, userId: string) {
+    /**
+     * Focus time banked against each task, for the task list. Inner-joined to `tasks` rather
+     * than grouped on `focusSessions.taskId` alone: sessions deliberately outlive the task
+     * they named, and totals for tasks the user has since deleted are payload no caller can
+     * render — that residue would otherwise grow with every task ever deleted.
+     */
+    async listTaskFocusTotals(database: Database, userId: string): Promise<TaskFocusTotal[]> {
+        return database
+            .select({
+                taskId: tasks.id,
+                totalSeconds: sql<number>`coalesce(sum(${focusSessions.elapsedSeconds}), 0)::int`,
+                sessionCount: sql<number>`count(*)::int`,
+            })
+            .from(focusSessions)
+            .innerJoin(tasks, eq(tasks.id, focusSessions.taskId))
+            .where(and(completedSessionsOf(userId), eq(tasks.userId, userId)))
+            .groupBy(tasks.id);
+    },
+
+    async getSessionSummary(database: Database, userId: string, timeZone: string) {
+        const completedDay = completedDayInZone(timeZone);
+
         // Four numbers, so let the database produce four numbers. Pulling every completed
         // row back to count it in JS grew with the user's whole history, which is exactly
         // the payload that gets heaviest for the people who use the product most.
@@ -817,11 +899,11 @@ export const appRepository = {
             // The streak only ever reads back from the newest day until a gap, so a window
             // this wide can never cut one short in practice.
             database
-                .select({ day: COMPLETED_DAY })
+                .select({ day: completedDay })
                 .from(focusSessions)
                 .where(completedSessionsOf(userId))
-                .groupBy(COMPLETED_DAY)
-                .orderBy(desc(COMPLETED_DAY))
+                .groupBy(completedDay)
+                .orderBy(desc(completedDay))
                 .limit(STREAK_WINDOW_DAYS),
         ]);
 
@@ -829,7 +911,10 @@ export const appRepository = {
             totalSessions: totals[0]?.totalSessions ?? 0,
             totalMinutes: Math.round((totals[0]?.totalSeconds ?? 0) / 60),
             completedCycles: totals[0]?.completedCycles ?? 0,
-            currentStreak: calculateCurrentStreak(activeDays.map((row) => row.day)),
+            currentStreak: calculateCurrentStreak(
+                activeDays.map((row) => row.day),
+                dayKeyInZone(new Date(), timeZone),
+            ),
         };
     },
 };

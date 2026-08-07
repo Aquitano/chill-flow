@@ -6,20 +6,27 @@ import {
     completeCycleInputSchema,
     completeSessionInputSchema,
     recoverSessionInputSchema,
+    sessionSummaryInputSchema,
     startSessionInputSchema,
 } from '../validation/app';
 
 export const sessionsRouter = j.router({
     // Summary only: the workspace renders totals, and the full history of every completed
     // session is an unbounded payload nothing reads.
-    list: protectedDataProcedure.query(async ({ c, ctx }) => {
-        return c.superjson({ summary: await appRepository.getSessionSummary(ctx.db, ctx.userId) });
+    list: protectedDataProcedure.input(sessionSummaryInputSchema).query(async ({ c, ctx, input }) => {
+        return c.superjson({ summary: await appRepository.getSessionSummary(ctx.db, ctx.userId, input.timeZone) });
     }),
 
     // Loaded on demand by the progress panel, so the workspace's first paint stays four
     // numbers rather than a list nothing is showing yet.
     history: protectedDataProcedure.query(async ({ c, ctx }) => {
         return c.superjson(await appRepository.listRecentSessions(ctx.db, ctx.userId));
+    }),
+
+    // Per-task focus time for the task list. Grouped in the database over the user's whole
+    // history rather than summed from `history`, which only reaches back a fixed window.
+    taskTotals: protectedDataProcedure.query(async ({ c, ctx }) => {
+        return c.superjson(await appRepository.listTaskFocusTotals(ctx.db, ctx.userId));
     }),
 
     start: protectedMutationProcedure

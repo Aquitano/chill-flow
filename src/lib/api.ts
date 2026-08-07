@@ -10,6 +10,7 @@ import {
     Quote,
     SavedPreset,
     Task,
+    TaskFocusTotal,
     Track,
     UserPreferences,
 } from '@/models/app';
@@ -77,20 +78,27 @@ export function describeApiError(error: unknown): string {
     return error instanceof Error && error.message ? error.message : 'Something went wrong. Please retry.';
 }
 
+/** Builds the ApiError for a rejected response, preferring the server's own message. */
+export async function apiErrorFrom(response: Response): Promise<ApiError> {
+    let message = `Request failed with status ${response.status}`;
+
+    try {
+        const body = (await response.clone().json()) as unknown;
+        if (body && typeof body === 'object' && 'message' in body && typeof body.message === 'string') {
+            message = body.message;
+        }
+    } catch {
+        // Non-JSON error body; fall back to the status-based message above.
+    }
+
+    return new ApiError(response.status, message);
+}
+
 async function unwrap<T>(request: Promise<Response>): Promise<T> {
     const response = await request;
 
     if (!response.ok) {
-        let message = `Request failed with status ${response.status}`;
-        try {
-            const body = (await response.clone().json()) as unknown;
-            if (body && typeof body === 'object' && 'message' in body && typeof body.message === 'string') {
-                message = body.message;
-            }
-        } catch {
-            // Non-JSON error body; fall back to the status-based message above.
-        }
-        throw new ApiError(response.status, message);
+        throw await apiErrorFrom(response);
     }
 
     return response.json() as Promise<T>;
@@ -166,8 +174,9 @@ export const api = {
         delete: (input: { id: string }) => unwrap<{ success: boolean }>(client.presets.delete.$post(input)),
     },
     sessions: {
-        list: () => unwrap<SessionPayload>(client.sessions.list.$get()),
+        list: (input: { timeZone: string }) => unwrap<SessionPayload>(client.sessions.list.$get(input)),
         history: () => unwrap<FocusSession[]>(client.sessions.history.$get()),
+        taskTotals: () => unwrap<TaskFocusTotal[]>(client.sessions.taskTotals.$get()),
         start: (input: {
             mode: string;
             timerKind: FocusSession['timerKind'];

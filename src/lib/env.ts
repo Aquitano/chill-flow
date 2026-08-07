@@ -90,27 +90,3 @@ export const appEnv = {
     isDatabaseConfigured: Boolean(rawEnv.DATABASE_URL),
     isSentryConfigured: Boolean(rawEnv.NEXT_PUBLIC_SENTRY_DSN),
 };
-
-export function getEnvWarnings() {
-    const warnings: string[] = [];
-
-    if (!appEnv.isClerkConfigured) {
-        warnings.push('Clerk keys are missing. Sign-in and the protected workspace are disabled until Clerk is configured.');
-    }
-
-    if (!appEnv.isDatabaseConfigured) {
-        warnings.push('DATABASE_URL is missing. Protected workspace APIs are disabled until the database is configured.');
-    }
-
-    if (appEnv.isClerkConfigured && !appEnv.isClerkWebhookConfigured) {
-        warnings.push(
-            'CLERK_WEBHOOK_SIGNING_SECRET is missing. Deleted accounts will leave their tasks, sessions, and preferences behind.',
-        );
-    }
-
-    if (!appEnv.isSentryConfigured) {
-        warnings.push('NEXT_PUBLIC_SENTRY_DSN is missing. Sentry is disabled.');
-    }
-
-    return warnings;
-}

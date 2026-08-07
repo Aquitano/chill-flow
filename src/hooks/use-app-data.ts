@@ -11,6 +11,7 @@ const queryKeys = {
     presets: ['presets'],
     sessions: ['sessions'],
     sessionHistory: ['sessions', 'history'],
+    taskFocusTotals: ['sessions', 'task-totals'],
     ambientSounds: ['ambient', 'sounds'],
     ambientMixes: ['ambient', 'mixes'],
 };
@@ -129,10 +130,15 @@ export function usePreferencesQuery() {
     });
 }
 
+/**
+ * Totals plus the day streak. The zone travels with the request because the streak is
+ * counted in the user's calendar days, and only the browser knows which those are. Resolved
+ * inside the query function so it reads the client's zone, never the server's during SSR.
+ */
 export function useSessionsQuery() {
     return useQuery({
         queryKey: queryKeys.sessions,
-        queryFn: api.sessions.list,
+        queryFn: () => api.sessions.list({ timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
     });
 }
 
@@ -145,6 +151,18 @@ export function useSessionHistoryQuery(enabled: boolean) {
         queryKey: queryKeys.sessionHistory,
         queryFn: api.sessions.history,
         enabled,
+    });
+}
+
+/**
+ * Focus time per task, for the task list. Keyed under `sessions` so finishing a block
+ * refreshes it along with the totals; its only consumer mounts with the tasks panel, which
+ * is gate enough without an `enabled` flag.
+ */
+export function useTaskFocusTotalsQuery() {
+    return useQuery({
+        queryKey: queryKeys.taskFocusTotals,
+        queryFn: api.sessions.taskTotals,
     });
 }
 
