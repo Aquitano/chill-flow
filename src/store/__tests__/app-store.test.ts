@@ -1,5 +1,7 @@
 import { sessionEventForTransition, type FocusSessionStatus } from '@/lib/focus-session';
 import { MAX_LIKED_TRACKS } from '@/lib/likes';
+import { LIKED_SCENE } from '@/lib/tracks';
+import type { Track } from '@/models/app';
 import {
     OPEN_ENDED_PRESET,
     defaultModes,
@@ -47,6 +49,55 @@ describe('toggleTrackLike', () => {
 
         expect(useAppStore.getState().toggleTrackLike('track-0')).toBe('unliked');
         expect(useAppStore.getState().likedTrackIds).toHaveLength(MAX_LIKED_TRACKS - 1);
+    });
+});
+
+describe('the liked-tracks queue', () => {
+    beforeEach(resetStore);
+
+    const track = (id: string, category: string): Track => ({
+        id,
+        title: id,
+        artist: 'Test',
+        audioUrl: `/audio/${id}.mp3`,
+        duration: 60,
+        tags: [],
+        category,
+    });
+    const library = [track('rain', 'nature'), track('focus', 'focus'), track('hum', 'ambient')];
+
+    it('plays only liked tracks while the liked filter is on', () => {
+        useAppStore.setState({
+            tracks: library,
+            likedTrackIds: ['rain', 'hum'],
+            activeScene: LIKED_SCENE,
+            currentTrack: library[0],
+        });
+
+        const queue = useAppStore.getState().getQueue();
+        expect(queue.map((entry) => entry.id)).toEqual(['rain', 'hum']);
+
+        useAppStore.getState().nextTrack();
+        expect(useAppStore.getState().currentTrack?.id).toBe('hum');
+        useAppStore.getState().nextTrack();
+        expect(useAppStore.getState().currentTrack?.id).toBe('rain');
+    });
+
+    it('drops the filter when the last like goes, so the queue is never empty', () => {
+        useAppStore.setState({ tracks: library, likedTrackIds: ['rain'], activeScene: LIKED_SCENE });
+
+        useAppStore.getState().toggleTrackLike('rain');
+
+        expect(useAppStore.getState().activeScene).toBeNull();
+        expect(useAppStore.getState().getQueue()).toHaveLength(library.length);
+    });
+
+    it('keeps the filter while other likes remain', () => {
+        useAppStore.setState({ tracks: library, likedTrackIds: ['rain', 'hum'], activeScene: LIKED_SCENE });
+
+        useAppStore.getState().toggleTrackLike('rain');
+
+        expect(useAppStore.getState().activeScene).toBe(LIKED_SCENE);
     });
 });
 

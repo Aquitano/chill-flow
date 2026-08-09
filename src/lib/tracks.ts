@@ -38,8 +38,18 @@ export function deriveScenes(tracks: Track[]): Scene[] {
         .sort((a, b) => a.label.localeCompare(b.label));
 }
 
-export function tracksInScene(tracks: Track[], scene: string | null): Track[] {
+/**
+ * Pseudo-scene for the tracks the user has liked. Real scene ids are track categories, and
+ * the leading '@' keeps this one out of that namespace.
+ */
+export const LIKED_SCENE = '@liked';
+
+export function tracksInScene(tracks: Track[], scene: string | null, likedTrackIds: string[] = []): Track[] {
     if (!scene) return tracks;
+    if (scene === LIKED_SCENE) {
+        const liked = new Set(likedTrackIds);
+        return tracks.filter((track) => liked.has(track.id));
+    }
     return tracks.filter((track) => track.category?.trim() === scene);
 }
 

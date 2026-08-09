@@ -1,5 +1,5 @@
 import { MAX_LIKED_TRACKS, type TrackLikeOutcome } from '@/lib/likes';
-import { tracksInScene } from '@/lib/tracks';
+import { LIKED_SCENE, tracksInScene } from '@/lib/tracks';
 import { Background, Quote, Task, Track } from '@/models/app';
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
@@ -424,10 +424,20 @@ export const useAppStore = create<AppState>()(
             ),
         setLikedTrackIds: (trackIds) => set({ likedTrackIds: trackIds }, false, 'setLikedTrackIds'),
         toggleTrackLike: (trackId) => {
-            const { likedTrackIds } = get();
+            const { likedTrackIds, activeScene } = get();
 
             if (likedTrackIds.includes(trackId)) {
-                set({ likedTrackIds: likedTrackIds.filter((id) => id !== trackId) }, false, 'unlikeTrack');
+                const remaining = likedTrackIds.filter((id) => id !== trackId);
+                set(
+                    {
+                        likedTrackIds: remaining,
+                        // Unliking the last one leaves the liked filter with nothing to play,
+                        // so hand next/previous the whole library back instead of an empty queue.
+                        activeScene: activeScene === LIKED_SCENE && remaining.length === 0 ? null : activeScene,
+                    },
+                    false,
+                    'unlikeTrack',
+                );
                 return 'unliked';
             }
 
@@ -443,7 +453,7 @@ export const useAppStore = create<AppState>()(
         nextTrack: () =>
             set(
                 (state) => {
-                    const queue = tracksInScene(state.tracks, state.activeScene);
+                    const queue = tracksInScene(state.tracks, state.activeScene, state.likedTrackIds);
                     if (queue.length === 0) return state;
                     const currentIndex = state.currentTrack
                         ? queue.findIndex((track) => track.id === state.currentTrack?.id)
@@ -467,7 +477,7 @@ export const useAppStore = create<AppState>()(
                         };
                     }
 
-                    const queue = tracksInScene(state.tracks, state.activeScene);
+                    const queue = tracksInScene(state.tracks, state.activeScene, state.likedTrackIds);
                     if (queue.length === 0) return state;
 
                     const currentIndex = state.currentTrack
@@ -492,8 +502,8 @@ export const useAppStore = create<AppState>()(
                 'toggleOverlay',
             ),
         getQueue: () => {
-            const { tracks, activeScene } = get();
-            return tracksInScene(tracks, activeScene);
+            const { tracks, activeScene, likedTrackIds } = get();
+            return tracksInScene(tracks, activeScene, likedTrackIds);
         },
         setSelectedBackgroundId: (backgroundId) => set({ selectedBackgroundId: backgroundId }, false, 'setBackgroundId'),
         setCurrentQuote: (quote) => set({ currentQuote: quote }, false, 'setCurrentQuote'),
