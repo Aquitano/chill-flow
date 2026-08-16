@@ -36,28 +36,20 @@ manifest.forEach(assertValid);
 const db = createDatabase(databaseUrl);
 
 for (const entry of manifest) {
+    const values = {
+        title: entry.title,
+        artist: entry.artist,
+        category: entry.category,
+        durationSec: entry.durationSec,
+        tags: entry.tags ?? [],
+        storageKey: entry.storageKey,
+    };
     await db
         .insert(tracks)
-        .values({
-            id: entry.id,
-            title: entry.title,
-            artist: entry.artist,
-            category: entry.category,
-            durationSec: entry.durationSec,
-            tags: entry.tags ?? [],
-            storageKey: entry.storageKey,
-        })
+        .values({ id: entry.id, ...values })
         .onConflictDoUpdate({
             target: tracks.id,
-            set: {
-                title: entry.title,
-                artist: entry.artist,
-                category: entry.category,
-                durationSec: entry.durationSec,
-                tags: entry.tags ?? [],
-                storageKey: entry.storageKey,
-                updatedAt: new Date(),
-            },
+            set: { ...values, updatedAt: new Date() },
         });
     console.log(`Seeded ${entry.id}`);
 }

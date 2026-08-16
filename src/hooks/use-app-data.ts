@@ -209,18 +209,30 @@ export function useCreateTaskMutation() {
     });
 }
 
+type TaskUpdateInput = {
+    id: string;
+    text?: string;
+    priority?: Task['priority'];
+    isCompleted?: boolean;
+    dueAt?: Date | null;
+    dueHasTime?: boolean;
+};
+
+/**
+ * Mirrors `updateTaskInputSchema` in src/server/validation/app.ts, so the optimistic row
+ * matches what the server writes back: a cleared due date can never keep a time of day.
+ */
+function nextDueHasTime(task: Task, input: TaskUpdateInput, dueAt: Date | null): boolean {
+    if (dueAt === null) return false;
+    if (input.dueAt !== undefined) return input.dueHasTime ?? false;
+    return input.dueHasTime ?? task.dueHasTime;
+}
+
 export function useUpdateTaskMutation() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: (input: {
-            id: string;
-            text?: string;
-            priority?: Task['priority'];
-            isCompleted?: boolean;
-            dueAt?: Date | null;
-            dueHasTime?: boolean;
-        }) => api.tasks.update(input),
+        mutationFn: (input: TaskUpdateInput) => api.tasks.update(input),
         onMutate: async (input): Promise<TaskListContext> => {
             await queryClient.cancelQueries({ queryKey: queryKeys.tasks });
             const previous = queryClient.getQueryData<Task[]>(queryKeys.tasks);
@@ -228,13 +240,7 @@ export function useUpdateTaskMutation() {
                 old.map((task) => {
                     if (task.id !== input.id) return task;
                     const dueAt = input.dueAt === undefined ? task.dueAt : input.dueAt;
-                    const dueHasTime =
-                        dueAt === null
-                            ? false
-                            : input.dueAt !== undefined
-                              ? (input.dueHasTime ?? false)
-                              : (input.dueHasTime ?? task.dueHasTime);
-                    return { ...task, ...input, dueHasTime };
+                    return { ...task, ...input, dueHasTime: nextDueHasTime(task, input, dueAt) };
                 }),
             );
             return { previous };
