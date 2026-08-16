@@ -3,7 +3,7 @@
 import { ambientCategoryIcon } from '@/components/app/ambient-icons';
 import { useAmbient } from '@/lib/audio/useAmbient';
 import { LIKE_LIMIT_TOAST } from '@/lib/likes';
-import { deriveScenes, tracksInScene } from '@/lib/tracks';
+import { LIKED_SCENE, deriveScenes, tracksInScene } from '@/lib/tracks';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app-store';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
@@ -37,6 +37,14 @@ type PaletteItem = {
     keywords?: string;
     run: () => void;
 };
+
+/**
+ * A typed query is nearly always aimed at a track, so matches lead. An empty one means the
+ * palette was opened to *do* something — with a large catalog, actions would otherwise sit
+ * a hundred rows below the fold.
+ */
+const SEARCH_GROUP_ORDER: PaletteItem['group'][] = ['Tracks', 'Scenes', 'Tasks', 'Actions'];
+const IDLE_GROUP_ORDER: PaletteItem['group'][] = ['Actions', 'Tasks', 'Scenes', 'Tracks'];
 
 function matchesQuery(item: PaletteItem, query: string): boolean {
     if (!query) return true;
@@ -76,11 +84,13 @@ export function CommandPalette() {
         const store = useAppStore.getState;
         const close = () => useAppStore.getState().setOverlay(null);
 
+        const snapshot = store();
+
         const trackItems: PaletteItem[] = tracks.map((track) => ({
             id: `track-${track.id}`,
             group: 'Tracks',
             label: track.title,
-            sub: track.artist,
+            sub: snapshot.currentTrack?.id === track.id ? `${track.artist} · Playing` : track.artist,
             icon: Music,
             keywords: [...track.tags, track.category ?? ''].join(' '),
             run: () => {
@@ -91,25 +101,42 @@ export function CommandPalette() {
             },
         }));
 
-        const sceneItems: PaletteItem[] = deriveScenes(tracks).map((scene) => ({
-            id: `scene-${scene.id}`,
-            group: 'Scenes',
-            label: scene.label,
-            sub: `Scene · ${scene.trackCount} ${scene.trackCount === 1 ? 'track' : 'tracks'}`,
-            icon: ListMusic,
-            run: () => {
-                const s = store();
-                s.setActiveScene(scene.id);
-                const queue = tracksInScene(s.tracks, scene.id);
-                if (queue.length > 0 && !queue.some((track) => track.id === s.currentTrack?.id)) {
-                    s.setCurrentTrack(queue[0] ?? null);
-                }
-                s.setIsPlaying(true);
-                close();
-            },
-        }));
+        const playScene = (sceneId: string) => {
+            const s = store();
+            s.setActiveScene(sceneId);
+            const queue = tracksInScene(s.tracks, sceneId, s.likedTrackIds);
+            if (queue.length > 0 && !queue.some((track) => track.id === s.currentTrack?.id)) {
+                s.setCurrentTrack(queue[0] ?? null);
+            }
+            s.setIsPlaying(true);
+            close();
+        };
 
-        const snapshot = store();
+        const trackCountLabel = (count: number) => `Scene · ${count} ${count === 1 ? 'track' : 'tracks'}`;
+
+        const sceneItems: PaletteItem[] = [
+            ...(snapshot.likedTrackIds.length > 0
+                ? [
+                      {
+                          id: 'scene-liked',
+                          group: 'Scenes' as const,
+                          label: 'Liked tracks',
+                          sub: trackCountLabel(tracksInScene(tracks, LIKED_SCENE, snapshot.likedTrackIds).length),
+                          icon: Heart,
+                          keywords: 'liked favourites favorites hearts',
+                          run: () => playScene(LIKED_SCENE),
+                      },
+                  ]
+                : []),
+            ...deriveScenes(tracks).map((scene) => ({
+                id: `scene-${scene.id}`,
+                group: 'Scenes' as const,
+                label: scene.label,
+                sub: trackCountLabel(scene.trackCount),
+                icon: ListMusic,
+                run: () => playScene(scene.id),
+            })),
+        ];
 
         const taskItems: PaletteItem[] = tasks
             .filter((task) => !task.isCompleted)
@@ -309,7 +336,13 @@ export function CommandPalette() {
         // `open` retriggers the snapshot so labels (Play/Pause, timer) are fresh per opening.
     }, [tracks, tasks, board, ambientSounds, powered, mixer, open]);
 
-    const filtered = useMemo(() => items.filter((item) => matchesQuery(item, query)), [items, query]);
+    const filtered = useMemo(() => {
+        const order = query ? SEARCH_GROUP_ORDER : IDLE_GROUP_ORDER;
+        // Sort is stable, so each group keeps the order it was built in.
+        return items
+            .filter((item) => matchesQuery(item, query))
+            .sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group));
+    }, [items, query]);
     const clampedIndex = Math.min(activeIndex, Math.max(0, filtered.length - 1));
     const activeItem = filtered[clampedIndex];
 

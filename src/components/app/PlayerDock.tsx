@@ -5,11 +5,10 @@ import { LibraryPanel } from '@/components/app/LibraryPanel';
 import { TrackArt } from '@/components/app/TrackArt';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
-import { useUpdatePreferencesMutation } from '@/hooks/use-app-data';
-import { describeApiError } from '@/lib/api';
+import { useTrackLike } from '@/hooks/use-track-like';
 import { useAmbient } from '@/lib/audio/useAmbient';
 import { useAudioEngineState } from '@/lib/audio/useAudioEngine';
-import { LIKE_LIMIT_TOAST } from '@/lib/likes';
+import { LIKED_SCENE, sceneLabel } from '@/lib/tracks';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app-store';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -53,7 +52,7 @@ function toAudioErrorMessage(err: unknown): string {
 export const PlayerDock: React.FC = () => {
     const { engine, state: audio } = useAudioEngineState();
     const { mixer, activeCount: ambientCount } = useAmbient();
-    const updatePreferences = useUpdatePreferencesMutation();
+    const toggleLike = useTrackLike();
 
     const isPlayingStore = useAppStore((state) => state.isPlaying);
     const volume = useAppStore((state) => state.volume);
@@ -62,8 +61,6 @@ export const PlayerDock: React.FC = () => {
     const setVolume = useAppStore((state) => state.setVolume);
     const currentTrack = useAppStore((state) => state.currentTrack);
     const likedTrackIds = useAppStore((state) => state.likedTrackIds);
-    const toggleTrackLike = useAppStore((state) => state.toggleTrackLike);
-    const setLikedTrackIds = useAppStore((state) => state.setLikedTrackIds);
     const previousTrack = useAppStore((state) => state.previousTrack);
     const nextTrack = useAppStore((state) => state.nextTrack);
     const repeatEnabled = useAppStore((state) => state.repeatEnabled);
@@ -71,6 +68,7 @@ export const PlayerDock: React.FC = () => {
     const currentMode = useAppStore((state) => state.currentMode);
     const modes = useAppStore((state) => state.modes);
     const sessionSummary = useAppStore((state) => state.sessionSummary);
+    const activeScene = useAppStore((state) => state.activeScene);
     const activeOverlay = useAppStore((state) => state.activeOverlay);
     const toggleOverlay = useAppStore((state) => state.toggleOverlay);
     const setOverlay = useAppStore((state) => state.setOverlay);
@@ -79,6 +77,10 @@ export const PlayerDock: React.FC = () => {
     const isLiked = currentTrack ? likedTrackIds.includes(currentTrack.id) : false;
     const libraryOpen = activeOverlay === 'library';
     const ambienceOpen = activeOverlay === 'ambience';
+
+    // Skip and next follow the library filter, so the filter has to be visible from the
+    // dock too — otherwise a queue of three tracks looks like a broken skip button.
+    const queueLabel = activeScene === null ? null : activeScene === LIKED_SCENE ? 'Liked' : sceneLabel(activeScene);
 
     // Playback progress / scrubber state. While the user drags, `scrubValue` overrides
     // the live currentTime so the thumb doesn't fight per-second time updates; the seek
@@ -221,6 +223,8 @@ export const PlayerDock: React.FC = () => {
     // Clicking anywhere outside the dock closes an open panel; the panels are
     // lightweight browsers, not modal decisions.
     const dockRef = useRef<HTMLDivElement>(null);
+    const libraryButtonRef = useRef<HTMLButtonElement>(null);
+    const ambienceButtonRef = useRef<HTMLButtonElement>(null);
     useEffect(() => {
         if (!libraryOpen && !ambienceOpen) return;
         const handlePointerDown = (event: PointerEvent) => {
@@ -236,33 +240,21 @@ export const PlayerDock: React.FC = () => {
         return () => document.removeEventListener('pointerdown', handlePointerDown);
     }, [libraryOpen, ambienceOpen, setOverlay]);
 
-    const handleLikeToggle = () => {
-        if (!currentTrack) return;
+    // A panel closed from the keyboard (Escape, or the shortcut that opened it) would
+    // otherwise strand focus on the body. Only reclaim it when focus is still inside the
+    // dock, so closing by clicking something else doesn't yank it back here.
+    const previousOverlayRef = useRef(activeOverlay);
+    useEffect(() => {
+        const closed = previousOverlayRef.current;
+        previousOverlayRef.current = activeOverlay;
 
-        const previousLikes = likedTrackIds;
-        const outcome = toggleTrackLike(currentTrack.id);
+        if (activeOverlay !== null || (closed !== 'library' && closed !== 'ambience')) return;
+        const focused = document.activeElement;
+        if (focused !== document.body && !(focused instanceof Node && dockRef.current?.contains(focused))) return;
 
-        if (outcome === 'limit-reached') {
-            toast.error(LIKE_LIMIT_TOAST.title, LIKE_LIMIT_TOAST.options);
-            return;
-        }
-
-        const nextLikes =
-            outcome === 'unliked'
-                ? previousLikes.filter((trackId) => trackId !== currentTrack.id)
-                : [...previousLikes, currentTrack.id];
-
-        updatePreferences.mutate(
-            { likedTrackIds: nextLikes },
-            {
-                // Put the heart back rather than leaving a like that was never saved.
-                onError: (error) => {
-                    setLikedTrackIds(previousLikes);
-                    toast.error("Couldn't save that like", { description: describeApiError(error) });
-                },
-            },
-        );
-    };
+        const trigger = closed === 'library' ? libraryButtonRef.current : ambienceButtonRef.current;
+        trigger?.focus();
+    }, [activeOverlay]);
 
     return (
         <div ref={dockRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex flex-col">
@@ -305,11 +297,14 @@ export const PlayerDock: React.FC = () => {
                 <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4">
                     <div className="flex min-w-0 items-center">
                         <button
+                            ref={libraryButtonRef}
                             type="button"
                             onClick={() => toggleOverlay('library')}
                             aria-expanded={libraryOpen}
                             aria-controls="dock-panel-library"
-                            aria-label={libraryOpen ? 'Close library' : 'Open library'}
+                            aria-label={`${libraryOpen ? 'Close library' : 'Open library'}${
+                                queueLabel ? ` — playing from ${queueLabel}` : ''
+                            }`}
                             className="group focus-visible:outline-ember -m-1.5 flex min-w-0 items-center gap-3 rounded-lg p-1.5 text-left transition-colors hover:bg-white/5 focus-visible:outline-2"
                         >
                             {currentTrack ? (
@@ -329,6 +324,14 @@ export const PlayerDock: React.FC = () => {
                                     {currentTrack?.artist ?? 'Choose a soundtrack'}
                                 </span>
                             </span>
+                            {queueLabel && (
+                                <span
+                                    aria-hidden
+                                    className="text-ink-mid hidden shrink-0 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] md:block"
+                                >
+                                    {queueLabel}
+                                </span>
+                            )}
                             <ChevronUp
                                 aria-hidden
                                 className={cn(
@@ -389,7 +392,7 @@ export const PlayerDock: React.FC = () => {
                             variant="ghost"
                             size="icon"
                             className={`rounded-full hover:bg-white/10 ${isLiked ? 'text-rose-400' : 'text-ink-dim hover:text-ink'}`}
-                            onClick={handleLikeToggle}
+                            onClick={() => currentTrack && toggleLike(currentTrack.id)}
                             disabled={!currentTrack}
                             aria-pressed={isLiked}
                             aria-label={isLiked ? 'Unlike track' : 'Like track'}
@@ -405,6 +408,7 @@ export const PlayerDock: React.FC = () => {
                             </span>
                         )}
                         <Button
+                            ref={ambienceButtonRef}
                             variant="ghost"
                             size="icon"
                             className={cn(
