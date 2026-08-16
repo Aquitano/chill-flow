@@ -1,9 +1,5 @@
 # Product
 
-## Register
-
-product
-
 ## Users
 
 People doing focused knowledge work — students, developers, writers, anyone who reaches for lo-fi or ambient sound to settle into deep work. They arrive wanting to *start*, not to configure. Context is a laptop or desktop work session, often for a stretch of time, frequently returning day to day. They want their setup (sound, timer, tasks, background) to be there waiting when they come back.
