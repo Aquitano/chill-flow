@@ -138,43 +138,47 @@ export function LibraryPanel() {
         const isHighlighted = highlighted?.id === track.id;
         const liked = likedTrackIds.includes(track.id);
         return (
-            <div key={track.id} role="presentation" className="group relative">
-                <button
-                    type="button"
-                    role="option"
-                    id={`library-track-${track.id}`}
-                    data-track-id={track.id}
-                    aria-selected={active}
-                    onClick={() => play(track)}
-                    onPointerMove={() => setHighlight(rowIndexById.get(track.id) ?? 0)}
-                    className={cn(
-                        'focus-visible:outline-ember flex w-full items-center gap-3 rounded-xl py-2 pr-11 pl-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2',
-                        active ? 'bg-white/8' : isHighlighted ? 'bg-white/5' : 'hover:bg-white/5',
-                    )}
-                >
-                    <TrackArt track={track} className="h-10 w-10" />
-                    <span className="min-w-0 flex-1">
-                        <span className={cn('block truncate text-sm font-medium', active ? 'text-ember' : 'text-ink')}>
-                            {track.title}
-                        </span>
-                        <span className="text-ink-dim block truncate text-xs">{track.artist}</span>
+            <div
+                key={track.id}
+                role="option"
+                id={`library-track-${track.id}`}
+                data-track-id={track.id}
+                // The search field is the combobox, so selection has to follow its
+                // aria-activedescendant. The playing track is a separate signal.
+                aria-selected={isHighlighted}
+                data-playing={active || undefined}
+                onClick={() => play(track)}
+                onPointerMove={() => setHighlight(rowIndexById.get(track.id) ?? 0)}
+                className={cn(
+                    'group relative flex w-full cursor-pointer items-center gap-3 rounded-xl py-2 pr-11 pl-2.5 text-left transition-colors',
+                    active ? 'bg-white/8' : isHighlighted ? 'bg-white/5' : 'hover:bg-white/5',
+                )}
+            >
+                <TrackArt track={track} className="h-10 w-10" />
+                <span className="min-w-0 flex-1">
+                    <span className={cn('block truncate text-sm font-medium', active ? 'text-ember' : 'text-ink')}>
+                        {track.title}
                     </span>
-                    {active && isPlaying && (
-                        <span className="eq-playing flex shrink-0 items-end gap-[2px]" aria-hidden>
-                            {[0, 0.2, 0.1].map((delay, index) => (
-                                <span
-                                    key={index}
-                                    className="eq-bar bg-ember h-3 w-[2px] rounded-full"
-                                    style={{ animationDelay: `${delay}s` }}
-                                />
-                            ))}
-                        </span>
-                    )}
-                    <span className="text-ink-dim shrink-0 text-xs tabular-nums">{formatDuration(track.duration)}</span>
-                </button>
+                    <span className="text-ink-dim block truncate text-xs">{track.artist}</span>
+                </span>
+                {active && isPlaying && (
+                    <span className="eq-playing flex shrink-0 items-end gap-[2px]" aria-hidden>
+                        {[0, 0.2, 0.1].map((delay, index) => (
+                            <span
+                                key={index}
+                                className="eq-bar bg-ember h-3 w-[2px] rounded-full"
+                                style={{ animationDelay: `${delay}s` }}
+                            />
+                        ))}
+                    </span>
+                )}
+                <span className="text-ink-dim shrink-0 text-xs tabular-nums">{formatDuration(track.duration)}</span>
                 <button
                     type="button"
-                    onClick={() => toggleLike(track.id)}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        toggleLike(track.id);
+                    }}
                     aria-pressed={liked}
                     aria-label={liked ? `Unlike ${track.title}` : `Like ${track.title}`}
                     className={cn(
@@ -266,7 +270,9 @@ export function LibraryPanel() {
                     </div>
 
                     {rows.length === 0 ? (
-                        <p className="text-ink-dim px-4 pb-6 text-center text-sm">No tracks match “{query}”</p>
+                        <p className="text-ink-dim px-4 pb-6 text-center text-sm">
+                            {query ? `No tracks match “${query}”` : 'Nothing in this filter'}
+                        </p>
                     ) : (
                         <>
                             {widened && (
