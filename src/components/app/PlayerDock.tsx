@@ -163,7 +163,6 @@ export const PlayerDock: React.FC = () => {
         return () => engine.removeEventListener('error', handleError);
     }, [engine, reportAudioFailure]);
 
-    // Keep the engine's loop flag in sync with the Repeat toggle.
     useEffect(() => {
         engine.setLoop(repeatEnabled);
     }, [engine, repeatEnabled]);

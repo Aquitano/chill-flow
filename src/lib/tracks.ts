@@ -53,7 +53,6 @@ export function fallbackHue(id: string): number {
     return 30 + (hash % 60);
 }
 
-/** Format whole seconds as m:ss for track durations. */
 export function formatDuration(totalSeconds: number): string {
     if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return '--:--';
     const minutes = Math.floor(totalSeconds / 60);

@@ -32,9 +32,7 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
 }
 
 /**
- * Show a timer notification if (and only if) the API is supported and permission has
- * been granted. Returns whether a notification was actually shown. Callers are still
- * responsible for honoring the user's `showNotifications` preference.
+ * Callers are still responsible for honoring the user's `showNotifications` preference.
  */
 export function showTimerNotification(title: string, body: string): boolean {
     if (!isSupported() || Notification.permission !== 'granted') {
