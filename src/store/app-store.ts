@@ -55,6 +55,12 @@ export function presetToMinutes(preset: string, customMinutes: string): number |
 
 type PhaseInput = Pick<AppState, 'timerMode' | 'selectedPreset' | 'customMinutes' | 'pomodoroSettings'>;
 
+/** Length of a Pomodoro phase: the long break lands on the last session of the cadence. */
+function pomodoroPhaseMinutes(settings: PomodoroSettings, isBreak: boolean, session: number): number {
+    if (!isBreak) return settings.focusMinutes;
+    return session === settings.sessionsBeforeLongBreak ? settings.longBreakMinutes : settings.breakMinutes;
+}
+
 /**
  * Full duration of the phase currently on the dial — the focus preset, or the Pomodoro
  * phase in play (long break included). Null for open-ended focus. Reset and the progress
@@ -67,12 +73,7 @@ export function phaseDurationSeconds(state: PhaseInput): number | null {
     }
 
     const pomodoro = state.pomodoroSettings;
-    const minutes = pomodoro.isBreak
-        ? pomodoro.currentSession === pomodoro.sessionsBeforeLongBreak
-            ? pomodoro.longBreakMinutes
-            : pomodoro.breakMinutes
-        : pomodoro.focusMinutes;
-    return minutes * 60;
+    return pomodoroPhaseMinutes(pomodoro, pomodoro.isBreak, pomodoro.currentSession) * 60;
 }
 
 function isOpenEnded(state: Pick<AppState, 'timerMode' | 'selectedPreset'>): boolean {
@@ -837,12 +838,7 @@ export const useAppStore = create<AppState>()(
                 nextSession = 1;
             }
 
-            const nextMinutes = nextBreakState
-                ? nextSession === pomodoroSettings.sessionsBeforeLongBreak
-                    ? pomodoroSettings.longBreakMinutes
-                    : pomodoroSettings.breakMinutes
-                : pomodoroSettings.focusMinutes;
-            const nextSeconds = nextMinutes * 60;
+            const nextSeconds = pomodoroPhaseMinutes(pomodoroSettings, nextBreakState, nextSession) * 60;
             // The phase always changes; whether its clock starts itself is the user's call.
             const autoStart = nextBreakState ? pomodoroSettings.autoStartBreaks : pomodoroSettings.autoStartFocus;
 

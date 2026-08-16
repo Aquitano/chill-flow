@@ -81,7 +81,6 @@ export function useResizablePanel(): ResizablePanel {
         setSize(next);
     }, []);
 
-    // Track the breakpoint and re-clamp if the viewport shrinks below the current size.
     useEffect(() => {
         // Re-clamp once mounted: the lazy initializer runs during render, before the
         // player bar is in the DOM, so a stored size may need correcting against it now.

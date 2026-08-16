@@ -27,7 +27,7 @@ const sentryConfig = withSentryConfig(
         project: 'chill-flow',
     },
     {
-        // Upload a larger set of source maps for prettier stack traces (increases build time)
+        // Wider source-map upload buys readable stack traces at the cost of build time.
         widenClientFileUpload: true,
         transpileClientSDK: false,
 

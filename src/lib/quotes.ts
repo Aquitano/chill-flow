@@ -14,7 +14,7 @@ export const quotes: Quote[] = [
         tags: ['focus', 'quiet'],
     },
     {
-        id: 'murakami',
+        id: 'russell',
         text: 'To be able to concentrate for a considerable time is essential to difficult achievement.',
         author: 'Bertrand Russell',
         tags: ['concentration', 'achievement'],

@@ -12,7 +12,6 @@ export interface HighlightSpan {
     start: number;
     /** Index one past the span's last character. */
     end: number;
-    /** Highlight classes for this span (token colour). */
     className: string;
 }
 

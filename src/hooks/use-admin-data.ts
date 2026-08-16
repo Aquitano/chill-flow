@@ -39,7 +39,6 @@ function assertWithinLimit(audio: File | null, cover: File | null): void {
     }
 }
 
-/** Read a media file's duration in seconds via a throwaway <audio> element. */
 function readAudioDuration(file: File): Promise<number> {
     return new Promise((resolve) => {
         const audio = document.createElement('audio');

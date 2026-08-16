@@ -149,8 +149,7 @@ describe('backend validation', () => {
             }).success,
         ).toBe(false);
 
-        // Track ids are shape-validated only (catalog membership lives in the DB now): a
-        // well-formed id is accepted, an empty one is rejected.
+        // Track ids are shape-validated only (catalog membership lives in the DB now).
         expect(trackLookupInputSchema.safeParse({ id: 'any-track-id' }).success).toBe(true);
         expect(trackLookupInputSchema.safeParse({ id: '' }).success).toBe(false);
     });

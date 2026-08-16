@@ -28,7 +28,6 @@ export function TaskComposer() {
     const inputRef = useRef<HTMLInputElement>(null);
     const hintId = useId();
 
-    // Focus the field whenever the card opens (trigger click or first focus).
     useEffect(() => {
         if (expanded) {
             inputRef.current?.focus();

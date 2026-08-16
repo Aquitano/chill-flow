@@ -280,7 +280,6 @@ export function AppShell() {
         };
         const serializedPayload = JSON.stringify(nextPayload);
 
-        // Skip if this exact payload is already persisted or currently being saved.
         if (
             serializedPayload === lastPersistedPreferencesRef.current ||
             serializedPayload === savingPreferencesRef.current

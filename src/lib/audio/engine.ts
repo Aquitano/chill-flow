@@ -145,10 +145,7 @@ class AudioEngineImpl {
         }
     }
 
-    /**
-     * Maps a normalized 0..1 control value to linear amplitude with a perceptual curve.
-     * Account for human logarithmic loudness perception.
-     */
+    /** Accounts for human logarithmic loudness perception. */
     private perceptual(v01: number): number {
         const v = Math.max(0, Math.min(1, v01));
         return v * v;
@@ -389,7 +386,7 @@ class AudioEngineImpl {
 
     async loadMainTrack(url: string): Promise<void> {
         this.debugLogger.debug('TrackLoader', 'Loading main track', {
-            url: url.substring(url.lastIndexOf('/') + 1), // Log filename only for privacy
+            url: url.substring(url.lastIndexOf('/') + 1),
             fullUrl: url,
         });
 
@@ -425,7 +422,6 @@ class AudioEngineImpl {
                 await incoming.element.play();
                 this.crossfade(incoming, outgoing);
             } else {
-                // Nothing to blend with, so the lane simply opens.
                 this.openDeck(incoming);
             }
 

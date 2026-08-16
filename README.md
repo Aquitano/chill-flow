@@ -41,7 +41,7 @@ Prerequisites: [Bun](https://bun.sh), Node.js 24 or newer, a Postgres database, 
     cp .env.example .env
     ```
 
-    The workspace requires `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, and `DATABASE_URL`. Keep the default `AUDIO_BASE_URL=/audio` to serve audio from `public/audio/` during local development. R2 and Sentry are optional locally; `.env.example` documents every variable.
+    The workspace requires `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, and `DATABASE_URL`. Keep the default `AUDIO_BASE_URL=/audio` to serve audio from `public/audio/` during local development. R2 and Sentry are optional locally; `.env.example` documents every runtime variable.
 
 3. Apply the database schema:
 
