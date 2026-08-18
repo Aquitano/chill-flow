@@ -243,9 +243,15 @@ async function ensureUserPreferences(database: Database, userId: string) {
  * The calendar day a session lands on *for the user*. `completedAt` is a `timestamp`
  * without a zone holding UTC, so it has to be pinned to UTC before it can be converted —
  * a bare `AT TIME ZONE` would read it as local server time instead.
+ *
+ * Aliased so GROUP BY / ORDER BY reference the alias instead of repeating the expression:
+ * each repetition binds `timeZone` as a fresh placeholder, and Postgres then rejects the
+ * query because the select expression (`$1`) never matches the grouped one (`$4`).
  */
 function completedDayInZone(timeZone: string) {
-    return sql<string>`to_char((${focusSessions.completedAt} AT TIME ZONE 'UTC') AT TIME ZONE ${timeZone}, 'YYYY-MM-DD')`;
+    return sql<string>`to_char((${focusSessions.completedAt} AT TIME ZONE 'UTC') AT TIME ZONE ${timeZone}, 'YYYY-MM-DD')`.as(
+        'day',
+    );
 }
 
 /** Bound on the day list behind the streak; longer than any streak worth reporting. */
