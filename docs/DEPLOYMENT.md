@@ -107,6 +107,20 @@ Import the repo and set the environment variables below, then deploy.
 `DATABASE_URL` and `R2_SECRET_ACCESS_KEY` must stay server-only — never expose them through
 `NEXT_PUBLIC_*`, client bundles, rendered output, or logs.
 
+### Custom domain via Cloudflare DNS
+
+1. Vercel → Project → Settings → Domains → add your domain. Vercel shows the exact record to
+   create (a CNAME to `cname.vercel-dns.com`; Cloudflare flattens it automatically at the apex).
+2. Create that record in Cloudflare DNS and set it to **DNS only (grey cloud)**. Vercel is
+   already a CDN and terminates TLS itself; proxying through Cloudflare stacks a second proxy
+   on top, can block Vercel's certificate issuance, and in `Flexible` SSL mode causes an
+   infinite redirect loop. Proxy (orange cloud) only if you specifically want Cloudflare WAF
+   or Access in front — and then SSL/TLS mode must be **Full (strict)**.
+3. Once the domain is live, sweep it through everything that names the origin:
+   `ALLOWED_CORS_ORIGINS` and `NEXT_PUBLIC_APP_URL` on Vercel, the origins in
+   `scripts/audio/cors.json` followed by `bun run audio:cors`, and the Clerk production
+   instance domain plus the webhook URL from step 3.
+
 ## 6. Post-deploy smoke test
 
 - [ ] App loads at the production URL; landing page renders.
@@ -142,4 +156,6 @@ fine either way). Confirm a test error appears in Sentry after the first deploy.
 bun run lint && bun run test && bun run build
 ```
 
-All three must pass before promoting a deploy.
+All three must pass before promoting a deploy. `bun run build` needs
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` in the environment (the landing page prerenders through
+`<ClerkProvider>`); without a `.env`, prefix the command with any well-formed key.
