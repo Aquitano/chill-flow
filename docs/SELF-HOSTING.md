@@ -33,30 +33,23 @@ Next builds are memory-hungry and will fight the running container for RAM.
 
 ## 1. Build the image
 
-`NEXT_PUBLIC_*` values are inlined into the client bundle at build time, so they are **build
-args**, not runtime env. Changing one needs a rebuild, not a restart. The build also fails
-outright without `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, since the landing page is prerendered
-through `<ClerkProvider>`.
+The image is environment-agnostic: the build accepts no deployment-specific arguments or
+secrets. Clerk, the app URL, and the optional Sentry DSN are all read from the container's
+runtime environment. The browser fetches its public Sentry DSN from `/api/runtime-config`.
 
 ### In CI (recommended)
 
 `.github/workflows/docker-image.yml` builds on every push to `main` and publishes to
-`ghcr.io/<owner>/chill-flow`. Configure the repository first:
+`ghcr.io/<owner>/chill-flow`. It needs no repository variables or deployment secrets, so the
+same published image can move between environments.
 
-| Setting                             | Kind     | Value                                       |
-| ----------------------------------- | -------- | ------------------------------------------- |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | variable | Clerk production publishable key            |
-| `NEXT_PUBLIC_APP_URL`               | variable | `https://<your-domain>`                     |
-| `NEXT_PUBLIC_SENTRY_DSN`            | variable | Optional; omit to disable Sentry            |
-| `SENTRY_AUTH_TOKEN`                 | secret   | Optional; only needed for source-map upload |
-
-The publishable key is a public value by design — a repository variable is the right home for
-it, and it has to be readable at build time anyway.
+Because the generic build has no single Sentry project, it does not upload browser source maps.
+Runtime Sentry reporting still works, but client stack traces remain minified.
 
 ### Locally
 
 ```bash
-docker compose build          # reads the same NEXT_PUBLIC_* names from your .env
+docker compose build          # no build arguments or secrets required
 ```
 
 ## 2. Configure the VPS
@@ -69,6 +62,13 @@ the `VERCEL_URL` fallback in `src/lib/client.ts` does not exist off Vercel.
 
 Keep the file at `chmod 600` and owned by the deploying user. It holds `DATABASE_URL`,
 `CLERK_SECRET_KEY`, and `R2_SECRET_ACCESS_KEY`.
+
+After changing runtime configuration, including `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`,
+`NEXT_PUBLIC_APP_URL`, or `SENTRY_DSN`, recreate only the app service so Compose reloads `.env`:
+
+```bash
+docker compose up -d --force-recreate app
+```
 
 ## 3. Cloudflare Tunnel
 
@@ -121,7 +121,7 @@ own, so `docker compose pull` on a fresh VPS fails with `denied` until you do on
 Then, for every release:
 
 ```bash
-docker compose pull && docker compose up -d
+docker compose --profile tunnel pull && docker compose --profile tunnel up -d
 ```
 
 Expect a few seconds of downtime. `app` holds a fixed `127.0.0.1:3000` binding, so Compose

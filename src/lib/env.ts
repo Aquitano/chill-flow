@@ -1,12 +1,25 @@
 import { parseAllowedOrigins } from '@/server/security/origin';
 import { z } from 'zod';
 
+// NEXT_PUBLIC_* reads are normally replaced during `next build`. Reading through the
+// process.env object keeps the Clerk key available to server-rendered code at container
+// runtime; RootLayout passes it to ClerkProvider explicitly for the browser.
+export function getClerkPublishableKey(): string | undefined {
+    const runtimeEnv = process.env;
+    return runtimeEnv.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+}
+
+export function getSentryDsn(): string | undefined {
+    const runtimeEnv = process.env;
+    return runtimeEnv.SENTRY_DSN || runtimeEnv.NEXT_PUBLIC_SENTRY_DSN;
+}
+
 const envSchema = z.object({
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: z.string().optional(),
     CLERK_SECRET_KEY: z.string().optional(),
     CLERK_WEBHOOK_SIGNING_SECRET: z.string().optional(),
     DATABASE_URL: z.url().optional(),
-    NEXT_PUBLIC_SENTRY_DSN: z.url().optional(),
+    SENTRY_DSN: z.url().optional(),
     ALLOWED_CORS_ORIGINS: z.string().optional(),
     AUDIO_BASE_URL: z.string().optional(),
     R2_ACCOUNT_ID: z.string().optional(),
@@ -17,11 +30,11 @@ const envSchema = z.object({
 });
 
 const parsedEnv = envSchema.safeParse({
-    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: getClerkPublishableKey(),
     CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY,
     CLERK_WEBHOOK_SIGNING_SECRET: process.env.CLERK_WEBHOOK_SIGNING_SECRET,
-    DATABASE_URL: process.env.DATABASE_URL,
-    NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN,
+    DATABASE_URL: process.env.DATABASE_URL || undefined,
+    SENTRY_DSN: getSentryDsn() || undefined,
     ALLOWED_CORS_ORIGINS: process.env.ALLOWED_CORS_ORIGINS,
     AUDIO_BASE_URL: process.env.AUDIO_BASE_URL,
     R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID,
@@ -80,7 +93,7 @@ export const appEnv = {
     clerkSecretKey: rawEnv.CLERK_SECRET_KEY,
     clerkWebhookSigningSecret: rawEnv.CLERK_WEBHOOK_SIGNING_SECRET,
     databaseUrl: rawEnv.DATABASE_URL,
-    sentryDsn: rawEnv.NEXT_PUBLIC_SENTRY_DSN,
+    sentryDsn: rawEnv.SENTRY_DSN,
     allowedCorsOrigins: parseAllowedOrigins(rawEnv.ALLOWED_CORS_ORIGINS),
     audioBaseUrl,
     r2,
@@ -88,5 +101,5 @@ export const appEnv = {
     isClerkConfigured: Boolean(rawEnv.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && rawEnv.CLERK_SECRET_KEY),
     isClerkWebhookConfigured: Boolean(rawEnv.CLERK_WEBHOOK_SIGNING_SECRET),
     isDatabaseConfigured: Boolean(rawEnv.DATABASE_URL),
-    isSentryConfigured: Boolean(rawEnv.NEXT_PUBLIC_SENTRY_DSN),
+    isSentryConfigured: Boolean(rawEnv.SENTRY_DSN),
 };

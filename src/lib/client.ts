@@ -2,14 +2,16 @@ import type { AppRouter } from '@/server';
 import { createClient } from 'jstack';
 
 /**
- * On the server, resolve from NEXT_PUBLIC_APP_URL / VERCEL_URL so production SSR never points
- * at localhost; in the browser, use the current origin.
+ * On the server, resolve from runtime NEXT_PUBLIC_APP_URL / VERCEL_URL so production SSR
+ * never points at localhost; in the browser, use the current origin.
  */
 function getApiBaseUrl(): string {
     if (typeof window !== 'undefined') {
         return `${window.location.origin}/api`;
     }
-    const explicit = process.env.NEXT_PUBLIC_APP_URL;
+    // Access through the env object so Next.js does not replace this value during `next build`.
+    const runtimeEnv = process.env;
+    const explicit = runtimeEnv.NEXT_PUBLIC_APP_URL;
     if (explicit) {
         return `${explicit.replace(/\/$/, '')}/api`;
     }

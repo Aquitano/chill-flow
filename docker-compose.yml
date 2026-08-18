@@ -4,10 +4,6 @@ services:
         # Build locally instead of pulling with: docker compose build
         build:
             context: .
-            args:
-                NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
-                NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN}
-                NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
         restart: unless-stopped
         env_file: .env
         # Loopback-only: the tunnel (or a local reverse proxy) is the sole entrypoint, so the

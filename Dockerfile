@@ -14,21 +14,11 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# NEXT_PUBLIC_* values are inlined into the client bundle at build time, so they are build
-# args rather than runtime env. Changing one requires a rebuild, not a restart.
-ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
-ARG NEXT_PUBLIC_SENTRY_DSN
-ARG NEXT_PUBLIC_APP_URL
-ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
-ENV NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN
-ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# SENTRY_AUTH_TOKEN is mounted as a secret so it never lands in an image layer. Without it the
-# build still succeeds; only source-map upload is skipped.
-RUN --mount=type=secret,id=sentry_auth_token,required=false \
-    SENTRY_AUTH_TOKEN="$(cat /run/secrets/sentry_auth_token 2>/dev/null || true)" \
-    bun run build
+# The published image is environment-agnostic: all deployment configuration is supplied only
+# when the container runs.
+RUN bun run build
 
 FROM node:24-bookworm-slim AS runner
 WORKDIR /app

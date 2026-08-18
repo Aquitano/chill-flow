@@ -1,25 +1,40 @@
 import * as Sentry from '@sentry/nextjs';
-import { appEnv } from '@/lib/env';
 
-if (appEnv.sentryDsn) {
-    Sentry.init({
-        dsn: appEnv.sentryDsn,
+type RuntimeConfig = {
+    sentryDsn: string | null;
+};
 
-        tracesSampleRate: 1,
+async function initializeSentry() {
+    try {
+        const response = await fetch('/api/runtime-config', { cache: 'no-store' });
+        if (!response.ok) return;
 
-        debug: false,
+        const { sentryDsn } = (await response.json()) as RuntimeConfig;
+        if (!sentryDsn) return;
 
-        replaysOnErrorSampleRate: 1.0,
+        Sentry.init({
+            dsn: sentryDsn,
 
-        replaysSessionSampleRate: 0.1,
+            tracesSampleRate: 1,
 
-        integrations: [
-            Sentry.replayIntegration({
-                maskAllText: true,
-                blockAllMedia: true,
-            }),
-        ],
-    });
+            debug: false,
+
+            replaysOnErrorSampleRate: 1.0,
+
+            replaysSessionSampleRate: 0.1,
+
+            integrations: [
+                Sentry.replayIntegration({
+                    maskAllText: true,
+                    blockAllMedia: true,
+                }),
+            ],
+        });
+    } catch {
+        // Observability is optional and must never prevent the application from starting.
+    }
 }
+
+void initializeSentry();
 
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;

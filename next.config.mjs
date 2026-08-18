@@ -22,23 +22,13 @@ const nextConfig = {
     },
 };
 
-const sentryConfig = withSentryConfig(
-    nextConfig,
-    {
-        silent: true,
-        org: 'aquitano',
-        project: 'chill-flow',
-    },
-    {
-        // Wider source-map upload buys readable stack traces at the cost of build time.
-        widenClientFileUpload: true,
-        transpileClientSDK: false,
-
-        hideSourceMaps: true,
-        disableLogger: true,
-        automaticVercelMonitors: true,
-    },
-);
+const sentryConfig = withSentryConfig(nextConfig, {
+    silent: true,
+    telemetry: false,
+    // A public, reusable image has no single Sentry project to upload source maps to.
+    sourcemaps: { disable: true },
+    webpack: { treeshake: { removeDebugLogging: true } },
+});
 
 const config = process.env.DEBUG_MILLION ? MillionLint.next({ rsc: true })(sentryConfig) : sentryConfig;
 

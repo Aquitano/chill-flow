@@ -106,7 +106,7 @@ Import the repo and set the environment variables below, then deploy.
 | `R2_SECRET_ACCESS_KEY` | for admin upload | R2 S3 secret (server-only) |
 | `R2_BUCKET` | for admin upload | Bucket name |
 | `R2_JURISDICTION` | optional | Bucket jurisdiction (e.g. `eu`); unset for default |
-| `NEXT_PUBLIC_SENTRY_DSN` | optional | Enables Sentry when set |
+| `SENTRY_DSN` | optional | Enables server and browser Sentry reporting when set |
 
 `DATABASE_URL` and `R2_SECRET_ACCESS_KEY` must stay server-only — never expose them through
 `NEXT_PUBLIC_*`, client bundles, rendered output, or logs.
@@ -137,7 +137,7 @@ Run a backup before each migration deploy and verify a restore at least once.
 
 ## Observability
 
-Set `NEXT_PUBLIC_SENTRY_DSN` to enable Sentry; leave it unset to disable it (the app starts
+Set `SENTRY_DSN` to enable Sentry; leave it unset to disable it (the app starts
 fine either way). Confirm a test error appears in Sentry after the first deploy.
 
 ## Pre-deploy verification

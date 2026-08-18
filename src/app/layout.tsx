@@ -3,7 +3,8 @@ import { Inter, Spectral } from 'next/font/google';
 import { Providers } from '../components/providers';
 
 import { ClerkProvider } from '@clerk/nextjs';
-import { appEnv } from '@/lib/env';
+import { getClerkPublishableKey } from '@/lib/env';
+import { connection } from 'next/server';
 
 import './globals.css';
 
@@ -36,13 +37,18 @@ export const metadata: Metadata = {
     },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
     children,
 }: Readonly<{
     children: React.ReactNode;
 }>) {
+    // Defer rendering until request time so one container image can receive its Clerk key
+    // from runtime environment variables instead of baking the key into the client bundle.
+    await connection();
+    const clerkPublishableKey = getClerkPublishableKey();
+
     return (
-        <ClerkProvider publishableKey={appEnv.clerkPublishableKey}>
+        <ClerkProvider publishableKey={clerkPublishableKey}>
             <html lang="en" className={`${inter.variable} ${spectral.variable} dark`}>
                 <body className="antialiased">
                     <Providers>{children}</Providers>
