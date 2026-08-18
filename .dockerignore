@@ -1,0 +1,37 @@
+.git
+.github
+node_modules
+.next
+.open-next
+out
+build
+coverage
+.million
+.impeccable
+docs
+
+# Secrets must never enter the build context.
+.env
+.env*.local
+.env.development
+.env.test
+.env.production
+.dev.vars
+.sentryclirc
+.clerk.json
+.clerk
+*.pem
+*-service-account.json
+*-credentials.json
+
+# Audio binaries live in R2, not the image.
+public/audio
+scripts/audio/originals
+scripts/audio/out
+
+Dockerfile
+.dockerignore
+docker-compose.yml
+*.tsbuildinfo
+.DS_Store
+.vscode

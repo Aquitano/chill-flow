@@ -20,9 +20,11 @@ export default clerkMiddleware(async (auth, req) => {
 
 export const config = {
     matcher: [
-        // Skip Next.js internals and all static files, unless found in search params
-        '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+        // Skip Next.js internals and all static files, unless found in search params.
+        // /api/health is excluded too: clerkMiddleware throws when Clerk keys are missing, and
+        // a liveness probe that depends on auth config can't report "the process is up".
+        '/((?!_next|api/health|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
         // Always run for API routes
-        '/(api|trpc)(.*)',
+        '/(api|trpc)((?!/health$).*)',
     ],
 };

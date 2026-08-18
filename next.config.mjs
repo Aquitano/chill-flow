@@ -4,6 +4,9 @@ import { withSentryConfig } from '@sentry/nextjs';
 /** @type {import('next').NextConfig} */
 const nextConfig = {
     reactStrictMode: true,
+    // Emits .next/standalone with a self-contained server.js, so the runtime image ships only
+    // traced dependencies instead of the full node_modules tree.
+    output: 'standalone',
     images: {
         remotePatterns: [
             {

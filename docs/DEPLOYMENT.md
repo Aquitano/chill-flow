@@ -4,6 +4,10 @@ ChillFlow deploys as a Next.js app on **Vercel**, backed by **managed Postgres (
 **Cloudflare R2** for audio, and **Clerk** for auth. This runbook takes a fresh clone to a
 live deployment.
 
+To run the app as a container on your own VPS instead, see
+[SELF-HOSTING.md](SELF-HOSTING.md). Steps 1-4 below (Neon, R2, Clerk, catalog publish) apply
+to both paths.
+
 ## Architecture
 
 | Concern | Service | Notes |
