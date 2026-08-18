@@ -16,7 +16,9 @@ export interface ResizablePanel {
 
 const STORAGE_KEY = 'chillflow:tasks-panel-size';
 const DEFAULT_SIZE: PanelSize = { width: 320, height: 440 };
-const MIN_SIZE: PanelSize = { width: 288, height: 220 };
+// Narrower than the default and the composer footer breaks apart; resizing is for
+// growing the panel, so the floor sits at the width the layout is designed for.
+const MIN_SIZE: PanelSize = { width: 320, height: 220 };
 // Below this the panel is a full sheet instead: a 320px pane floating beside a dial on a
 // 700px-wide screen leaves neither enough room to be usable.
 const DESKTOP_QUERY = '(min-width: 768px)';

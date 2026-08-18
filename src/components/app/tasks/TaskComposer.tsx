@@ -159,12 +159,13 @@ export function TaskComposer() {
         confirmations.push(`${dateToken.raw} → ${formatDue(parsed.dueAt, parsed.dueHasTime)}`);
     }
 
+    // Short strings on purpose: the footer has ~260px at the panel's minimum width.
     const lengthNotice =
         remaining > LENGTH_NOTICE_AT
             ? ''
             : remaining < 0
-              ? `${-remaining} over the ${MAX_TASK_LENGTH}-character limit`
-              : `${remaining} characters left`;
+              ? `${-remaining} over the limit`
+              : `${remaining} ${remaining === 1 ? 'character' : 'characters'} left`;
 
     return (
         <div
@@ -308,7 +309,14 @@ export function TaskComposer() {
 
             <div className="mt-3 flex items-center justify-between gap-2 border-t border-white/10 pt-3">
                 <span className="flex min-w-0 items-center gap-2 text-[11px]">
-                    <span className="hidden items-center gap-1 text-ink-dim sm:flex">
+                    {/* The length notice takes over the hint's slot: at the panel's minimum
+                        width there is only room for one of them beside the buttons. */}
+                    <span
+                        className={cn(
+                            'items-center gap-1 whitespace-nowrap text-ink-dim',
+                            lengthNotice ? 'hidden' : 'hidden sm:flex',
+                        )}
+                    >
                         <CornerDownLeft className="h-3 w-3" /> to add
                     </span>
                     {/* Always-mounted live region, like the token confirmations above: the
@@ -321,7 +329,7 @@ export function TaskComposer() {
                         {lengthNotice}
                     </span>
                 </span>
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 items-center gap-2">
                     <Button type="button" variant="ghost" size="sm" onClick={handleCancel}>
                         <X className="h-3.5 w-3.5" /> Cancel
                     </Button>

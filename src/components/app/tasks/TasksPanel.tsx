@@ -147,6 +147,16 @@ function TaskRow({ task, focusTotal, nav }: { task: Task; focusTotal?: TaskFocus
     const [armed, setArmed] = useState(false);
     const rowRef = useRef<HTMLLIElement>(null);
 
+    // Set once Enter/Escape has ended the rename: refocusing the row blurs the input while
+    // it is still mounted (setDraft(null) has not applied yet), and that blur must not
+    // commit again — Enter would mutate twice and Escape would commit a cancelled rename.
+    const renameEnded = useRef(false);
+
+    const startRename = () => {
+        renameEnded.current = false;
+        setDraft(task.text);
+    };
+
     const commitRename = () => {
         const next = draft?.trim() ?? '';
         if (next && next !== task.text) {
@@ -157,6 +167,7 @@ function TaskRow({ task, focusTotal, nav }: { task: Task; focusTotal?: TaskFocus
 
     /** Ends a rename from the keyboard, where focus has to go back to the row it came from. */
     const endRename = (commit: boolean) => {
+        renameEnded.current = true;
         if (commit) commitRename();
         else setDraft(null);
         rowRef.current?.focus();
@@ -181,7 +192,7 @@ function TaskRow({ task, focusTotal, nav }: { task: Task; focusTotal?: TaskFocus
         }
         if (event.key === 'Enter') {
             event.preventDefault();
-            setDraft(task.text);
+            startRename();
         } else if (event.key === ' ') {
             event.preventDefault();
             updateTask.mutate({ id: task.id, isCompleted: !task.isCompleted });
@@ -259,7 +270,7 @@ function TaskRow({ task, focusTotal, nav }: { task: Task; focusTotal?: TaskFocus
                 {draft === null ? (
                     <button
                         type="button"
-                        onClick={() => setDraft(task.text)}
+                        onClick={startRename}
                         className={cn(
                             'focus-visible:outline-ember block w-full truncate rounded text-left text-sm focus-visible:outline-2',
                             task.isCompleted ? 'text-ink-dim line-through' : 'text-ink',
@@ -275,7 +286,9 @@ function TaskRow({ task, focusTotal, nav }: { task: Task; focusTotal?: TaskFocus
                         value={draft}
                         maxLength={MAX_TASK_LENGTH}
                         onChange={(event) => setDraft(event.target.value)}
-                        onBlur={commitRename}
+                        onBlur={() => {
+                            if (!renameEnded.current) commitRename();
+                        }}
                         onKeyDown={(event) => {
                             if (event.key === 'Enter') {
                                 event.preventDefault();
