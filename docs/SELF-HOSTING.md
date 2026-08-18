@@ -106,12 +106,38 @@ stopped reading them.
 
 ## 5. Deploy and update
 
+The first workflow run publishes the GHCR package as **private** even when the repository is
+public — package visibility is a separate setting, and Compose does not authenticate on its
+own, so `docker compose pull` on a fresh VPS fails with `denied` until you do one of:
+
+- flip the package to public under Packages → chill-flow → Package settings → Change
+  visibility, or
+- log the VPS in once with a token carrying the `read:packages` scope:
+
+    ```bash
+    echo "$GHCR_TOKEN" | docker login ghcr.io -u <github-username> --password-stdin
+    ```
+
+Then, for every release:
+
 ```bash
 docker compose pull && docker compose up -d
 ```
 
-Compose starts the new container, waits for the healthcheck (`/api/health`), and removes the
-old one. To roll back, pin `image:` to a previous `sha-` tag and repeat.
+Expect a few seconds of downtime. `app` holds a fixed `127.0.0.1:3000` binding, so Compose
+stops and removes the old container before the replacement can claim the port, and the tunnel
+returns errors until the new process listens. Compose does not gate that swap on the
+healthcheck — the `service_healthy` condition only decides when `cloudflared` starts. A
+zero-downtime swap would need two app services behind a local reverse proxy; for a
+single-box deploy the outage is not worth that.
+
+Confirm the rollout landed:
+
+```bash
+docker compose ps    # app turns healthy at the first check, one interval in
+```
+
+To roll back, pin `image:` to a previous `sha-` tag and repeat.
 
 ## 6. Post-deploy smoke test
 
