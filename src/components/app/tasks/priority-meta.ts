@@ -7,6 +7,8 @@ export interface PriorityMeta {
     accent: string;
     ring: string;
     token: string;
+    /** High is the only filled flag, so priority never rests on colour alone. */
+    flagFill: 'currentColor' | 'none';
 }
 
 /** Ordered high -> low so menus and the priority cycle read top-down. */
@@ -18,6 +20,7 @@ export const PRIORITY_META: Record<TaskPriority, PriorityMeta> = {
         accent: 'text-rose-300',
         ring: 'border-rose-400/70',
         token: 'bg-rose-500/30 text-rose-50',
+        flagFill: 'currentColor',
     },
     medium: {
         value: 'medium',
@@ -26,6 +29,7 @@ export const PRIORITY_META: Record<TaskPriority, PriorityMeta> = {
         accent: 'text-amber-200',
         ring: 'border-amber-300/70',
         token: 'bg-amber-400/30 text-amber-50',
+        flagFill: 'none',
     },
     low: {
         value: 'low',
@@ -34,6 +38,7 @@ export const PRIORITY_META: Record<TaskPriority, PriorityMeta> = {
         accent: 'text-sky-300',
         ring: 'border-sky-400/70',
         token: 'bg-sky-500/30 text-sky-50',
+        flagFill: 'none',
     },
 };
 

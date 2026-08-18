@@ -1,3 +1,4 @@
+import { MAX_TASK_LENGTH } from '@/lib/task-parser';
 import { describe, expect, it } from 'vitest';
 import {
     cancelSessionInputSchema,
@@ -31,6 +32,13 @@ describe('backend validation', () => {
         expect(result.dueAt).toEqual(dueAt);
         expect(result.dueHasTime).toBe(true);
         expect(result.priority).toBe('medium');
+    });
+
+    // The composer and the rename field both gate on MAX_TASK_LENGTH; this pins it to the
+    // limit the server actually enforces, since the two are declared separately.
+    it('accepts task text exactly as long as the client allows, and no longer', () => {
+        expect(createTaskInputSchema.safeParse({ text: 'a'.repeat(MAX_TASK_LENGTH) }).success).toBe(true);
+        expect(createTaskInputSchema.safeParse({ text: 'a'.repeat(MAX_TASK_LENGTH + 1) }).success).toBe(false);
     });
 
     it('drops a stray time flag on creation when no due date is given', () => {
