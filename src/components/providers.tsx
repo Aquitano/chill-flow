@@ -27,8 +27,10 @@ export const Providers = ({ children }: PropsWithChildren) => {
                 mutationCache: new MutationCache({
                     // Every failed mutation (task/preference/session) surfaces a toast so
                     // failures are never silent. The message id dedupes identical errors
-                    // (e.g. a flapping background preference save).
-                    onError: (error) => {
+                    // (e.g. a flapping background preference save). Mutations that name the
+                    // failed action themselves opt out via `meta.toasted`.
+                    onError: (error, _variables, _context, mutation) => {
+                        if (mutation.meta?.toasted) return;
                         const message = describeApiError(error);
                         toast.error(message, { id: message });
                     },

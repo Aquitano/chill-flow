@@ -2,6 +2,9 @@ import type { Task } from '@/models/app';
 
 export type TaskPriority = Task['priority'];
 
+/** Matches the server's task-text limit, so no UI path can submit text it will reject. */
+export const MAX_TASK_LENGTH = 120;
+
 /** Default priority applied when no token is typed (and what p4 clears back to). */
 export const DEFAULT_PRIORITY: TaskPriority = 'medium';
 

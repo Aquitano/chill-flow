@@ -13,24 +13,20 @@ import {
     useTaskFocusTotalsQuery,
     useUpdateTaskMutation,
 } from '@/hooks/use-app-data';
-import { describeApiError } from '@/lib/api';
 import { formatFocusDuration } from '@/lib/focus-duration';
 import { dueState, formatDue, quickDueOptions, type DueState } from '@/lib/task-dates';
-import type { TaskPriority } from '@/lib/task-parser';
+import { MAX_TASK_LENGTH, type TaskPriority } from '@/lib/task-parser';
 import { cn } from '@/lib/utils';
 import type { Task, TaskFocusTotal } from '@/models/app';
 import { useAppStore } from '@/store/app-store';
 import { AnimatePresence, motion } from 'framer-motion';
 import { CalendarDays, Check, Flag, Target, Timer, Trash2, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { DUE_TEXT } from './due-meta';
 import { PRIORITY_META, PRIORITY_OPTIONS } from './priority-meta';
 import { TaskComposer } from './TaskComposer';
 import type { ResizablePanel } from './use-resizable-panel';
-
-/** Matches the server's task-text limit, so a rename can't fail validation on length. */
-const MAX_TASK_LENGTH = 120;
 
 /**
  * Clearing hard-deletes every completed task at once, and nothing is kept server-side to
@@ -49,7 +45,6 @@ function ClearCompletedButton({ count }: { count: number }) {
         setArmed(false);
         clearCompleted.mutate(undefined, {
             onSuccess: ({ count: cleared }) => toast(`Cleared ${cleared} completed ${plural(cleared, 'task')}`),
-            onError: (error) => toast.error("Couldn't clear completed tasks", { description: describeApiError(error) }),
         });
     };
 
@@ -79,7 +74,66 @@ function focusLabelOf(total: TaskFocusTotal) {
     return `${formatFocusDuration(total.totalSeconds)} focused across ${total.sessionCount} ${plural(total.sessionCount, 'block')}`;
 }
 
-function TaskRow({ task, focusTotal }: { task: Task; focusTotal?: TaskFocusTotal }) {
+interface RowNavigation {
+    /** True when this row carries the list's roving tab stop. */
+    isActive: boolean;
+    onFocus: () => void;
+    /** Handles the roving keys; true means the key was consumed. */
+    onNavKey: (key: string) => boolean;
+    /** Moves the tab stop off this row, called just before it is removed. */
+    onLeaving: () => void;
+}
+
+/**
+ * Roving tabindex over the task rows: arrows move a single tab stop, Home/End jump to the
+ * ends. The active row is tracked by id rather than index, so the regrouping that follows a
+ * mutation keeps the same row active; if that row is gone the stop falls back to the first.
+ */
+function useRowNavigation(orderedIds: string[]) {
+    const [activeId, setActiveId] = useState<string | null>(null);
+    const listRef = useRef<HTMLUListElement>(null);
+    const active = activeId !== null && orderedIds.includes(activeId) ? activeId : (orderedIds[0] ?? null);
+
+    const focusRow = (id: string | undefined) => {
+        if (id === undefined) return;
+        setActiveId(id);
+        listRef.current?.querySelector<HTMLElement>(`[data-task-row="${CSS.escape(id)}"]`)?.focus();
+    };
+
+    const targetOf = (key: string, index: number): string | undefined => {
+        switch (key) {
+            case 'ArrowDown':
+                return orderedIds[Math.min(index + 1, orderedIds.length - 1)];
+            case 'ArrowUp':
+                return orderedIds[Math.max(index - 1, 0)];
+            case 'Home':
+                return orderedIds[0];
+            case 'End':
+                return orderedIds.at(-1);
+            default:
+                return undefined;
+        }
+    };
+
+    const rowProps = (id: string): RowNavigation => ({
+        isActive: active === id,
+        onFocus: () => setActiveId(id),
+        onNavKey: (key) => {
+            const target = targetOf(key, orderedIds.indexOf(id));
+            if (target === undefined) return false;
+            focusRow(target);
+            return true;
+        },
+        onLeaving: () => {
+            const index = orderedIds.indexOf(id);
+            focusRow(orderedIds[index + 1] ?? orderedIds[index - 1]);
+        },
+    });
+
+    return { listRef, rowProps };
+}
+
+function TaskRow({ task, focusTotal, nav }: { task: Task; focusTotal?: TaskFocusTotal; nav: RowNavigation }) {
     const updateTask = useUpdateTaskMutation();
     const deleteTask = useDeleteTaskMutation();
     const setFocusTask = useAppStore((state) => state.setFocusTask);
@@ -87,6 +141,21 @@ function TaskRow({ task, focusTotal }: { task: Task; focusTotal?: TaskFocusTotal
     const meta = PRIORITY_META[task.priority];
     // Non-null while renaming; the row shows the field instead of the label.
     const [draft, setDraft] = useState<string | null>(null);
+    // A deleted task can't be restored — recreating it would mint a new id and orphan the
+    // focus totals keyed to the old one — so the trash arms first and deletes on the
+    // second press, exactly like Clear completed. Focus leaving the row disarms it.
+    const [armed, setArmed] = useState(false);
+    const rowRef = useRef<HTMLLIElement>(null);
+
+    // Set once Enter/Escape has ended the rename: refocusing the row blurs the input while
+    // it is still mounted (setDraft(null) has not applied yet), and that blur must not
+    // commit again — Enter would mutate twice and Escape would commit a cancelled rename.
+    const renameEnded = useRef(false);
+
+    const startRename = () => {
+        renameEnded.current = false;
+        setDraft(task.text);
+    };
 
     const commitRename = () => {
         const next = draft?.trim() ?? '';
@@ -95,6 +164,49 @@ function TaskRow({ task, focusTotal }: { task: Task; focusTotal?: TaskFocusTotal
         }
         setDraft(null);
     };
+
+    /** Ends a rename from the keyboard, where focus has to go back to the row it came from. */
+    const endRename = (commit: boolean) => {
+        renameEnded.current = true;
+        if (commit) commitRename();
+        else setDraft(null);
+        rowRef.current?.focus();
+    };
+
+    const requestDelete = () => {
+        if (!armed) {
+            setArmed(true);
+            return;
+        }
+        setArmed(false);
+        nav.onLeaving();
+        deleteTask.mutate({ id: task.id });
+    };
+
+    // Keys pressed on the row itself; the buttons and the rename field own their own.
+    const handleKeyDown = (event: React.KeyboardEvent<HTMLLIElement>) => {
+        if (event.target !== event.currentTarget) return;
+        if (nav.onNavKey(event.key)) {
+            event.preventDefault();
+            return;
+        }
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            startRename();
+        } else if (event.key === ' ') {
+            event.preventDefault();
+            updateTask.mutate({ id: task.id, isCompleted: !task.isCompleted });
+        } else if (event.key === 'Delete') {
+            event.preventDefault();
+            requestDelete();
+        }
+    };
+
+    // Row actions keep out of the way until hover or keyboard focus on desktop; below md
+    // there is no hover, so they always show. What is state rather than an action stays
+    // visible: the focus marker, an armed delete, and the high-priority flag.
+    const reveal = (pinned: boolean) =>
+        pinned ? undefined : 'md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100';
 
     const dueMenuItems = (
         <>
@@ -121,12 +233,20 @@ function TaskRow({ task, focusTotal }: { task: Task; focusTotal?: TaskFocusTotal
 
     return (
         <motion.li
+            ref={rowRef}
             layout
+            data-task-row={task.id}
+            tabIndex={nav.isActive ? 0 : -1}
+            onFocus={nav.onFocus}
+            onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) setArmed(false);
+            }}
+            onKeyDown={handleKeyDown}
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, x: -12 }}
             transition={{ duration: 0.18 }}
-            className="group flex items-center gap-3 rounded-lg px-2 py-2 transition hover:bg-white/5"
+            className="group flex items-center gap-3 rounded-lg px-2 py-2 transition hover:bg-white/5 focus-visible:outline-ember focus-visible:outline-2"
         >
             <button
                 type="button"
@@ -150,7 +270,7 @@ function TaskRow({ task, focusTotal }: { task: Task; focusTotal?: TaskFocusTotal
                 {draft === null ? (
                     <button
                         type="button"
-                        onClick={() => setDraft(task.text)}
+                        onClick={startRename}
                         className={cn(
                             'focus-visible:outline-ember block w-full truncate rounded text-left text-sm focus-visible:outline-2',
                             task.isCompleted ? 'text-ink-dim line-through' : 'text-ink',
@@ -166,14 +286,16 @@ function TaskRow({ task, focusTotal }: { task: Task; focusTotal?: TaskFocusTotal
                         value={draft}
                         maxLength={MAX_TASK_LENGTH}
                         onChange={(event) => setDraft(event.target.value)}
-                        onBlur={commitRename}
+                        onBlur={() => {
+                            if (!renameEnded.current) commitRename();
+                        }}
                         onKeyDown={(event) => {
                             if (event.key === 'Enter') {
                                 event.preventDefault();
-                                commitRename();
+                                endRename(true);
                             } else if (event.key === 'Escape') {
                                 event.preventDefault();
-                                setDraft(null);
+                                endRename(false);
                             }
                         }}
                         aria-label="Task name"
@@ -218,15 +340,7 @@ function TaskRow({ task, focusTotal }: { task: Task; focusTotal?: TaskFocusTotal
                 )}
             </span>
 
-            <div
-                className={cn(
-                    'flex items-center gap-1 transition',
-                    // The focus marker stays visible without hover; it is state, not an action.
-                    isFocused
-                        ? 'opacity-100'
-                        : 'opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100',
-                )}
-            >
+            <div className="flex items-center gap-1">
                 {!task.isCompleted && (
                     <button
                         type="button"
@@ -235,6 +349,7 @@ function TaskRow({ task, focusTotal }: { task: Task; focusTotal?: TaskFocusTotal
                         className={cn(
                             'rounded p-1 transition hover:bg-white/10',
                             isFocused ? 'text-ember' : 'text-ink-dim hover:text-ink-mid',
+                            reveal(isFocused),
                         )}
                         aria-label={isFocused ? 'Stop focusing on this task' : 'Focus on this task'}
                     >
@@ -246,7 +361,10 @@ function TaskRow({ task, focusTotal }: { task: Task; focusTotal?: TaskFocusTotal
                         <DropdownMenuTrigger asChild>
                             <button
                                 type="button"
-                                className="rounded p-1 text-ink-dim transition hover:bg-white/10 hover:text-ink-mid"
+                                className={cn(
+                                    'rounded p-1 text-ink-dim transition hover:bg-white/10 hover:text-ink-mid',
+                                    reveal(false),
+                                )}
                                 aria-label="Set due date"
                             >
                                 <CalendarDays className="h-3.5 w-3.5" />
@@ -261,10 +379,14 @@ function TaskRow({ task, focusTotal }: { task: Task; focusTotal?: TaskFocusTotal
                     <DropdownMenuTrigger asChild>
                         <button
                             type="button"
-                            className={cn('rounded p-1 transition hover:bg-white/10', meta.accent)}
+                            className={cn(
+                                'rounded p-1 transition hover:bg-white/10',
+                                meta.accent,
+                                reveal(task.priority === 'high'),
+                            )}
                             aria-label={`Task priority: ${meta.label}`}
                         >
-                            <Flag className="h-3.5 w-3.5" />
+                            <Flag className="h-3.5 w-3.5" fill={meta.flagFill} />
                         </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="bg-black/90 backdrop-blur-md">
@@ -276,7 +398,7 @@ function TaskRow({ task, focusTotal }: { task: Task; focusTotal?: TaskFocusTotal
                                 }
                                 className={task.priority === option.value ? 'bg-white/10' : ''}
                             >
-                                <Flag className={cn('h-3.5 w-3.5', option.accent)} />
+                                <Flag className={cn('h-3.5 w-3.5', option.accent)} fill={option.flagFill} />
                                 {option.label}
                             </DropdownMenuItem>
                         ))}
@@ -284,12 +406,22 @@ function TaskRow({ task, focusTotal }: { task: Task; focusTotal?: TaskFocusTotal
                 </DropdownMenu>
                 <button
                     type="button"
-                    onClick={() => deleteTask.mutate({ id: task.id })}
-                    className="rounded p-1 text-ink-dim transition hover:bg-white/10 hover:text-rose-300"
-                    aria-label="Delete task"
+                    onClick={requestDelete}
+                    disabled={deleteTask.isPending}
+                    className={cn(
+                        'rounded p-1 transition hover:bg-white/10',
+                        armed ? 'bg-rose-400/15 text-rose-300' : 'text-ink-dim hover:text-rose-300',
+                        reveal(armed),
+                    )}
+                    aria-label={armed ? `Delete “${task.text}”? Press again to confirm` : `Delete “${task.text}”`}
                 >
                     <Trash2 className="h-3.5 w-3.5" />
                 </button>
+                {/* Always-mounted live region: arming has no text of its own, and from the
+                    keyboard the label that changes is not the one focus sits on. */}
+                <span role="status" aria-live="polite" className="sr-only">
+                    {armed ? `Press Delete again to remove “${task.text}”` : ''}
+                </span>
             </div>
         </motion.li>
     );
@@ -347,6 +479,7 @@ export function TasksPanel({ panel }: { panel: ResizablePanel }) {
     const openCount = tasks.filter((task) => !task.isCompleted).length;
     const { enabled: resizable, size, resizing, onResizeStart } = panel;
     const groups = groupTasks(tasks);
+    const rowNav = useRowNavigation(groups.flatMap((group) => group.tasks.map((task) => task.id)));
 
     const focusTotalsQuery = useTaskFocusTotalsQuery();
     const focusTotals = useMemo(
@@ -394,7 +527,7 @@ export function TasksPanel({ panel }: { panel: ResizablePanel }) {
             <div className="scrollbar-custom flex-1 overflow-y-auto px-4 pb-4">
                 <TaskComposer />
 
-                <ul className="space-y-0.5">
+                <ul ref={rowNav.listRef} className="space-y-0.5">
                     {tasks.length === 0 && (
                         <li className="rounded-xl border border-dashed border-white/15 px-3 py-6 text-center">
                             <p className="text-sm font-medium text-ink-mid">No tasks yet</p>
@@ -426,7 +559,12 @@ export function TasksPanel({ panel }: { panel: ResizablePanel }) {
                                   ]
                                 : []),
                             ...group.tasks.map((task) => (
-                                <TaskRow key={task.id} task={task} focusTotal={focusTotals.get(task.id)} />
+                                <TaskRow
+                                    key={task.id}
+                                    task={task}
+                                    focusTotal={focusTotals.get(task.id)}
+                                    nav={rowNav.rowProps(task.id)}
+                                />
                             )),
                         ])}
                     </AnimatePresence>

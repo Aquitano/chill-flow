@@ -1,8 +1,16 @@
 'use client';
 
-import { ApiError, api, type WorkspacePresetInput } from '@/lib/api';
+import { ApiError, api, describeApiError, type WorkspacePresetInput } from '@/lib/api';
 import { Task, UserPreferences } from '@/models/app';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+
+declare module '@tanstack/react-query' {
+    interface Register {
+        /** Set by mutations that toast their own failure; see `rollbackTasks`. */
+        mutationMeta: { toasted?: true };
+    }
+}
 
 const queryKeys = {
     tasks: ['tasks'],
@@ -177,12 +185,28 @@ function retryTransientOnce(failureCount: number, error: Error) {
 
 type TaskListContext = { previous?: Task[] };
 
+/**
+ * Shared failure path for the task writes: undo the optimistic list and name what broke,
+ * so every call site (row, composer, timer prompt) reports the same way. The generic
+ * mutation-cache toast in providers.tsx stands down for `meta.toasted` mutations, so a
+ * failure still shows exactly one toast.
+ */
+function rollbackTasks(queryClient: QueryClient, title: string) {
+    return (error: Error, _input: unknown, context: TaskListContext | undefined) => {
+        if (context?.previous) {
+            queryClient.setQueryData(queryKeys.tasks, context.previous);
+        }
+        toast.error(title, { description: describeApiError(error) });
+    };
+}
+
 export function useCreateTaskMutation() {
     const queryClient = useQueryClient();
 
     return useMutation({
         mutationFn: (input: { text: string; priority: Task['priority']; dueAt?: Date | null; dueHasTime?: boolean }) =>
             api.tasks.create(input),
+        meta: { toasted: true },
         onMutate: async (input): Promise<TaskListContext> => {
             await queryClient.cancelQueries({ queryKey: queryKeys.tasks });
             const previous = queryClient.getQueryData<Task[]>(queryKeys.tasks);
@@ -198,11 +222,7 @@ export function useCreateTaskMutation() {
             queryClient.setQueryData<Task[]>(queryKeys.tasks, (old = []) => [optimisticTask, ...old]);
             return { previous };
         },
-        onError: (_error, _input, context) => {
-            if (context?.previous) {
-                queryClient.setQueryData(queryKeys.tasks, context.previous);
-            }
-        },
+        onError: rollbackTasks(queryClient, "Couldn't add that task"),
         onSettled: async () => {
             await queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
         },
@@ -233,6 +253,7 @@ export function useUpdateTaskMutation() {
 
     return useMutation({
         mutationFn: (input: TaskUpdateInput) => api.tasks.update(input),
+        meta: { toasted: true },
         onMutate: async (input): Promise<TaskListContext> => {
             await queryClient.cancelQueries({ queryKey: queryKeys.tasks });
             const previous = queryClient.getQueryData<Task[]>(queryKeys.tasks);
@@ -245,11 +266,7 @@ export function useUpdateTaskMutation() {
             );
             return { previous };
         },
-        onError: (_error, _input, context) => {
-            if (context?.previous) {
-                queryClient.setQueryData(queryKeys.tasks, context.previous);
-            }
-        },
+        onError: rollbackTasks(queryClient, "Couldn't save that change"),
         onSettled: async () => {
             await queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
         },
@@ -261,17 +278,14 @@ export function useDeleteTaskMutation() {
 
     return useMutation({
         mutationFn: (input: { id: string }) => api.tasks.delete(input),
+        meta: { toasted: true },
         onMutate: async (input): Promise<TaskListContext> => {
             await queryClient.cancelQueries({ queryKey: queryKeys.tasks });
             const previous = queryClient.getQueryData<Task[]>(queryKeys.tasks);
             queryClient.setQueryData<Task[]>(queryKeys.tasks, (old = []) => old.filter((task) => task.id !== input.id));
             return { previous };
         },
-        onError: (_error, _input, context) => {
-            if (context?.previous) {
-                queryClient.setQueryData(queryKeys.tasks, context.previous);
-            }
-        },
+        onError: rollbackTasks(queryClient, "Couldn't delete that task"),
         onSettled: async () => {
             await queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
         },
@@ -283,17 +297,14 @@ export function useClearCompletedTasksMutation() {
 
     return useMutation({
         mutationFn: () => api.tasks.clearCompleted(),
+        meta: { toasted: true },
         onMutate: async (): Promise<TaskListContext> => {
             await queryClient.cancelQueries({ queryKey: queryKeys.tasks });
             const previous = queryClient.getQueryData<Task[]>(queryKeys.tasks);
             queryClient.setQueryData<Task[]>(queryKeys.tasks, (old = []) => old.filter((task) => !task.isCompleted));
             return { previous };
         },
-        onError: (_error, _input, context) => {
-            if (context?.previous) {
-                queryClient.setQueryData(queryKeys.tasks, context.previous);
-            }
-        },
+        onError: rollbackTasks(queryClient, "Couldn't clear completed tasks"),
         onSettled: async () => {
             await queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
         },
@@ -356,8 +367,7 @@ export function useSessionRecoverMutation() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: (input: { id: string; elapsedSeconds: number; savedAtMs: number }) =>
-            api.sessions.recover(input),
+        mutationFn: (input: { id: string; elapsedSeconds: number; savedAtMs: number }) => api.sessions.recover(input),
         retry: retryTransientOnce,
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: queryKeys.sessions });

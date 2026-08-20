@@ -10,13 +10,23 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useCreateTaskMutation } from '@/hooks/use-app-data';
 import { dueState, formatDue, quickDueOptions } from '@/lib/task-dates';
-import { parseTaskInput, resolvePriority, stripSpans, stripPriorityTokens, type TaskPriority } from '@/lib/task-parser';
+import {
+    MAX_TASK_LENGTH,
+    parseTaskInput,
+    resolvePriority,
+    stripSpans,
+    stripPriorityTokens,
+    type TaskPriority,
+} from '@/lib/task-parser';
 import { cn } from '@/lib/utils';
 import { CalendarDays, Check, CornerDownLeft, Flag, Plus, X } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { DUE_CHIP, DUE_TOKEN_HIGHLIGHT } from './due-meta';
 import { PRIORITY_META, PRIORITY_OPTIONS } from './priority-meta';
 import { TokenHighlightInput } from './TokenHighlightInput';
+
+/** How close to the ceiling the length notice appears; a permanent counter would be noise. */
+const LENGTH_NOTICE_AT = 20;
 
 export function TaskComposer() {
     const createTask = useCreateTaskMutation();
@@ -53,7 +63,10 @@ export function TaskComposer() {
         className: token.type === 'priority' ? effectiveMeta.token : DUE_TOKEN_HIGHLIGHT,
     }));
 
-    const canSubmit = parsed.text.length > 0 && !createTask.isPending;
+    // The limit applies to the text the server stores — tokens are stripped before it is
+    // measured, so a `maxLength` on the field would cut the wrong string.
+    const remaining = MAX_TASK_LENGTH - parsed.text.length;
+    const canSubmit = parsed.text.length > 0 && remaining >= 0 && !createTask.isPending;
 
     const reset = () => {
         setValue('');
@@ -146,6 +159,14 @@ export function TaskComposer() {
         confirmations.push(`${dateToken.raw} → ${formatDue(parsed.dueAt, parsed.dueHasTime)}`);
     }
 
+    // Short strings on purpose: the footer has ~260px at the panel's minimum width.
+    const lengthNotice =
+        remaining > LENGTH_NOTICE_AT
+            ? ''
+            : remaining < 0
+              ? `${-remaining} over the limit`
+              : `${remaining} ${remaining === 1 ? 'character' : 'characters'} left`;
+
     return (
         <div
             className="mb-4 rounded-xl border border-white/15 bg-night-2/90 p-3 shadow-lg"
@@ -187,7 +208,7 @@ export function TaskComposer() {
                                 aria-label={`Priority: ${priorityChipLabel}`}
                                 aria-describedby={hintId}
                             >
-                                <Flag className="h-3.5 w-3.5" />
+                                <Flag className="h-3.5 w-3.5" fill={effectiveMeta.flagFill} />
                                 {priorityChipLabel}
                             </button>
                         </DropdownMenuTrigger>
@@ -207,7 +228,7 @@ export function TaskComposer() {
                                     onSelect={() => selectPriority(option.value)}
                                     className={!tokenActive && manualPriority === option.value ? 'bg-white/10' : ''}
                                 >
-                                    <Flag className={cn('h-3.5 w-3.5', PRIORITY_META[option.value].accent)} />
+                                    <Flag className={cn('h-3.5 w-3.5', option.accent)} fill={option.flagFill} />
                                     {option.label}
                                 </DropdownMenuItem>
                             ))}
@@ -286,11 +307,29 @@ export function TaskComposer() {
                 </span>
             </div>
 
-            <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-3">
-                <span className="hidden items-center gap-1 text-[11px] text-ink-dim sm:flex">
-                    <CornerDownLeft className="h-3 w-3" /> to add
+            <div className="mt-3 flex items-center justify-between gap-2 border-t border-white/10 pt-3">
+                <span className="flex min-w-0 items-center gap-2 text-[11px]">
+                    {/* The length notice takes over the hint's slot: at the panel's minimum
+                        width there is only room for one of them beside the buttons. */}
+                    <span
+                        className={cn(
+                            'items-center gap-1 whitespace-nowrap text-ink-dim',
+                            lengthNotice ? 'hidden' : 'hidden sm:flex',
+                        )}
+                    >
+                        <CornerDownLeft className="h-3 w-3" /> to add
+                    </span>
+                    {/* Always-mounted live region, like the token confirmations above: the
+                        notice only has text near the limit, so it announces as a mutation. */}
+                    <span
+                        role="status"
+                        aria-live="polite"
+                        className={cn('truncate', remaining < 0 ? 'text-rose-300' : 'text-ink-dim')}
+                    >
+                        {lengthNotice}
+                    </span>
                 </span>
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 items-center gap-2">
                     <Button type="button" variant="ghost" size="sm" onClick={handleCancel}>
                         <X className="h-3.5 w-3.5" /> Cancel
                     </Button>
