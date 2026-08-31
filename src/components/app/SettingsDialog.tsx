@@ -1,5 +1,6 @@
 'use client';
 
+import { FocusTrend } from '@/components/app/FocusTrend';
 import { SessionHistory } from '@/components/app/SessionHistory';
 import { WorkspacePresets } from '@/components/app/WorkspacePresets';
 import { Button } from '@/components/ui/button';
@@ -500,6 +501,8 @@ export function SettingsDialog() {
                                             </div>
                                         ))}
                                     </dl>
+
+                                    <FocusTrend enabled={isMenuOpen && activeSection === 'progress'} />
 
                                     <SessionHistory enabled={isMenuOpen && activeSection === 'progress'} />
                                 </div>

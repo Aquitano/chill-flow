@@ -87,7 +87,7 @@ export const CenterContent: React.FC = () => {
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: -12 }}
                         >
-                            <p className="text-xs tracking-[0.3em] text-ink-dim uppercase">Current pace</p>
+                            <p className="text-xs tracking-[0.3em] text-ink-dim uppercase">All time</p>
                             <h2 className="mt-4 text-4xl font-medium text-ink">
                                 {sessionSummary.totalMinutes} minutes focused
                             </h2>

@@ -7,6 +7,7 @@ import {
     AmbientMix,
     AmbientSound,
     Background,
+    DailyFocus,
     FocusSession,
     PomodoroSettings,
     SavedPreset,
@@ -259,6 +260,12 @@ const STREAK_WINDOW_DAYS = 366;
 
 /** How far back the progress panel's history list reaches. */
 const SESSION_HISTORY_LIMIT = 50;
+
+/**
+ * Days of per-day focus totals behind the trend strip: two weeks on screen, plus enough
+ * behind them that "last week" is always a complete week.
+ */
+const DAILY_FOCUS_WINDOW_DAYS = 28;
 
 function completedSessionsOf(userId: string) {
     return and(
@@ -885,6 +892,29 @@ export const appRepository = {
             .innerJoin(tasks, eq(tasks.id, focusSessions.taskId))
             .where(and(completedSessionsOf(userId), eq(tasks.userId, userId)))
             .groupBy(tasks.id);
+    },
+
+    /**
+     * Focus seconds per user-local calendar day over the recent window — grouped in the
+     * database the same way the streak days are. The SQL window is padded a day so a zone
+     * west of UTC never loses its oldest local day to the cutoff.
+     */
+    async listDailyFocus(database: Database, userId: string, timeZone: string): Promise<DailyFocus[]> {
+        const completedDay = completedDayInZone(timeZone);
+        return database
+            .select({
+                day: completedDay,
+                totalSeconds: sql<number>`coalesce(sum(${focusSessions.elapsedSeconds}), 0)::int`,
+            })
+            .from(focusSessions)
+            .where(
+                and(
+                    completedSessionsOf(userId),
+                    sql`${focusSessions.completedAt} >= now() - make_interval(days => ${DAILY_FOCUS_WINDOW_DAYS + 1})`,
+                ),
+            )
+            .groupBy(completedDay)
+            .orderBy(asc(completedDay));
     },
 
     async getSessionSummary(database: Database, userId: string, timeZone: string) {

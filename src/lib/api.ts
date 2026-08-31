@@ -6,6 +6,7 @@ import {
     AmbientMix,
     AmbientSound,
     Background,
+    DailyFocus,
     FocusSession,
     Quote,
     SavedPreset,
@@ -176,6 +177,7 @@ export const api = {
     sessions: {
         list: (input: { timeZone: string }) => unwrap<SessionPayload>(client.sessions.list.$get(input)),
         history: () => unwrap<FocusSession[]>(client.sessions.history.$get()),
+        daily: (input: { timeZone: string }) => unwrap<DailyFocus[]>(client.sessions.daily.$get(input)),
         taskTotals: () => unwrap<TaskFocusTotal[]>(client.sessions.taskTotals.$get()),
         start: (input: {
             mode: string;
