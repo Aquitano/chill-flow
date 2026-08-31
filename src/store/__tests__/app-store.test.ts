@@ -101,6 +101,47 @@ describe('the liked-tracks queue', () => {
     });
 });
 
+describe('previous and next track', () => {
+    beforeEach(resetStore);
+
+    const track = (id: string): Track => ({
+        id,
+        title: id,
+        artist: 'Test',
+        audioUrl: `/audio/${id}.mp3`,
+        duration: 60,
+        tags: [],
+        category: 'focus',
+    });
+    const library = [track('a'), track('b'), track('c')];
+
+    it('steps backward through the queue, twice in a row', () => {
+        useAppStore.setState({ tracks: library, currentTrack: library[2]! });
+
+        useAppStore.getState().previousTrack();
+        expect(useAppStore.getState().currentTrack?.id).toBe('b');
+
+        useAppStore.getState().previousTrack();
+        expect(useAppStore.getState().currentTrack?.id).toBe('a');
+    });
+
+    it('wraps from the first track to the last', () => {
+        useAppStore.setState({ tracks: library, currentTrack: library[0]! });
+
+        useAppStore.getState().previousTrack();
+        expect(useAppStore.getState().currentTrack?.id).toBe('c');
+    });
+
+    it('goes to the queue predecessor after a track was picked from the library', () => {
+        useAppStore.setState({ tracks: library, currentTrack: library[0]! });
+
+        useAppStore.getState().setCurrentTrack(library[2]!);
+        useAppStore.getState().previousTrack();
+
+        expect(useAppStore.getState().currentTrack?.id).toBe('b');
+    });
+});
+
 describe('presetToMinutes', () => {
     it('reads the shipped presets', () => {
         expect(presetToMinutes('15m', '25')).toBe(15);
@@ -230,6 +271,21 @@ describe('timer clock', () => {
 
         expect(useAppStore.getState().timerActive).toBe(true);
         expect(useAppStore.getState().timerSeconds).toBe(15 * 60);
+    });
+});
+
+describe('setTimerPreset', () => {
+    beforeEach(resetStore);
+
+    it('changes nothing while in Pomodoro mode', () => {
+        useAppStore.getState().setTimerMode('pomodoro');
+        const before = useAppStore.getState();
+
+        useAppStore.getState().setTimerPreset('15m');
+
+        const after = useAppStore.getState();
+        expect(after.timerSeconds).toBe(before.timerSeconds);
+        expect(after.selectedPreset).toBe(before.selectedPreset);
     });
 });
 
