@@ -6,6 +6,10 @@
  * or permission isn't granted, calls become no-ops instead of throwing. Permission is
  * only ever requested from an explicit user gesture (settings toggle or starting a
  * timer), never automatically on load.
+ *
+ * iOS Safari exposes the Notification API only inside a web app installed to the Home
+ * Screen (which the manifest in app/manifest.ts enables); in a plain tab it reports
+ * 'unsupported' here and the settings toggle explains that.
  */
 
 export type NotificationPermissionState = 'default' | 'granted' | 'denied' | 'unsupported';
@@ -31,20 +35,49 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
     }
 }
 
+let serviceWorkerRegistration: Promise<ServiceWorkerRegistration | null> | null = null;
+
 /**
- * Returns whether a notification was actually shown. Permission alone is not consent to
- * interrupt, so callers are still responsible for honoring `showNotifications`.
+ * Chrome for Android forbids `new Notification()` (it throws "Illegal constructor");
+ * notifications there must go through ServiceWorkerRegistration.showNotification. The
+ * worker (public/sw.js) does nothing else — no caching, no fetch handling — and is
+ * registered lazily the first time a notification is actually shown.
  */
-export function showTimerNotification(title: string, body: string): boolean {
-    if (!isSupported() || Notification.permission !== 'granted') {
-        return false;
+function notificationServiceWorker(): Promise<ServiceWorkerRegistration | null> {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
+        return Promise.resolve(null);
     }
+    serviceWorkerRegistration ??= navigator.serviceWorker.register('/sw.js').catch(() => null);
+    return serviceWorkerRegistration;
+}
+
+function constructNotification(title: string, options: NotificationOptions): void {
     try {
-        // A shared tag means a newer timer event replaces the previous one rather than
-        // stacking notifications.
-        new Notification(title, { body, icon: '/favicon.ico', tag: 'chillflow-timer' });
-        return true;
+        new Notification(title, options);
     } catch {
-        return false;
+        // No construction path in this browser; there is nothing further to fall back to.
     }
+}
+
+/**
+ * Fire-and-forget: the notification is shown through the service worker registration
+ * where possible (required on Android, harmless elsewhere), falling back to the bare
+ * constructor. Permission alone is not consent to interrupt, so callers are still
+ * responsible for honoring `showNotifications`.
+ */
+export function showTimerNotification(title: string, body: string): void {
+    if (!isSupported() || Notification.permission !== 'granted') {
+        return;
+    }
+
+    // A shared tag means a newer timer event replaces the previous one rather than
+    // stacking notifications.
+    const options: NotificationOptions = { body, icon: '/favicon.ico', tag: 'chillflow-timer' };
+    void notificationServiceWorker().then((registration) => {
+        if (!registration) {
+            constructNotification(title, options);
+            return;
+        }
+        return registration.showNotification(title, options).catch(() => constructNotification(title, options));
+    });
 }

@@ -140,7 +140,10 @@ function AlertsSection() {
                         </span>
                     )}
                     {preferences.showNotifications && permission === 'unsupported' && (
-                        <span className="text-ink-dim mt-1.5 block text-xs">Not supported in this browser.</span>
+                        <span className="text-ink-dim mt-1.5 block text-xs">
+                            Not supported in this browser. On iPhone or iPad, add ChillFlow to your Home
+                            Screen first — notifications only work from there.
+                        </span>
                     )}
                     {preferences.showNotifications && permission === 'default' && (
                         <button
