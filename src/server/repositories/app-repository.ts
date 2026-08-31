@@ -72,6 +72,11 @@ function mapSavedPreset(row: typeof savedPresets.$inferSelect): SavedPreset {
         trackId: row.trackId,
         backgroundId: row.backgroundId,
         mode: row.mode,
+        ambientLevels: row.ambientLevels,
+        timerMode: row.timerMode,
+        timerPreset: row.timerPreset,
+        customMinutes: row.customMinutes,
+        pomodoroSettings: row.pomodoroSettings,
     };
 }
 
@@ -847,6 +852,11 @@ export const appRepository = {
                 trackId: row.trackId,
                 backgroundId: row.backgroundId,
                 mode: row.mode,
+                ambientLevels: row.ambientLevels,
+                timerMode: row.timerMode,
+                timerPreset: row.timerPreset,
+                customMinutes: row.customMinutes,
+                pomodoroSettings: row.pomodoroSettings,
                 createdAt: row.createdAt.toISOString(),
             })),
         };

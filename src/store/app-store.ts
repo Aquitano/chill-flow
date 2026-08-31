@@ -39,6 +39,9 @@ export type HydratablePreferences = {
     pomodoroSettings: PomodoroCadence;
 };
 
+/** Timer portion of a saved scene: HydratablePreferences minus the volume. */
+export type SceneTimerSettings = Omit<HydratablePreferences, 'volume'>;
+
 /** Preset label for open-ended focus: no countdown, the dial counts up instead. */
 export const OPEN_ENDED_PRESET = '∞';
 
@@ -259,6 +262,12 @@ interface AppState {
 
     setTimerMode: (mode: TimerMode) => void;
     hydratePreferences: (prefs: HydratablePreferences) => void;
+    /**
+     * Point the dial at a saved scene's timer. Returns false — leaving the dial exactly
+     * as it is — whenever a block is running or holds unfinished time, so applying a
+     * scene can never silently discard focus in progress.
+     */
+    applySceneTimer: (settings: SceneTimerSettings) => boolean;
     restoreTimer: (snapshot: TimerSnapshot) => TimerRestoreOutcome;
     startTimer: () => void;
     pauseTimer: () => void;
@@ -592,6 +601,43 @@ export const useAppStore = create<AppState>()(
                 false,
                 'hydratePreferences',
             ),
+
+        applySceneTimer: (settings) => {
+            const state = get();
+            const midCountdown =
+                !isOpenEnded(state) && state.timerSeconds !== (phaseDurationSeconds(state) ?? 0);
+            const midCountUp = isOpenEnded(state) && countUpSecondsAt(state, Date.now()) > 0;
+            if (state.timerActive || midCountdown || midCountUp) {
+                return false;
+            }
+
+            const focusMinutes = presetToMinutes(settings.timerPreset, settings.customMinutes);
+            const focusSeconds = focusMinutes === null ? 0 : focusMinutes * 60;
+            const pomodoroSeconds = settings.pomodoroSettings.focusMinutes * 60;
+
+            set(
+                {
+                    timerMode: settings.timerMode,
+                    selectedPreset: settings.timerPreset,
+                    customMinutes: settings.customMinutes,
+                    focusTimerSeconds: focusSeconds,
+                    pomodoroTimerSeconds: pomodoroSeconds,
+                    timerSeconds: settings.timerMode === 'focus' ? focusSeconds : pomodoroSeconds,
+                    timerActive: false,
+                    timerEndsAt: null,
+                    ...IDLE_COUNT_UP,
+                    pomodoroSettings: {
+                        ...state.pomodoroSettings,
+                        ...settings.pomodoroSettings,
+                        currentSession: 1,
+                        isBreak: false,
+                    },
+                },
+                false,
+                'applySceneTimer',
+            );
+            return true;
+        },
 
         restoreTimer: (snapshot) => {
             const state = get();
