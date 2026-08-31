@@ -460,6 +460,12 @@ export const TimerDial: React.FC = () => {
             // one still pending (pause, reset, skipped break) is silenced.
             coveredBoundaryChimeRef.current = chime.hasSounded();
             chime.cancelIfPending();
+            // The cover is only for boundary effects flushing in this same commit. A pause
+            // landing a breath after the deadline processes no boundary at all, and the
+            // flag must not survive to mute some later, unrelated one.
+            queueMicrotask(() => {
+                coveredBoundaryChimeRef.current = false;
+            });
         };
     }, [timerActive, timerEndsAt, isBreak, timerSoundPref, tickTimer]);
 
