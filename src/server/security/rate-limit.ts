@@ -1,6 +1,16 @@
 import { j } from '@/server/jstack';
 import { HTTPException } from 'hono/http-exception';
 
+/**
+ * Best-effort, per-instance rate limiting. Buckets live in module memory, so each
+ * serverless instance counts on its own and forgets everything on cold start — the
+ * limits hold within one warm instance, not across the fleet. That is a deliberate
+ * trade: every limited procedure already sits behind Clerk auth, so this blunts
+ * accidental client loops and single-instance floods rather than acting as a security
+ * control. If a fleet-wide guarantee is ever needed, back the buckets with shared
+ * storage (Postgres/Upstash) instead of tightening the numbers here.
+ */
+
 type RateLimitOptions = {
     key: string;
     limit: number;
