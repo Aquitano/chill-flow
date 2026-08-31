@@ -9,9 +9,10 @@ import {
     useUpdatePresetMutation,
 } from '@/hooks/use-app-data';
 import { describeApiError } from '@/lib/api';
+import { getAmbientMixer } from '@/lib/audio/ambient';
 import { cn } from '@/lib/utils';
 import type { SavedPreset } from '@/models/app';
-import { useAppStore } from '@/store/app-store';
+import { OPEN_ENDED_PRESET, useAppStore } from '@/store/app-store';
 import { Check, RefreshCcw, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -26,9 +27,14 @@ export function WorkspacePresets({ enabled }: { enabled: boolean }) {
     const backgrounds = useAppStore((state) => state.backgrounds);
     const currentTrack = useAppStore((state) => state.currentTrack);
     const selectedBackgroundId = useAppStore((state) => state.selectedBackgroundId);
+    const timerMode = useAppStore((state) => state.timerMode);
+    const selectedPreset = useAppStore((state) => state.selectedPreset);
+    const customMinutes = useAppStore((state) => state.customMinutes);
+    const pomodoroSettings = useAppStore((state) => state.pomodoroSettings);
     const setMode = useAppStore((state) => state.setMode);
     const setCurrentTrack = useAppStore((state) => state.setCurrentTrack);
     const setSelectedBackgroundId = useAppStore((state) => state.setSelectedBackgroundId);
+    const applySceneTimer = useAppStore((state) => state.applySceneTimer);
 
     const presetsQuery = usePresetsQuery(enabled);
     const savePreset = useSavePresetMutation();
@@ -37,25 +43,56 @@ export function WorkspacePresets({ enabled }: { enabled: boolean }) {
 
     const [name, setName] = useState('');
 
+    // The whole scene as it stands: what plays, what surrounds it, and how the timer is
+    // set. Ambient levels are read from the mixer at save time — they live outside the
+    // store — and an empty board saves as {} so the scene honestly has no ambience.
     const currentSetup = {
         trackId: currentTrack?.id ?? null,
         backgroundId: selectedBackgroundId,
         mode: currentMode,
+        ambientLevels: getAmbientMixer().currentLevels(),
+        timerMode,
+        timerPreset: selectedPreset,
+        customMinutes,
+        pomodoroSettings: {
+            focusMinutes: pomodoroSettings.focusMinutes,
+            breakMinutes: pomodoroSettings.breakMinutes,
+            longBreakMinutes: pomodoroSettings.longBreakMinutes,
+            sessionsBeforeLongBreak: pomodoroSettings.sessionsBeforeLongBreak,
+            autoStartBreaks: pomodoroSettings.autoStartBreaks,
+            autoStartFocus: pomodoroSettings.autoStartFocus,
+        },
     };
 
-    const describe = (preset: SavedPreset) =>
-        [
+    const timerLabel = (preset: SavedPreset) => {
+        if (preset.timerMode === 'pomodoro') {
+            return `Pomodoro ${preset.pomodoroSettings?.focusMinutes ?? ''}m`.trim();
+        }
+        if (!preset.timerPreset) return undefined;
+        return preset.timerPreset === OPEN_ENDED_PRESET ? 'Open-ended' : `${preset.timerPreset} focus`;
+    };
+
+    const describe = (preset: SavedPreset) => {
+        const layerCount = preset.ambientLevels ? Object.keys(preset.ambientLevels).length : 0;
+        return [
             modes[preset.mode]?.label ?? preset.mode,
             tracks.find((track) => track.id === preset.trackId)?.title,
             backgrounds.find((background) => background.id === preset.backgroundId)?.name,
+            timerLabel(preset),
+            layerCount > 0 ? `${layerCount} ambient ${layerCount === 1 ? 'layer' : 'layers'}` : undefined,
         ]
             .filter(Boolean)
             .join(' · ');
+    };
 
+    // Ambient levels are deliberately left out of the comparison: nudging one slider
+    // shouldn't un-check the scene the workspace was built from.
     const isApplied = (preset: SavedPreset) =>
         preset.mode === currentSetup.mode &&
         preset.trackId === currentSetup.trackId &&
-        preset.backgroundId === currentSetup.backgroundId;
+        preset.backgroundId === currentSetup.backgroundId &&
+        (preset.timerMode === null ||
+            (preset.timerMode === timerMode && preset.timerPreset === selectedPreset));
 
     const handleSave = () => {
         const trimmed = name.trim();
@@ -72,7 +109,8 @@ export function WorkspacePresets({ enabled }: { enabled: boolean }) {
     };
 
     // A preset points at ids, so a track or scene deleted since it was saved simply doesn't
-    // apply — better than refusing the whole preset over one missing piece.
+    // apply — better than refusing the whole preset over one missing piece. Null scene
+    // fields (presets from before scenes) leave ambience and the timer untouched.
     const handleApply = (preset: SavedPreset) => {
         setMode(preset.mode);
 
@@ -81,6 +119,30 @@ export function WorkspacePresets({ enabled }: { enabled: boolean }) {
 
         if (backgrounds.some((background) => background.id === preset.backgroundId)) {
             setSelectedBackgroundId(preset.backgroundId);
+        }
+
+        if (preset.ambientLevels) {
+            const mixer = getAmbientMixer();
+            if (Object.keys(preset.ambientLevels).length > 0) {
+                mixer.applyMix(preset.ambientLevels);
+            } else {
+                mixer.setPowered(false);
+            }
+        }
+
+        if (preset.timerMode && preset.timerPreset && preset.customMinutes && preset.pomodoroSettings) {
+            const applied = applySceneTimer({
+                timerMode: preset.timerMode,
+                timerPreset: preset.timerPreset,
+                customMinutes: preset.customMinutes,
+                pomodoroSettings: preset.pomodoroSettings,
+            });
+            if (!applied) {
+                toast('Kept your timer as it is', {
+                    id: 'scene-timer-kept',
+                    description: 'A block is in progress — the rest of the scene was applied.',
+                });
+            }
         }
     };
 

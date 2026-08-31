@@ -58,6 +58,18 @@ export interface ExportedPreset {
     trackId: string | null;
     backgroundId: string | null;
     mode: string;
+    ambientLevels: Record<string, number> | null;
+    timerMode: 'focus' | 'pomodoro' | null;
+    timerPreset: string | null;
+    customMinutes: string | null;
+    pomodoroSettings: {
+        focusMinutes: number;
+        breakMinutes: number;
+        longBreakMinutes: number;
+        sessionsBeforeLongBreak: number;
+        autoStartBreaks: boolean;
+        autoStartFocus: boolean;
+    } | null;
     createdAt: string;
 }
 
