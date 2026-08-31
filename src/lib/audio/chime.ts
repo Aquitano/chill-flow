@@ -22,11 +22,61 @@ const TONES: Record<ChimeKind, [number, number]> = {
 
 export type ChimeKind = 'complete' | 'resume';
 
+/** A chime placed on the audio timeline ahead of time; see scheduleTimerChime. */
+export interface ScheduledChime {
+    /**
+     * Whether the chime's start time has passed on the audio clock — it sounded, or is
+     * sounding. A context suspended since scheduling never advances its clock, so an
+     * inaudible chime correctly reads as not having sounded.
+     */
+    hasSounded: () => boolean;
+    /** Silence the chime if it hasn't started yet; one already sounding is left alone. */
+    cancelIfPending: () => void;
+}
+
 function readAudioContext(): AudioContext | null {
     try {
         return getAudioEngine().getAudioContext();
     } catch {
         return null;
+    }
+}
+
+interface ToneNodes {
+    oscillator: OscillatorNode;
+    gain: GainNode;
+}
+
+function scheduleTones(context: AudioContext, kind: ChimeKind, startAt: number): ToneNodes[] {
+    return TONES[kind].map((frequency, index) => {
+        const at = startAt + index * (TONE_SECONDS / 2);
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(frequency, at);
+        gain.gain.setValueAtTime(0, at);
+        gain.gain.linearRampToValueAtTime(CHIME_GAIN, at + 0.04);
+        gain.gain.exponentialRampToValueAtTime(0.0001, at + TONE_SECONDS);
+
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+        oscillator.start(at);
+        oscillator.stop(at + TONE_SECONDS);
+
+        return { oscillator, gain };
+    });
+}
+
+/**
+ * Create and resume the shared context. Call inside the user gesture that starts a
+ * timer: a context unlocked here keeps its clock running while the tab is hidden, so a
+ * chime scheduled later actually renders at its boundary.
+ */
+export function unlockTimerChime(): void {
+    const context = readAudioContext();
+    if (context?.state === 'suspended') {
+        void context.resume().catch(() => undefined);
     }
 }
 
@@ -43,26 +93,54 @@ export function playTimerChime(kind: ChimeKind): boolean {
     }
 
     try {
-        const startAt = context.currentTime + 0.02;
-        TONES[kind].forEach((frequency, index) => {
-            const at = startAt + index * (TONE_SECONDS / 2);
-            const oscillator = context.createOscillator();
-            const gain = context.createGain();
-
-            oscillator.type = 'sine';
-            oscillator.frequency.setValueAtTime(frequency, at);
-            gain.gain.setValueAtTime(0, at);
-            gain.gain.linearRampToValueAtTime(CHIME_GAIN, at + 0.04);
-            gain.gain.exponentialRampToValueAtTime(0.0001, at + TONE_SECONDS);
-
-            oscillator.connect(gain);
-            gain.connect(context.destination);
-            oscillator.start(at);
-            oscillator.stop(at + TONE_SECONDS);
-        });
+        scheduleTones(context, kind, context.currentTime + 0.02);
         return true;
     } catch {
         // A failed cue must never take the timer down with it.
         return false;
     }
+}
+
+/**
+ * Place a chime on the AudioContext timeline `delaySeconds` from now. The audio thread
+ * keeps rendering while the browser throttles hidden-tab JS (Chrome drops timers to once
+ * a minute after five minutes), so a chime scheduled when a countdown starts rings at
+ * the boundary even when no timer callback gets to run there. Null when there is no
+ * context to schedule into.
+ */
+export function scheduleTimerChime(kind: ChimeKind, delaySeconds: number): ScheduledChime | null {
+    const context = readAudioContext();
+    if (!context) {
+        return null;
+    }
+
+    if (context.state === 'suspended') {
+        void context.resume().catch(() => undefined);
+    }
+
+    const startAt = context.currentTime + Math.max(0, delaySeconds);
+    let nodes: ToneNodes[];
+    try {
+        nodes = scheduleTones(context, kind, startAt);
+    } catch {
+        return null;
+    }
+
+    return {
+        hasSounded: () => context.currentTime >= startAt,
+        cancelIfPending: () => {
+            if (context.currentTime >= startAt) {
+                return;
+            }
+            for (const { oscillator, gain } of nodes) {
+                try {
+                    oscillator.stop();
+                    oscillator.disconnect();
+                    gain.disconnect();
+                } catch {
+                    // A cancel that fails only risks a duplicate ring; never let it throw.
+                }
+            }
+        },
+    };
 }

@@ -21,7 +21,7 @@ import {
     initialFocusSessionState,
     sessionEventForTransition,
 } from '@/lib/focus-session';
-import { playTimerChime } from '@/lib/audio/chime';
+import { playTimerChime, scheduleTimerChime, unlockTimerChime, type ChimeKind } from '@/lib/audio/chime';
 import { FocusChannel, openFocusChannel } from '@/lib/focus-channel';
 import { getNotificationPermission, requestNotificationPermission, showTimerNotification } from '@/lib/notifications';
 import { flushSessionBeacon } from '@/lib/session-beacon';
@@ -199,6 +199,7 @@ export const TimerDial: React.FC = () => {
     const timerMode = useAppStore((state) => state.timerMode);
     const timerSeconds = useAppStore((state) => state.timerSeconds);
     const timerActive = useAppStore((state) => state.timerActive);
+    const timerEndsAt = useAppStore((state) => state.timerEndsAt);
     const countUpSeconds = useAppStore((state) => state.countUpSeconds);
     const timerResetCount = useAppStore((state) => state.timerResetCount);
     const selectedPreset = useAppStore((state) => state.selectedPreset);
@@ -246,6 +247,10 @@ export const TimerDial: React.FC = () => {
     // Set by handleSkipBreak so the boundary effect can tell an explicit skip from a break
     // that ran out; the two differ in wording and in whether the user is present.
     const skippedBreakRef = useRef(false);
+    // Set by the deadline effect's cleanup when the chime it pre-scheduled on the audio
+    // clock already rang for the boundary being processed; chimeAtBoundary consumes it
+    // so the boundary effects don't ring a second time.
+    const coveredBoundaryChimeRef = useRef(false);
 
     const [customHours, setCustomHours] = useState('0');
     const [customMins, setCustomMins] = useState('25');
@@ -428,6 +433,36 @@ export const TimerDial: React.FC = () => {
         };
     }, [timerActive, tickTimer]);
 
+    // Boundary work normally rides on the interval above, but Chrome throttles hidden-tab
+    // timers to once a minute after five minutes — and a tab with music paused has no
+    // audio exemption, which is exactly the DeepWork case. Two escapes: the chime is
+    // placed on the AudioContext timeline the moment the countdown gets its deadline
+    // (the audio thread is never throttled, so it rings on time), and a timeout armed for
+    // the exact deadline pulls the rest — notification, phase advance, the session
+    // write — forward at the browser's first opportunity.
+    useEffect(() => {
+        if (!timerActive || timerEndsAt == null) {
+            return;
+        }
+
+        const delayMs = Math.max(0, timerEndsAt - Date.now());
+        // The small pad keeps the tick from landing a rounding hair before the deadline.
+        const timeout = setTimeout(tickTimer, delayMs + 25);
+        const chime = timerSoundPref ? scheduleTimerChime(isBreak ? 'resume' : 'complete', delayMs / 1000) : null;
+
+        return () => {
+            clearTimeout(timeout);
+            if (!chime) {
+                return;
+            }
+            // Cleanup runs before the boundary effects of the same commit, so this hands
+            // them what happened: a chime that already rang must not ring again, while
+            // one still pending (pause, reset, skipped break) is silenced.
+            coveredBoundaryChimeRef.current = chime.hasSounded();
+            chime.cancelIfPending();
+        };
+    }, [timerActive, timerEndsAt, isBreak, timerSoundPref, tickTimer]);
+
     useEffect(() => {
         saveTimerSnapshot();
         document.addEventListener('visibilitychange', saveTimerSnapshot);
@@ -540,6 +575,15 @@ export const TimerDial: React.FC = () => {
         });
     }, []);
 
+    // Ring for a boundary unless the pre-scheduled chime already covered it.
+    const chimeAtBoundary = useCallback((kind: ChimeKind) => {
+        const covered = coveredBoundaryChimeRef.current;
+        coveredBoundaryChimeRef.current = false;
+        if (!covered) {
+            playTimerChime(kind);
+        }
+    }, []);
+
     // Announce focus-countdown completion (finite focus reaching 0:00). Open-ended focus
     // also sits at timerSeconds 0, so it is excluded to keep selecting it from reading as
     // a completion. The chime and the live region always fire; the browser notification is
@@ -551,12 +595,12 @@ export const TimerDial: React.FC = () => {
         if (timerMode !== 'focus' || isOpenEnded || prevSeconds <= 0 || timerSeconds !== 0) return;
 
         setAnnouncement('Focus session complete.');
-        if (timerSoundPref) playTimerChime('complete');
+        if (timerSoundPref) chimeAtBoundary('complete');
         if (showNotificationsPref) {
             showTimerNotification('Focus session complete', 'Nice work — time to step away for a bit.');
         }
         promptFocusTask();
-    }, [timerSeconds, timerMode, isOpenEnded, showNotificationsPref, timerSoundPref, promptFocusTask]);
+    }, [timerSeconds, timerMode, isOpenEnded, showNotificationsPref, timerSoundPref, chimeAtBoundary, promptFocusTask]);
 
     // Pomodoro phase boundaries. `isBreak` only flips via advancePomodoroPhase (a real
     // boundary), so watching it covers focus→break and break→focus regardless of whether
@@ -569,7 +613,7 @@ export const TimerDial: React.FC = () => {
 
         if (pomodoroSettings.isBreak) {
             setAnnouncement('Focus block done. Break time.');
-            if (timerSoundPref) playTimerChime('complete');
+            if (timerSoundPref) chimeAtBoundary('complete');
             if (showNotificationsPref) showTimerNotification('Break time', 'Focus block done — take your break.');
             promptFocusTask();
             return;
@@ -588,12 +632,12 @@ export const TimerDial: React.FC = () => {
         // This effect owns the announcement for both boundaries; handleSkipBreak setting its
         // own would be overwritten here on the very next commit.
         setAnnouncement(skipped ? 'Break skipped. Back to focus.' : 'Break over. Back to focus.');
-        if (timerSoundPref) playTimerChime('resume');
+        if (timerSoundPref) chimeAtBoundary('resume');
         // No notification for a skip: the user just pressed the button, so they are here.
         if (showNotificationsPref && !skipped) {
             showTimerNotification('Back to focus', 'Break over — back into the flow.');
         }
-    }, [pomodoroSettings.isBreak, showNotificationsPref, timerSoundPref, timerMode, promptFocusTask]);
+    }, [pomodoroSettings.isBreak, showNotificationsPref, timerSoundPref, timerMode, chimeAtBoundary, promptFocusTask]);
 
     // Start/pause the timer. On the first start with notifications enabled, ask for
     // permission inside this gesture (browsers reject permission prompts otherwise).
@@ -605,8 +649,11 @@ export const TimerDial: React.FC = () => {
         if (showNotificationsPref && getNotificationPermission() === 'default') {
             void requestNotificationPermission();
         }
+        // Unlocking inside the gesture keeps the audio clock running in a hidden tab, so
+        // the deadline effect's scheduled chime can actually render at the boundary.
+        if (timerSoundPref) unlockTimerChime();
         startTimer();
-    }, [timerActive, pauseTimer, startTimer, showNotificationsPref]);
+    }, [timerActive, pauseTimer, startTimer, showNotificationsPref, timerSoundPref]);
 
     // Seed the fields from the duration currently in play each time the popover opens.
     const handleCustomOpenChange = (open: boolean) => {
