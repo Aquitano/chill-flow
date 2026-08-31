@@ -98,6 +98,12 @@ export interface UserPreferences {
 }
 
 /** Completed focus time banked against one task, across every block that named it. */
+/** Focus seconds banked on one user-local calendar day (YYYY-MM-DD). */
+export interface DailyFocus {
+    day: string;
+    totalSeconds: number;
+}
+
 export interface TaskFocusTotal {
     taskId: string;
     totalSeconds: number;
