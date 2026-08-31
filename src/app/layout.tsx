@@ -4,6 +4,7 @@ import { Providers } from '../components/providers';
 
 import { ClerkProvider } from '@clerk/nextjs';
 import { appEnv } from '@/lib/env';
+import { siteOrigin } from '@/lib/site-url';
 
 import './globals.css';
 
@@ -22,7 +23,11 @@ const spectral = Spectral({
 });
 
 export const metadata: Metadata = {
-    title: 'ChillFlow - Focus and Productivity with Lo-Fi Beats',
+    metadataBase: new URL(siteOrigin()),
+    title: {
+        default: 'ChillFlow - Focus and Productivity with Lo-Fi Beats',
+        template: '%s - ChillFlow',
+    },
     description:
         'Boost your productivity with curated lo-fi beats and ambient sounds. ChillFlow helps you achieve deep focus and flow state.',
     icons: [{ rel: 'icon', url: '/favicon.ico' }],
