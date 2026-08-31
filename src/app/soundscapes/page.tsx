@@ -1,4 +1,5 @@
 import { formatDuration } from '@/lib/tracks';
+import type { Metadata } from 'next';
 import { getDatabase } from '@/server/db/client';
 import { appRepository } from '@/server/repositories/app-repository';
 import { ArrowUpRight } from 'lucide-react';
@@ -7,6 +8,17 @@ import Link from 'next/link';
 // Catalog lives in the DB now, so this page reads at request time rather than being baked
 // into the static build (which would run a DB query against tracks during `next build`).
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = {
+    title: 'Soundscapes',
+    description:
+        'Every lo-fi track and ambient soundscape in the ChillFlow catalog. Pick one to open your focus workspace with it playing.',
+    alternates: { canonical: '/soundscapes' },
+    openGraph: {
+        title: 'Soundscapes on ChillFlow',
+        description: 'Every lo-fi track and ambient soundscape in the ChillFlow catalog.',
+    },
+};
 
 export default async function SoundscapesPage() {
     const database = getDatabase();
