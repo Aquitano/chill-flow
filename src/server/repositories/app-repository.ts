@@ -30,6 +30,9 @@ import {
     userPreferences,
 } from '../db/schema';
 
+/** Upper bound on one tasks:list response; see listTasks for how it truncates. */
+const MAX_LISTED_TASKS = 500;
+
 function resolveAudioUrl(storageKey: string): string {
     return `${appEnv.audioBaseUrl}/${storageKey.replace(/^\/+/, '')}`;
 }
@@ -527,11 +530,15 @@ export const appRepository = {
     },
 
     async listTasks(database: Database, userId: string) {
+        // Completed tasks are never archived, so an old account can hold thousands of
+        // them. Open tasks sort first so the cap only ever truncates completed history
+        // (the panel shows recent wins, not an archive).
         const storedTasks = await database
             .select()
             .from(tasks)
             .where(eq(tasks.userId, userId))
-            .orderBy(desc(tasks.createdAt));
+            .orderBy(asc(tasks.isCompleted), desc(tasks.createdAt))
+            .limit(MAX_LISTED_TASKS);
         return storedTasks.map(mapTask);
     },
 
