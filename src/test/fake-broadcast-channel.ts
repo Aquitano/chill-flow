@@ -10,8 +10,10 @@ export class TestBroadcastChannel {
     }
 
     postMessage(data: unknown) {
+        // Delivered on the microtask queue like the real API, never inline — so a test
+        // that forgets to flush fails instead of passing on ordering a browser won't give.
         for (const peer of TestBroadcastChannel.buses.get(this.name) ?? []) {
-            if (peer !== this) peer.onmessage?.({ data });
+            if (peer !== this) queueMicrotask(() => peer.onmessage?.({ data }));
         }
     }
 
