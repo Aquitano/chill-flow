@@ -244,7 +244,11 @@ export const PlayerDock: React.FC = () => {
     useEffect(() => {
         if (!('mediaSession' in navigator)) return;
         const session = navigator.mediaSession;
-        session.setActionHandler('play', () => setIsPlaying(true));
+        // A headset play press with an empty catalog would otherwise flip the UI to
+        // "playing" with nothing to play.
+        session.setActionHandler('play', () => {
+            if (useAppStore.getState().currentTrack) setIsPlaying(true);
+        });
         session.setActionHandler('pause', () => setIsPlaying(false));
         session.setActionHandler('previoustrack', previousTrack);
         session.setActionHandler('nexttrack', nextTrack);
