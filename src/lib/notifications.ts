@@ -47,7 +47,12 @@ function notificationServiceWorker(): Promise<ServiceWorkerRegistration | null> 
     if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
         return Promise.resolve(null);
     }
-    serviceWorkerRegistration ??= navigator.serviceWorker.register('/sw.js').catch(() => null);
+    serviceWorkerRegistration ??= navigator.serviceWorker.register('/sw.js').catch(() => {
+        // Drop the cached attempt so a transient failure is retried on the next
+        // notification instead of muting Android for the rest of the page's life.
+        serviceWorkerRegistration = null;
+        return null;
+    });
     return serviceWorkerRegistration;
 }
 

@@ -10,8 +10,8 @@ self.addEventListener('notificationclick', (event) => {
     event.notification.close();
     event.waitUntil(
         self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-            const open = clientList.find((client) => 'focus' in client);
-            return open ? open.focus() : self.clients.openWindow('/app');
+            const workspace = clientList.find((client) => new URL(client.url).pathname.startsWith('/app'));
+            return workspace ? workspace.focus() : self.clients.openWindow('/app');
         }),
     );
 });
