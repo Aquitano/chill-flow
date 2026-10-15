@@ -76,7 +76,9 @@ async function flush() {
 
 async function advance(ms: number) {
     await act(async () => {
-        await vi.advanceTimersByTimeAsync(ms);
+        const tickMs = Math.min(ms, 1000);
+        vi.setSystemTime(Date.now() + ms - tickMs);
+        await vi.advanceTimersByTimeAsync(tickMs);
     });
 }
 
