@@ -35,6 +35,7 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
     }
 }
 
+const WORKER_ACTIVATION_TIMEOUT_MS = 10_000;
 let serviceWorkerRegistration: Promise<ServiceWorkerRegistration | null> | null = null;
 
 /**
@@ -49,7 +50,20 @@ function notificationServiceWorker(): Promise<ServiceWorkerRegistration | null> 
     }
     serviceWorkerRegistration ??= navigator.serviceWorker
         .register('/sw.js')
-        .then(() => navigator.serviceWorker.ready)
+        .then(async () => {
+            let timeout: ReturnType<typeof setTimeout> | undefined;
+            const registration = await Promise.race([
+                navigator.serviceWorker.ready,
+                new Promise<null>((resolve) => {
+                    timeout = setTimeout(() => resolve(null), WORKER_ACTIVATION_TIMEOUT_MS);
+                }),
+            ]);
+            clearTimeout(timeout);
+            if (!registration) {
+                serviceWorkerRegistration = null;
+            }
+            return registration;
+        })
         .catch(() => {
             // Drop the cached attempt so a transient failure is retried on the next
             // notification instead of muting Android for the rest of the page's life.
