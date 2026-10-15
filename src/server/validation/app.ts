@@ -201,6 +201,23 @@ export const saveWorkspacePresetInputSchema = z.object({
     trackId: nullableTrackIdSchema,
     backgroundId: nullableBackgroundIdSchema,
     mode: modeSchema,
+    // Scene fields. Defaulted to null so a payload from before scenes existed still
+    // validates; a preset holding null for a part applies without touching that part.
+    ambientLevels: ambientLevelsSchema.nullable().default(null),
+    timerMode: z.enum(['focus', 'pomodoro']).nullable().default(null),
+    timerPreset: z.string().trim().min(1).max(16).nullable().default(null),
+    customMinutes: z
+        .string()
+        .trim()
+        .regex(/^\d{1,4}$/, { message: 'customMinutes must be a whole number of minutes.' })
+        .nullable()
+        .default(null),
+    // Unlike a preferences update, a scene snapshots the whole cadence, so the
+    // auto-start flags are required rather than merge-optional.
+    pomodoroSettings: pomodoroSettingsSchema
+        .required({ autoStartBreaks: true, autoStartFocus: true })
+        .nullable()
+        .default(null),
 });
 
 export const updateWorkspacePresetInputSchema = saveWorkspacePresetInputSchema.extend({

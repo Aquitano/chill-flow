@@ -499,6 +499,71 @@ describe('focus-session events the store produces', () => {
     });
 });
 
+describe('applySceneTimer', () => {
+    beforeEach(resetStore);
+
+    const scene = {
+        timerMode: 'focus' as const,
+        timerPreset: '45m',
+        customMinutes: '25',
+        pomodoroSettings: {
+            focusMinutes: 50,
+            breakMinutes: 10,
+            longBreakMinutes: 20,
+            sessionsBeforeLongBreak: 3,
+            autoStartBreaks: false,
+            autoStartFocus: false,
+        },
+    };
+
+    it('points an idle dial at the scene', () => {
+        expect(useAppStore.getState().applySceneTimer(scene)).toBe(true);
+
+        const state = useAppStore.getState();
+        expect(state.timerMode).toBe('focus');
+        expect(state.selectedPreset).toBe('45m');
+        expect(state.timerSeconds).toBe(45 * 60);
+        expect(state.pomodoroSettings.focusMinutes).toBe(50);
+        expect(state.timerActive).toBe(false);
+    });
+
+    it('refuses while a block is running', () => {
+        useAppStore.getState().startTimer();
+
+        expect(useAppStore.getState().applySceneTimer(scene)).toBe(false);
+        expect(useAppStore.getState().selectedPreset).toBe('25m');
+        expect(useAppStore.getState().timerActive).toBe(true);
+    });
+
+    it('applies a scene after a countdown completes', () => {
+        vi.useFakeTimers();
+        try {
+            atTime(0);
+            useAppStore.getState().startTimer();
+            atTime(25 * 60 * 1000);
+            useAppStore.getState().tickTimer();
+
+            expect(useAppStore.getState().timerSeconds).toBe(0);
+            expect(useAppStore.getState().applySceneTimer(scene)).toBe(true);
+            expect(useAppStore.getState().timerSeconds).toBe(45 * 60);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('refuses while a paused block still holds time', () => {
+        vi.useFakeTimers();
+        atTime(0);
+        useAppStore.getState().startTimer();
+        atTime(5 * 60 * 1000);
+        useAppStore.getState().pauseTimer();
+
+        expect(useAppStore.getState().applySceneTimer(scene)).toBe(false);
+        expect(useAppStore.getState().timerSeconds).toBe(20 * 60);
+        vi.useRealTimers();
+    });
+});
+
 describe('restoreTimer', () => {
     beforeEach(() => {
         vi.useFakeTimers();

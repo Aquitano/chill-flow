@@ -153,6 +153,23 @@ export const savedPresets = pgTable(
         trackId: text('trackId'),
         backgroundId: text('backgroundId'),
         mode: text('mode').notNull(),
+        // A preset is a full scene: what plays, what surrounds it, and how the timer is
+        // set. The scene columns are nullable — a preset saved before they existed applies
+        // only the parts it holds instead of silencing ambience or resetting the dial.
+        // Sound id -> level 0..100, same shape as ambient_mixes.levels; {} means the scene
+        // deliberately has no ambience.
+        ambientLevels: jsonb('ambientLevels').$type<Record<string, number>>(),
+        timerMode: text('timerMode').$type<'focus' | 'pomodoro'>(),
+        timerPreset: text('timerPreset'),
+        customMinutes: text('customMinutes'),
+        pomodoroSettings: jsonb('pomodoroSettings').$type<{
+            focusMinutes: number;
+            breakMinutes: number;
+            longBreakMinutes: number;
+            sessionsBeforeLongBreak: number;
+            autoStartBreaks: boolean;
+            autoStartFocus: boolean;
+        }>(),
         createdAt: timestamp('createdAt').defaultNow().notNull(),
     },
     (table) => [index('SavedPresets_userId_idx').on(table.userId)],

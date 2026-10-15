@@ -43,6 +43,16 @@ export interface SavedPreset {
     trackId: string | null;
     backgroundId: string | null;
     mode: string;
+    /**
+     * The rest of the scene. Null on presets saved before scenes existed — applying such
+     * a preset leaves ambience and the timer as they are. `ambientLevels` of {} means the
+     * scene deliberately has no ambience.
+     */
+    ambientLevels: Record<string, number> | null;
+    timerMode: 'focus' | 'pomodoro' | null;
+    timerPreset: string | null;
+    customMinutes: string | null;
+    pomodoroSettings: PomodoroSettings | null;
 }
 
 export interface Quote {
