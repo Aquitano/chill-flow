@@ -220,6 +220,61 @@ export const PlayerDock: React.FC = () => {
         return () => engine.removeEventListener('ended', handleEnded);
     }, [engine, nextTrack, reportAudioFailure]);
 
+    // Publish playback to the OS media surface (lock screen, media keys, watch
+    // controls). An app whose whole job is playing music for hours is otherwise
+    // uncontrollable without refocusing the tab.
+    useEffect(() => {
+        if (!('mediaSession' in navigator)) return;
+        navigator.mediaSession.metadata = currentTrack
+            ? new MediaMetadata({
+                  title: currentTrack.title,
+                  artist: currentTrack.artist,
+                  artwork: currentTrack.thumbnailUrl ? [{ src: currentTrack.thumbnailUrl }] : [],
+              })
+            : null;
+    }, [currentTrack]);
+
+    useEffect(() => {
+        if (!('mediaSession' in navigator)) return;
+        navigator.mediaSession.playbackState = isPlayingStore ? 'playing' : 'paused';
+    }, [isPlayingStore]);
+
+    // The store's isPlaying stays the single source of truth: OS controls flip it and
+    // the engine follows through the effects above, same as the in-app buttons.
+    useEffect(() => {
+        if (!('mediaSession' in navigator)) return;
+        const session = navigator.mediaSession;
+        // A headset play press with an empty catalog would otherwise flip the UI to
+        // "playing" with nothing to play.
+        session.setActionHandler('play', () => {
+            if (useAppStore.getState().currentTrack) setIsPlaying(true);
+        });
+        session.setActionHandler('pause', () => setIsPlaying(false));
+        session.setActionHandler('previoustrack', previousTrack);
+        session.setActionHandler('nexttrack', nextTrack);
+        session.setActionHandler('seekto', (details) => {
+            if (details.seekTime != null) engine.seek(details.seekTime);
+        });
+        return () => {
+            session.setActionHandler('play', null);
+            session.setActionHandler('pause', null);
+            session.setActionHandler('previoustrack', null);
+            session.setActionHandler('nexttrack', null);
+            session.setActionHandler('seekto', null);
+        };
+    }, [engine, setIsPlaying, previousTrack, nextTrack]);
+
+    // With a fresh position and rate, the OS interpolates the progress bar itself; this
+    // only needs to re-anchor it when time moves (a tick, a seek) or playback flips.
+    useEffect(() => {
+        if (!('mediaSession' in navigator) || duration <= 0) return;
+        navigator.mediaSession.setPositionState({
+            duration,
+            position: Math.min(audio.currentTime, duration),
+            playbackRate: 1,
+        });
+    }, [duration, audio.currentTime, isPlayingStore]);
+
     // Clicking anywhere outside the dock closes an open panel; the panels are
     // lightweight browsers, not modal decisions.
     const dockRef = useRef<HTMLDivElement>(null);

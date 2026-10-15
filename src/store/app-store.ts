@@ -172,7 +172,6 @@ export type PomodoroSettings = {
 interface AppState {
     isPlaying: boolean;
     currentTrack: Track | null;
-    lastTrack: Track | null;
     tracks: Track[];
     likedTrackIds: string[];
 
@@ -325,7 +324,6 @@ export const useAppStore = create<AppState>()(
     devtools((set, get) => ({
         isPlaying: false,
         currentTrack: null,
-        lastTrack: null,
         tracks: [],
         likedTrackIds: [],
         volume: [50],
@@ -422,15 +420,7 @@ export const useAppStore = create<AppState>()(
                 false,
                 'setBackgrounds',
             ),
-        setCurrentTrack: (track) =>
-            set(
-                (state) => ({
-                    lastTrack: state.currentTrack,
-                    currentTrack: track,
-                }),
-                false,
-                'setCurrentTrack',
-            ),
+        setCurrentTrack: (track) => set({ currentTrack: track }, false, 'setCurrentTrack'),
         setLikedTrackIds: (trackIds) => set({ likedTrackIds: trackIds }, false, 'setLikedTrackIds'),
         toggleTrackLike: (trackId) => {
             const { likedTrackIds, activeScene } = get();
@@ -468,10 +458,7 @@ export const useAppStore = create<AppState>()(
                         ? queue.findIndex((track) => track.id === state.currentTrack?.id)
                         : -1;
                     const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % queue.length : 0;
-                    return {
-                        lastTrack: state.currentTrack,
-                        currentTrack: queue[nextIndex] ?? null,
-                    };
+                    return { currentTrack: queue[nextIndex] ?? null };
                 },
                 false,
                 'nextTrack',
@@ -479,13 +466,6 @@ export const useAppStore = create<AppState>()(
         previousTrack: () =>
             set(
                 (state) => {
-                    if (state.lastTrack) {
-                        return {
-                            currentTrack: state.lastTrack,
-                            lastTrack: state.currentTrack,
-                        };
-                    }
-
                     const queue = tracksInScene(state.tracks, state.activeScene, state.likedTrackIds);
                     if (queue.length === 0) return state;
 
@@ -494,10 +474,7 @@ export const useAppStore = create<AppState>()(
                         : 0;
                     const previousIndex = currentIndex <= 0 ? queue.length - 1 : currentIndex - 1;
 
-                    return {
-                        lastTrack: state.currentTrack,
-                        currentTrack: queue[previousIndex] ?? null,
-                    };
+                    return { currentTrack: queue[previousIndex] ?? null };
                 },
                 false,
                 'previousTrack',
@@ -605,7 +582,9 @@ export const useAppStore = create<AppState>()(
         applySceneTimer: (settings) => {
             const state = get();
             const midCountdown =
-                !isOpenEnded(state) && state.timerSeconds !== (phaseDurationSeconds(state) ?? 0);
+                !isOpenEnded(state) &&
+                state.timerSeconds > 0 &&
+                state.timerSeconds !== (phaseDurationSeconds(state) ?? 0);
             const midCountUp = isOpenEnded(state) && countUpSecondsAt(state, Date.now()) > 0;
             if (state.timerActive || midCountdown || midCountUp) {
                 return false;
@@ -778,21 +757,25 @@ export const useAppStore = create<AppState>()(
         setTimerPreset: (preset) => {
             const state = get();
 
+            // Presets describe focus blocks; Pomodoro phase lengths are set through the
+            // cadence settings, so a preset picked outside focus mode changes nothing.
+            if (state.timerMode !== 'focus') {
+                return;
+            }
+
             if (preset === OPEN_ENDED_PRESET) {
-                if (state.timerMode === 'focus') {
-                    set(
-                        { ...timerDurationPatch('focus', 0), selectedPreset: preset },
-                        false,
-                        'setOpenEndedTimerPreset',
-                    );
-                }
+                set(
+                    { ...timerDurationPatch('focus', 0), selectedPreset: preset },
+                    false,
+                    'setOpenEndedTimerPreset',
+                );
                 return;
             }
 
             const minutes = presetToMinutes(preset, state.customMinutes) ?? 25;
 
             set(
-                { ...timerDurationPatch(state.timerMode, minutes * 60), selectedPreset: preset },
+                { ...timerDurationPatch('focus', minutes * 60), selectedPreset: preset },
                 false,
                 'setTimerPreset',
             );

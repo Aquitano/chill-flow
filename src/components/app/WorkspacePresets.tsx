@@ -50,7 +50,6 @@ export function WorkspacePresets({ enabled }: { enabled: boolean }) {
         trackId: currentTrack?.id ?? null,
         backgroundId: selectedBackgroundId,
         mode: currentMode,
-        ambientLevels: getAmbientMixer().currentLevels(),
         timerMode,
         timerPreset: selectedPreset,
         customMinutes,
@@ -99,7 +98,7 @@ export function WorkspacePresets({ enabled }: { enabled: boolean }) {
         if (!trimmed) return;
 
         savePreset.mutate(
-            { name: trimmed, ...currentSetup },
+            { name: trimmed, ...currentSetup, ambientLevels: getAmbientMixer().currentLevels() },
             {
                 onSuccess: () => setName(''),
                 onError: (error) =>
@@ -123,9 +122,8 @@ export function WorkspacePresets({ enabled }: { enabled: boolean }) {
 
         if (preset.ambientLevels) {
             const mixer = getAmbientMixer();
-            if (Object.keys(preset.ambientLevels).length > 0) {
-                mixer.applyMix(preset.ambientLevels);
-            } else {
+            mixer.applyMix(preset.ambientLevels);
+            if (Object.keys(preset.ambientLevels).length === 0) {
                 mixer.setPowered(false);
             }
         }
@@ -220,7 +218,12 @@ export function WorkspacePresets({ enabled }: { enabled: boolean }) {
                                     type="button"
                                     onClick={() =>
                                         updatePreset.mutate(
-                                            { id: preset.id, name: preset.name, ...currentSetup },
+                                            {
+                                                id: preset.id,
+                                                name: preset.name,
+                                                ...currentSetup,
+                                                ambientLevels: getAmbientMixer().currentLevels(),
+                                            },
                                             {
                                                 onSuccess: () => toast(`“${preset.name}” now matches this setup`),
                                                 onError: (error) =>
