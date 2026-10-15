@@ -30,7 +30,10 @@ export const metadata: Metadata = {
     },
     description:
         'Boost your productivity with curated lo-fi beats and ambient sounds. ChillFlow helps you achieve deep focus and flow state.',
-    icons: [{ rel: 'icon', url: '/favicon.ico' }],
+    icons: [
+        { rel: 'icon', url: '/favicon.ico' },
+        { rel: 'apple-touch-icon', url: '/apple-touch-icon.png' },
+    ],
     keywords: ['lofi', 'productivity', 'focus', 'ambient sounds', 'pomodoro', 'flow state'],
     openGraph: {
         title: 'ChillFlow - Focus and Productivity with Lo-Fi Beats',
