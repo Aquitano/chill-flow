@@ -23,6 +23,12 @@ export const sessionsRouter = j.router({
         return c.superjson(await appRepository.listRecentSessions(ctx.db, ctx.userId));
     }),
 
+    // Per-day focus totals behind the progress panel's trend strip; the zone travels with
+    // the request for the same reason it does on `list`.
+    daily: protectedDataProcedure.input(sessionSummaryInputSchema).query(async ({ c, ctx, input }) => {
+        return c.superjson(await appRepository.listDailyFocus(ctx.db, ctx.userId, input.timeZone));
+    }),
+
     // Per-task focus time for the task list. Grouped in the database over the user's whole
     // history rather than summed from `history`, which only reaches back a fixed window.
     taskTotals: protectedDataProcedure.query(async ({ c, ctx }) => {

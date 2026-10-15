@@ -19,6 +19,7 @@ const queryKeys = {
     presets: ['presets'],
     sessions: ['sessions'],
     sessionHistory: ['sessions', 'history'],
+    dailyFocus: ['sessions', 'daily'],
     taskFocusTotals: ['sessions', 'task-totals'],
     ambientSounds: ['ambient', 'sounds'],
     ambientMixes: ['ambient', 'mixes'],
@@ -158,6 +159,19 @@ export function useSessionHistoryQuery(enabled: boolean) {
     return useQuery({
         queryKey: queryKeys.sessionHistory,
         queryFn: api.sessions.history,
+        enabled,
+    });
+}
+
+/**
+ * Per-day focus totals for the trend strip. Keyed under `sessions` so finishing a block
+ * refreshes it along with the totals; the zone resolves in the query function for the
+ * same reason it does in useSessionsQuery.
+ */
+export function useDailyFocusQuery(enabled: boolean) {
+    return useQuery({
+        queryKey: queryKeys.dailyFocus,
+        queryFn: () => api.sessions.daily({ timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
         enabled,
     });
 }
