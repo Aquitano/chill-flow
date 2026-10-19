@@ -1,0 +1,227 @@
+use std::f32::consts::FRAC_PI_2;
+use std::fs::{self, File};
+use std::io;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::mpsc::Sender;
+use std::thread;
+
+use super::EngineEvent;
+use super::ffmpeg;
+use super::mixer::LaneLevel;
+
+const SEAM_SECS: f32 = 0.5;
+const QUIET_WINDOW_SECS: f32 = 0.05;
+const QUIET_POWER_RATIO: f64 = 0.01;
+
+pub(super) struct LoadedLoop {
+    pub(super) samples: Box<[i16]>,
+    pub(super) level: Arc<LaneLevel>,
+}
+
+pub(super) struct LoadRequest {
+    pub(super) id: String,
+    pub(super) url: String,
+    pub(super) cache_dir: PathBuf,
+    pub(super) rate: u32,
+    pub(super) level: Arc<LaneLevel>,
+}
+
+pub(super) fn spawn_load(
+    request: LoadRequest,
+    loaded: Sender<LoadedLoop>,
+    events: Sender<EngineEvent>,
+) {
+    thread::spawn(
+        move || match load(&request.url, &request.cache_dir, request.rate) {
+            Ok(samples) => {
+                let _ = loaded.send(LoadedLoop {
+                    samples,
+                    level: request.level,
+                });
+            }
+            Err(message) => {
+                request.level.retire();
+                let _ = events.send(EngineEvent::AmbientFailed {
+                    id: request.id,
+                    message,
+                });
+            }
+        },
+    );
+}
+
+fn load(url: &str, cache_dir: &Path, rate: u32) -> Result<Box<[i16]>, String> {
+    let path = cached_file(url, cache_dir)?;
+    let mut samples = decode(&path, rate)?;
+    trim_quiet_ends(&mut samples, (QUIET_WINDOW_SECS * rate as f32) as usize);
+    close_loop(&mut samples, (SEAM_SECS * rate as f32) as usize);
+    if samples.len() < 2 {
+        return Err(format!("{} contains no audio", path.display()));
+    }
+    Ok(samples.into_boxed_slice())
+}
+
+fn cached_file(url: &str, cache_dir: &Path) -> Result<PathBuf, String> {
+    let name = file_name(url).ok_or_else(|| format!("no file name in {url}"))?;
+    let dir = cache_dir.join("ambient");
+    let path = dir.join(name);
+    if path.is_file() {
+        return Ok(path);
+    }
+    let io_error = |error: io::Error| format!("could not cache {name}: {error}");
+    fs::create_dir_all(&dir).map_err(io_error)?;
+    let response = ureq::get(url)
+        .call()
+        .map_err(|error| format!("could not download {name}: {error}"))?;
+    let partial = dir.join(format!("{name}.part"));
+    let mut file = File::create(&partial).map_err(io_error)?;
+    io::copy(&mut response.into_body().into_reader(), &mut file).map_err(io_error)?;
+    drop(file);
+    fs::rename(&partial, &path).map_err(io_error)?;
+    Ok(path)
+}
+
+fn file_name(url: &str) -> Option<&str> {
+    let path = url.split(['?', '#']).next()?;
+    let name = path.rsplit('/').next()?;
+    let safe = !name.is_empty()
+        && !name.starts_with('.')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'));
+    safe.then_some(name)
+}
+
+fn decode(path: &Path, rate: u32) -> Result<Vec<i16>, String> {
+    let output = ffmpeg::command()
+        .arg("-i")
+        .arg(path)
+        .args([
+            "-vn",
+            "-f",
+            "s16le",
+            "-ac",
+            "2",
+            "-ar",
+            &rate.to_string(),
+            "pipe:1",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(ffmpeg::spawn_error)?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(ffmpeg::last_line(&stderr).map_or_else(
+            || format!("ffmpeg exited with {}", output.status),
+            str::to_owned,
+        ));
+    }
+    let (frames, _) = output.stdout.as_chunks::<4>();
+    Ok(frames
+        .iter()
+        .flat_map(|&[a, b, c, d]| [i16::from_le_bytes([a, b]), i16::from_le_bytes([c, d])])
+        .collect())
+}
+
+/// Cuts encoder padding and baked-in fades (windows 20 dB below the loop's mean power) off
+/// both ends, which no seam crossfade could hide.
+fn trim_quiet_ends(samples: &mut Vec<i16>, window_frames: usize) {
+    let window = window_frames * 2;
+    if window == 0 || samples.is_empty() {
+        return;
+    }
+    let power = |chunk: &[i16]| {
+        chunk.iter().map(|&s| f64::from(s).powi(2)).sum::<f64>() / chunk.len() as f64
+    };
+    let threshold = power(samples) * QUIET_POWER_RATIO;
+    let loud = |chunk: &[i16]| power(chunk) >= threshold;
+    let (Some(first), Some(last)) = (
+        samples.chunks(window).position(loud),
+        samples.chunks(window).rposition(loud),
+    ) else {
+        return;
+    };
+    samples.truncate(((last + 1) * window).min(samples.len()));
+    samples.drain(..first * window);
+}
+
+/// Blends the last `seam_frames` of an interleaved stereo loop into its head with an
+/// equal-power crossfade, then trims them, so the wrap from end to start is continuous.
+fn close_loop(samples: &mut Vec<i16>, seam_frames: usize) {
+    let frames = samples.len() / 2;
+    let seam = seam_frames.min(frames / 4);
+    if seam == 0 {
+        return;
+    }
+    let tail_start = (frames - seam) * 2;
+    for index in 0..seam * 2 {
+        let t = ((index / 2) as f32 + 0.5) / seam as f32;
+        let head = f32::from(samples[index]) * (t * FRAC_PI_2).sin();
+        let tail = f32::from(samples[tail_start + index]) * (t * FRAC_PI_2).cos();
+        samples[index] = (head + tail)
+            .round()
+            .clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16;
+    }
+    samples.truncate(tail_start);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stereo_sine(frames: usize, period: f32) -> Vec<i16> {
+        (0..frames)
+            .flat_map(|frame| {
+                let value =
+                    (10_000.0 * (std::f32::consts::TAU * frame as f32 / period).sin()) as i16;
+                [value, value]
+            })
+            .collect()
+    }
+
+    #[test]
+    fn closing_the_loop_trims_the_seam_and_removes_the_wrap_jump() {
+        let period = 97.3;
+        let mut samples = stereo_sine(4_800, period);
+        let largest_step = 2 * (10_000.0 * std::f32::consts::TAU / period) as i32;
+        let jump = |a: i16, b: i16| (i32::from(a) - i32::from(b)).abs();
+        let wrap_jump = |s: &[i16]| jump(s[s.len() - 2], s[0]);
+        assert!(wrap_jump(&samples) > largest_step);
+
+        close_loop(&mut samples, 240);
+
+        assert_eq!(samples.len(), (4_800 - 240) * 2);
+        assert!(wrap_jump(&samples) <= largest_step);
+        assert!(
+            samples
+                .windows(4)
+                .step_by(2)
+                .all(|w| jump(w[2], w[0]) <= largest_step)
+        );
+    }
+
+    #[test]
+    fn quiet_ends_are_trimmed_but_quiet_moments_inside_are_kept() {
+        let loud = stereo_sine(1_000, 50.0);
+        let samples: Vec<i16> =
+            [vec![0; 300], loud.clone(), vec![3; 200], loud, vec![0; 500]].concat();
+        let mut trimmed = samples.clone();
+
+        trim_quiet_ends(&mut trimmed, 50);
+
+        assert_eq!(trimmed.as_slice(), &samples[300..samples.len() - 500]);
+    }
+
+    #[test]
+    fn cache_names_come_from_the_last_url_segment() {
+        assert_eq!(
+            file_name("https://x.dev/a/ambient-rain-soft.mp3?v=2"),
+            Some("ambient-rain-soft.mp3")
+        );
+        assert_eq!(file_name("https://x.dev/a/.."), None);
+        assert_eq!(file_name("https://x.dev/"), None);
+    }
+}
