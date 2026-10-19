@@ -1,7 +1,6 @@
 use std::io::{BufRead, BufReader, ErrorKind, Read};
 use std::process::{Child, ChildStderr, ChildStdout, ExitStatus, Stdio};
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -25,7 +24,7 @@ impl Decoder {
         input: &StreamInput,
         start_secs: f64,
         rate: u32,
-        events: Sender<EngineEvent>,
+        report: impl Fn(EngineEvent) + Send + 'static,
     ) -> Result<(Self, MusicLane), String> {
         let mut command = ffmpeg::command();
         if input.url.starts_with("http://") || input.url.starts_with("https://") {
@@ -69,7 +68,7 @@ impl Decoder {
             producer,
             state: Arc::clone(&state),
             child: Arc::clone(&child),
-            events,
+            report: Box::new(report),
         };
         thread::spawn(move || reader.run(stdout, collect_last_line(stderr)));
         let lane = MusicLane::new(consumer, Arc::clone(&state));
@@ -92,7 +91,7 @@ struct Reader {
     producer: Producer<f32>,
     state: Arc<MusicState>,
     child: Arc<Mutex<Child>>,
-    events: Sender<EngineEvent>,
+    report: Box<dyn Fn(EngineEvent) + Send>,
 }
 
 impl Reader {
@@ -108,7 +107,7 @@ impl Reader {
             Ok(status) if status.success() => {
                 self.wait_until_drained();
                 if !self.cancelled() {
-                    let _ = self.events.send(EngineEvent::Ended);
+                    (self.report)(EngineEvent::Ended);
                 }
             }
             Ok(status) => {
@@ -117,10 +116,10 @@ impl Reader {
                 } else {
                     last_line
                 };
-                let _ = self.events.send(EngineEvent::Failed(message));
+                (self.report)(EngineEvent::Failed(message));
             }
             Err(error) => {
-                let _ = self.events.send(EngineEvent::Failed(error.to_string()));
+                (self.report)(EngineEvent::Failed(error.to_string()));
             }
         }
     }

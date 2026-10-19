@@ -49,6 +49,9 @@ pub struct Engine {
     analysis: Analysis,
     events: Sender<EngineEvent>,
     inbox: Receiver<EngineEvent>,
+    stream_events: Sender<(u64, EngineEvent)>,
+    stream_inbox: Receiver<(u64, EngineEvent)>,
+    next_stream: u64,
     loaded: Sender<LoadedLoop>,
     arrivals: Receiver<LoadedLoop>,
     stream: Option<Playing>,
@@ -57,6 +60,7 @@ pub struct Engine {
 }
 
 struct Playing {
+    id: u64,
     input: StreamInput,
     start_secs: f64,
     decoder: Decoder,
@@ -77,6 +81,7 @@ impl Engine {
         });
         let (mixer, ends) = Mixer::new(rate, Arc::clone(&controls));
         let (events, inbox) = mpsc::channel();
+        let (stream_events, stream_inbox) = mpsc::channel();
         let (loaded, arrivals) = mpsc::channel();
         let output = Output::start(mixer, rate, device.map(|_| ()), events.clone());
         Engine {
@@ -88,6 +93,9 @@ impl Engine {
             analysis: Analysis::new(ends.analysis, rate),
             events,
             inbox,
+            stream_events,
+            stream_inbox,
+            next_stream: 0,
             loaded,
             arrivals,
             stream: None,
@@ -182,15 +190,30 @@ impl Engine {
         while let Ok(LoadedLoop { samples, level }) = self.arrivals.try_recv() {
             self.send(Command::Ambient(AmbientLane::new(samples, level)));
         }
-        self.inbox.try_iter().collect()
+        let current = self.stream.as_ref().map(|playing| playing.id);
+        let mut events: Vec<EngineEvent> = self.inbox.try_iter().collect();
+        // A replaced decoder can finish or fail just before it notices it was cancelled.
+        events.extend(
+            self.stream_inbox
+                .try_iter()
+                .filter(|(id, _)| Some(*id) == current)
+                .map(|(_, event)| event),
+        );
+        events
     }
 
     fn start_decoder(&mut self, input: StreamInput, start_secs: f64) {
         self.stream = None;
-        match Decoder::spawn(&input, start_secs, self.rate, self.events.clone()) {
+        self.next_stream += 1;
+        let id = self.next_stream;
+        let events = self.stream_events.clone();
+        match Decoder::spawn(&input, start_secs, self.rate, move |event| {
+            let _ = events.send((id, event));
+        }) {
             Ok((decoder, lane)) => {
                 self.send(Command::Music(Some(lane)));
                 self.stream = Some(Playing {
+                    id,
                     input,
                     start_secs,
                     decoder,
