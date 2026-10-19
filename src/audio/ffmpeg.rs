@@ -11,7 +11,7 @@ pub(super) fn command() -> Command {
 
 pub(super) fn spawn_error(error: io::Error) -> String {
     if error.kind() == io::ErrorKind::NotFound {
-        "ffmpeg is not installed; install it with `brew install ffmpeg` (macOS) or `winget install ffmpeg` (Windows)"
+        "ffmpeg is not installed. Install it with `brew install ffmpeg` (macOS) or `winget install Gyan.FFmpeg` (Windows)."
             .to_owned()
     } else {
         format!("could not start ffmpeg: {error}")

@@ -22,7 +22,7 @@ pub enum Job {
     Catalog(Result<Catalog>),
     Inspected {
         url: String,
-        generation: u64,
+        choices: u64,
         result: Result<Saved>,
     },
     Resolved {
@@ -97,6 +97,9 @@ pub struct App {
     timer_follows_play: bool,
     pub stream: Stream,
     generation: u64,
+    /// Counts playback changes the user asked for, unlike `generation`, which also moves when a
+    /// track ends on its own.
+    choices: u64,
     failures_in_a_row: u32,
     resume_at: Option<f64>,
     pending_seek: Option<(f64, Instant)>,
@@ -113,10 +116,13 @@ pub struct App {
     pub quit: bool,
 }
 
+const LOOKING_UP: &str = "Looking up that link…";
+
 /// Things the UI should react to (toasts, glows, transitions), drained once per frame.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     Toast(Tone, String),
+    DismissToast(&'static str),
     TrackChanged,
     PhaseChanged,
     Liked,
@@ -137,7 +143,7 @@ impl App {
             timer: Timer::new(session.timer, config.pomodoro),
             focus_days: store.focus_days(7, &zone).unwrap_or(FocusDays { days: Vec::new() }),
             saved: store.saved().unwrap_or_default(),
-            likes: store.likes().unwrap_or_default(),
+            likes: Vec::new(),
             scenes: store.scenes().unwrap_or_default(),
             mixes: Vec::new(),
             config,
@@ -155,6 +161,7 @@ impl App {
             timer_follows_play: true,
             stream: Stream::Idle,
             generation: 0,
+            choices: 0,
             failures_in_a_row: 0,
             resume_at: (session.position > 1.0).then_some(session.position),
             pending_seek: None,
@@ -171,6 +178,7 @@ impl App {
             quit: false,
         };
         app.refresh_mixes();
+        app.load_likes();
         app.engine.set_volume(app.volume);
         app.apply_levels(&session.levels);
         app.mix_name = app.matching_mix_name();
@@ -400,6 +408,23 @@ impl App {
         }
     }
 
+    /// Likes keep the whole item, so catalog tracks are rebuilt from the current catalog in case
+    /// their files moved.
+    fn load_likes(&mut self) {
+        let likes = self.store.likes().unwrap_or_default();
+        self.likes = likes
+            .into_iter()
+            .map(|item| {
+                let track = (item.key.strip_prefix("r2:"))
+                    .and_then(|id| self.catalog.tracks.iter().find(|track| track.id == id));
+                match track {
+                    Some(track) => Item::from_track(&self.catalog, track),
+                    None => item,
+                }
+            })
+            .collect();
+    }
+
     fn fill_queue(&mut self, source: &Source, start_key: Option<&str>) {
         self.source = source.clone();
         let items = self.items_for(source);
@@ -409,6 +434,7 @@ impl App {
     }
 
     fn play_source(&mut self, source: Source, start_key: Option<&str>) {
+        self.choices += 1;
         self.fill_queue(&source, start_key);
         self.resume_at = None;
         self.failures_in_a_row = 0;
@@ -422,6 +448,7 @@ impl App {
     fn start(&mut self, item: Item, start_secs: f64) {
         self.generation += 1;
         self.pending_seek = None;
+        self.pending_resolve = None;
         self.resume_at = (start_secs > 0.0).then_some(start_secs);
         self.events.push(Event::TrackChanged);
         self.load_cover();
@@ -462,6 +489,7 @@ impl App {
     }
 
     fn enter_soundscape(&mut self) {
+        self.choices += 1;
         self.stop_stream();
         self.queue.replace(Vec::new(), None);
         self.source = Source::Soundscape;
@@ -527,6 +555,7 @@ impl App {
             self.engine.seek(0.0);
             return;
         }
+        self.choices += 1;
         let next = if forward {
             self.queue.next()
         } else {
@@ -571,6 +600,7 @@ impl App {
             Action::Remove(removal) => self.remove(removal),
             Action::JumpQueue(offset) => {
                 if let Some(item) = self.queue.jump(offset).cloned() {
+                    self.choices += 1;
                     self.failures_in_a_row = 0;
                     self.start(item, 0.0);
                     self.resume();
@@ -776,7 +806,7 @@ impl App {
             self.toast(Tone::Error, format!("Could not save the like: {error}"));
             return;
         }
-        self.likes = self.store.likes().unwrap_or_default();
+        self.load_likes();
         if liked {
             self.events.push(Event::Liked);
         }
@@ -862,7 +892,7 @@ impl App {
 
     fn reload_library(&mut self) {
         self.saved = self.store.saved().unwrap_or_default();
-        self.likes = self.store.likes().unwrap_or_default();
+        self.load_likes();
         self.scenes = self.store.scenes().unwrap_or_default();
         self.refresh_mixes();
         self.mix_name = self.matching_mix_name();
@@ -905,16 +935,30 @@ impl App {
     }
 
     pub fn open_url(&mut self, url: &str) {
-        self.toast(Tone::Info, "Looking up that link…");
-        let (jobs, url, generation) = (self.jobs.clone(), url.to_string(), self.generation);
+        self.toast(Tone::Info, LOOKING_UP);
+        let (jobs, url, choices) = (self.jobs.clone(), url.to_string(), self.choices);
         std::thread::spawn(move || {
             let result = youtube::inspect(&url);
-            let _ = jobs.send(Job::Inspected {
-                url,
-                generation,
-                result,
-            });
+            let _ = jobs.send(Job::Inspected { url, choices, result });
         });
+    }
+
+    fn inspected(&mut self, url: &str, choices: u64, result: Result<Saved>) {
+        let saved = match result {
+            Ok(saved) => saved,
+            Err(error) => return self.toast(Tone::Error, format!("Could not open that link. {error}")),
+        };
+        if let Err(error) = self.store.save(&saved) {
+            return self.toast(Tone::Error, format!("Could not save it: {error}"));
+        }
+        self.reload_library();
+        // The user picked something else while yt-dlp was looking; keep that playing.
+        if choices == self.choices {
+            let source = Source::Saved { id: saved.id };
+            self.play_source(source, youtube::start_key(url).as_deref());
+        } else {
+            self.toast(Tone::Done, format!("Added \"{}\" to YouTube", saved.title));
+        }
     }
 
     fn track_focus(&mut self, now: Instant) {
@@ -1011,6 +1055,7 @@ impl App {
     fn adjust_setting(&mut self, setting: Setting, delta: i8) {
         let step = |value: u32, by: i32, min: u32, max: u32| {
             value
+                .clamp(min, max)
                 .saturating_add_signed(by * i32::from(delta.signum()))
                 .clamp(min, max)
         };
@@ -1096,6 +1141,10 @@ impl App {
         if now.duration_since(self.session_saved_at) >= Duration::from_secs(15) {
             self.session_saved_at = now;
             let _ = self.store.save_session(&self.session());
+            let today = Timestamp::now().to_zoned(self.zone.clone()).date();
+            if self.focus_days.days.last().is_some_and(|(day, _)| *day != today) {
+                self.refresh_stats();
+            }
         }
     }
 
@@ -1117,9 +1166,7 @@ impl App {
                 let label = self.catalog.sound(&id).map_or(id.clone(), |sound| sound.label.clone());
                 self.toast(Tone::Error, format!("{label}: {message}"));
             }
-            EngineEvent::NoDevice(reason) => {
-                self.toast(Tone::Error, format!("No audio output ({reason}), playing silently"))
-            }
+            EngineEvent::NoDevice(_) => self.toast(Tone::Error, "No audio output, playing silently"),
         }
     }
 
@@ -1138,35 +1185,27 @@ impl App {
     fn handle_job(&mut self, job: Job) {
         match job {
             Job::Catalog(Ok(catalog)) => {
+                let tracks = self.items_for(&Source::Tracks);
                 self.catalog = catalog;
                 self.refresh_mixes();
-                if self.source == Source::Tracks && self.stream == Stream::Idle {
+                self.load_likes();
+                // Refilling reshuffles and drops anything queued, so only do it when the tracks changed.
+                if self.source == Source::Tracks
+                    && self.stream == Stream::Idle
+                    && self.items_for(&Source::Tracks) != tracks
+                {
                     let key = self.queue.current().map(|item| item.key.clone());
                     self.fill_queue(&Source::Tracks, key.as_deref());
+                    if self.queue.current().map(|item| &item.key) != key.as_ref() {
+                        self.resume_at = None;
+                    }
                 }
             }
             Job::Catalog(Err(_)) => {}
-            Job::Inspected {
-                url,
-                generation,
-                result,
-            } => match result {
-                Ok(saved) => {
-                    if let Err(error) = self.store.save(&saved) {
-                        self.toast(Tone::Error, format!("Could not save it: {error}"));
-                        return;
-                    }
-                    self.reload_library();
-                    // Something else started while yt-dlp was looking; keep that playing.
-                    if generation == self.generation {
-                        let source = Source::Saved { id: saved.id };
-                        self.play_source(source, youtube::start_key(&url).as_deref());
-                    } else {
-                        self.toast(Tone::Done, format!("Added \"{}\" to YouTube", saved.title));
-                    }
-                }
-                Err(error) => self.toast(Tone::Error, error.to_string()),
-            },
+            Job::Inspected { url, choices, result } => {
+                self.events.push(Event::DismissToast(LOOKING_UP));
+                self.inspected(&url, choices, result);
+            }
             Job::Resolved { generation, result } => {
                 if generation != self.generation {
                     return;

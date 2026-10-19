@@ -60,6 +60,11 @@ fn yt_dlp(args: &[&str]) -> Result<Vec<u8>> {
             .or_else(|| stderr.lines().last())
             .unwrap_or("yt-dlp failed")
             .trim_start_matches("ERROR: ");
+        // "[youtube] <id>: This video is unavailable" names the extractor and id; keep the reason.
+        let reason = reason
+            .strip_prefix('[')
+            .and_then(|rest| rest.split_once(": "))
+            .map_or(reason, |(_, message)| message);
         bail!("{reason}");
     }
     Ok(output.stdout)

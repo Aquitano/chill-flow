@@ -267,6 +267,7 @@ impl Ui {
         for event in std::mem::take(&mut app.events) {
             match event {
                 Event::Toast(tone, message) => self.toast(tone, message),
+                Event::DismissToast(message) => self.toasts.retain(|toast| toast.message != message),
                 Event::TrackChanged => self.title_shown.play(0.0, 1.0, now, self.duration(SMOOTH)),
                 Event::PhaseChanged => self
                     .glow
