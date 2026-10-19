@@ -22,6 +22,14 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 souvlaki = { version = "0.8.3", default-features = false, features = ["use_zbus"] }
-tachyonfx = { version = "0.25.2", default-features = false, features = ["std"] }
+tachyonfx = { version = "0.25.2", default-features = false, features = ["std", "std-duration"] }
+terminal-colorsaurus = "1.0.3"
 toml = "1.1.8"
+unicode-width = "0.2.2"
 ureq = "3.4.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.5"
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_LibraryLoader"] }

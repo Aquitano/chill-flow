@@ -1,0 +1,133 @@
+{
+  "tracks": [
+    {
+      "id": "relax-recharge-01",
+      "title": "Relax & Recharge",
+      "artist": "UnioMystica",
+      "file": "relax-recharge.mp3",
+      "cover": "cover-relax-recharge-01.png",
+      "durationSec": 900,
+      "tags": [
+        "focus",
+        "electronic"
+      ]
+    }
+  ],
+  "ambient": [
+    {
+      "id": "rain-soft",
+      "label": "Rain",
+      "file": "ambient-rain-soft.mp3",
+      "gainPercent": 100,
+      "credit": "USC Cinema / Sunset Editorial Collection, CC0 1.0"
+    },
+    {
+      "id": "rain-window",
+      "label": "Rain on roof",
+      "file": "ambient-rain-window.mp3",
+      "gainPercent": 100,
+      "credit": "USC Cinema / Sunset Editorial Collection, CC0 1.0"
+    },
+    {
+      "id": "thunder-distant",
+      "label": "Thunder",
+      "file": "ambient-thunder-distant.mp3",
+      "gainPercent": 100,
+      "credit": "USC Cinema / Sunset Editorial Collection, CC0 1.0"
+    },
+    {
+      "id": "wind-soft",
+      "label": "Wind",
+      "file": "ambient-wind-soft.mp3",
+      "gainPercent": 85,
+      "credit": "Tvabutzku1234, CC0 1.0"
+    },
+    {
+      "id": "fire-crackle",
+      "label": "Fire",
+      "file": "ambient-fire-crackle.mp3",
+      "gainPercent": 100,
+      "credit": "USC Cinema / Sunset Editorial Collection, CC0 1.0"
+    },
+    {
+      "id": "birds-forest",
+      "label": "Birds",
+      "file": "ambient-birds-forest.mp3",
+      "gainPercent": 90,
+      "credit": "ezwa, Public domain"
+    },
+    {
+      "id": "stream-creek",
+      "label": "Stream",
+      "file": "ambient-stream-creek.mp3",
+      "gainPercent": 100,
+      "credit": "Juandev, Public domain"
+    },
+    {
+      "id": "waves-ocean",
+      "label": "Waves",
+      "file": "ambient-waves-ocean.mp3",
+      "gainPercent": 100,
+      "credit": "Dsw4, Public domain"
+    },
+    {
+      "id": "cafe-murmur",
+      "label": "Café",
+      "file": "ambient-cafe-murmur.mp3",
+      "gainPercent": 100,
+      "credit": "Stephan (pdsounds.org), Public domain"
+    },
+    {
+      "id": "crickets-night",
+      "label": "Crickets",
+      "file": "ambient-crickets-night.mp3",
+      "gainPercent": 80,
+      "credit": "Serg Childed, CC BY-SA 4.0"
+    }
+  ],
+  "mixes": [
+    {
+      "id": "rainy-study",
+      "name": "Rainy study",
+      "levels": {
+        "rain-soft": 60,
+        "thunder-distant": 30,
+        "wind-soft": 15
+      }
+    },
+    {
+      "id": "campfire-night",
+      "name": "Campfire night",
+      "levels": {
+        "fire-crackle": 65,
+        "crickets-night": 35,
+        "wind-soft": 15
+      }
+    },
+    {
+      "id": "cafe-corner",
+      "name": "Café corner",
+      "levels": {
+        "cafe-murmur": 55,
+        "rain-window": 35
+      }
+    },
+    {
+      "id": "forest-morning",
+      "name": "Forest morning",
+      "levels": {
+        "birds-forest": 50,
+        "stream-creek": 45,
+        "wind-soft": 20
+      }
+    },
+    {
+      "id": "open-sea",
+      "name": "Open sea",
+      "levels": {
+        "waves-ocean": 65,
+        "wind-soft": 25
+      }
+    }
+  ]
+}
