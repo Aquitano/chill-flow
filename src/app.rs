@@ -103,6 +103,7 @@ pub struct App {
     /// track ends on its own.
     choices: u64,
     failures_in_a_row: u32,
+    reconnected_at: Option<Instant>,
     resume_at: Option<f64>,
     pending_seek: Option<(f64, Instant)>,
     pending_resolve: Option<(String, f64, Instant)>,
@@ -165,6 +166,7 @@ impl App {
             generation: 0,
             choices: 0,
             failures_in_a_row: 0,
+            reconnected_at: None,
             resume_at: (session.position > 1.0).then_some(session.position),
             pending_seek: None,
             pending_resolve: None,
@@ -1197,6 +1199,14 @@ impl App {
     }
 
     fn handle_engine(&mut self, event: EngineEvent) {
+        let dropped = match &event {
+            EngineEvent::Ended => self.ended_early(),
+            EngineEvent::Failed(_) => true,
+            _ => false,
+        };
+        if dropped && self.reconnect() {
+            return;
+        }
         match event {
             EngineEvent::Ended => {
                 self.failures_in_a_row = 0;
@@ -1216,6 +1226,37 @@ impl App {
             }
             EngineEvent::NoDevice(_) => self.toast(Tone::Error, "No audio output, playing silently"),
         }
+    }
+
+    /// A live stream never ends on its own, and a video that stops well short of its length
+    /// lost its connection or its URL expired (YouTube's last about six hours).
+    fn ended_early(&self) -> bool {
+        self.current().is_some_and(|item| {
+            item.is_live()
+                || item
+                    .duration
+                    .is_some_and(|length| self.position() + 15.0 < f64::from(length))
+        })
+    }
+
+    /// Picks a dropped stream up where it stopped, at most once a minute so a stream that keeps
+    /// failing still falls through to the next track.
+    fn reconnect(&mut self) -> bool {
+        let position = self.position();
+        let recently = self
+            .reconnected_at
+            .is_some_and(|at| at.elapsed() < Duration::from_secs(60));
+        let Some(item) = self.current().cloned() else {
+            return false;
+        };
+        if recently || position < 5.0 {
+            return false;
+        }
+        self.reconnected_at = Some(Instant::now());
+        self.toast(Tone::Info, "Lost the stream, reconnecting…");
+        let at = if item.is_live() { 0.0 } else { position };
+        self.start(item, at);
+        true
     }
 
     fn after_failure(&mut self) {
