@@ -441,9 +441,10 @@ impl App {
         });
     }
 
+    /// Play starts the timer too, unless the user paused it on its own mid-phase.
     fn resume(&mut self) {
         self.engine.set_paused(false);
-        if self.timer_follows_play {
+        if self.timer_follows_play || self.timer.elapsed(Instant::now()).is_zero() {
             self.set_timer_running(true);
         }
     }

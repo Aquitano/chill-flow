@@ -141,10 +141,10 @@ impl Timer {
         match self.mode {
             TimerMode::Pomodoro => {
                 let done = self.focus_blocks_done % every;
-                let current = if self.phase == Phase::Focus {
-                    done + 1
-                } else {
-                    done.max(1)
+                let current = match (self.phase, done) {
+                    (Phase::Focus, _) => done + 1,
+                    (_, 0) => every,
+                    (_, _) => done,
                 };
                 Some((current.min(every), every))
             }
@@ -183,6 +183,7 @@ impl Timer {
     }
 
     fn advance(&mut self, now: Instant) -> PhaseEnded {
+        let was_running = self.deadline.is_some();
         let ended = self.phase;
         let length = self.phase_length();
         let every = self.settings.long_break_every.max(1);
@@ -196,6 +197,7 @@ impl Timer {
             }
             (TimerMode::Pomodoro, Phase::Break | Phase::LongBreak) => (Phase::Focus, self.settings.auto_start_focus),
         };
+        let auto_start = auto_start && was_running;
         self.phase = next;
         self.remaining = self.phase_length();
         self.deadline = auto_start.then(|| now + self.remaining);
@@ -256,6 +258,31 @@ mod tests {
         }
         use Phase::*;
         assert_eq!(phases, [Break, Focus, Break, Focus, Break, Focus, LongBreak, Focus]);
+    }
+
+    #[test]
+    fn the_long_break_counts_the_block_that_earned_it() {
+        let now = Instant::now();
+        let mut timer = Timer::new(TimerMode::Pomodoro, PomodoroSettings::default());
+        timer.start(now);
+        for _ in 0..4 {
+            let ended = timer.skip(now);
+            if ended.next == Phase::Focus {
+                timer.skip(now);
+            }
+        }
+        assert_eq!((timer.phase(), timer.cycle()), (Phase::LongBreak, Some((4, 4))));
+    }
+
+    #[test]
+    fn skipping_a_paused_timer_leaves_the_next_phase_paused() {
+        let now = Instant::now();
+        let mut timer = Timer::new(TimerMode::Pomodoro, PomodoroSettings::default());
+        let ended = timer.skip(now);
+        assert_eq!(
+            (ended.next, ended.auto_started, timer.is_running()),
+            (Phase::Break, false, false)
+        );
     }
 
     #[test]
