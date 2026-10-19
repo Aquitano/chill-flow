@@ -7,9 +7,13 @@ use rtrb::Consumer;
 
 const FFT_LEN: usize = 2048;
 const LOW_HZ: f32 = 40.0;
-const HIGH_HZ: f32 = 16_000.0;
-const FLOOR_DB: f32 = -70.0;
-const CEILING_DB: f32 = -10.0;
+const HIGH_HZ: f32 = 12_000.0;
+const FLOOR_DB: f32 = -78.0;
+const CEILING_DB: f32 = -6.0;
+/// Music loses energy as frequency rises, so without a tilt the bass pins the left bars to the
+/// top while the right half of the visualizer stays dark.
+const TILT_DB_PER_OCTAVE: f32 = 3.0;
+const TILT_PIVOT_HZ: f32 = 1_000.0;
 
 pub(super) struct Analysis {
     samples: Consumer<f32>,
@@ -22,6 +26,7 @@ pub(super) struct Analysis {
     output: Vec<Complex<f32>>,
     scratch: Vec<Complex<f32>>,
     bins: Vec<Range<usize>>,
+    tilts: Vec<f32>,
 }
 
 impl Analysis {
@@ -44,18 +49,14 @@ impl Analysis {
             scratch: fft.make_scratch_vec(),
             fft,
             bins: Vec::new(),
+            tilts: Vec::new(),
         }
     }
 
     pub(super) fn fill(&mut self, bands: &mut [f32]) {
         self.drain();
         let (newest, oldest) = self.history.split_at(self.write);
-        for ((input, sample), weight) in self
-            .input
-            .iter_mut()
-            .zip(oldest.iter().chain(newest))
-            .zip(&self.window)
-        {
+        for ((input, sample), weight) in self.input.iter_mut().zip(oldest.iter().chain(newest)).zip(&self.window) {
             *input = sample * weight;
         }
         if self
@@ -68,14 +69,23 @@ impl Analysis {
         }
         if self.bins.len() != bands.len() {
             self.bins = band_bins(bands.len(), self.rate, FFT_LEN);
+            let bin_hz = self.rate / FFT_LEN as f32;
+            self.tilts = self
+                .bins
+                .iter()
+                .map(|bins| {
+                    let center_hz = (bins.start + bins.end) as f32 * 0.5 * bin_hz;
+                    TILT_DB_PER_OCTAVE * (center_hz.max(1.0) / TILT_PIVOT_HZ).log2()
+                })
+                .collect();
         }
         // A full-scale sine peaks at FFT_LEN / 4 under a Hann window; this rescales it to 0 dB.
         let scale = 4.0 / FFT_LEN as f32;
-        for (band, bins) in bands.iter_mut().zip(&self.bins) {
+        for ((band, bins), tilt) in bands.iter_mut().zip(&self.bins).zip(&self.tilts) {
             let peak = self.output[bins.clone()]
                 .iter()
                 .fold(0.0_f32, |max, bin| max.max(bin.norm()));
-            *band = level(peak * scale);
+            *band = level(peak * scale, *tilt);
         }
     }
 
@@ -109,8 +119,8 @@ fn band_bins(bands: usize, rate: f32, fft_len: usize) -> Vec<Range<usize>> {
         .collect()
 }
 
-fn level(amplitude: f32) -> f32 {
-    let db = 20.0 * amplitude.max(1e-9).log10();
+fn level(amplitude: f32, tilt_db: f32) -> f32 {
+    let db = 20.0 * amplitude.max(1e-9).log10() + tilt_db;
     ((db - FLOOR_DB) / (CEILING_DB - FLOOR_DB)).clamp(0.0, 1.0)
 }
 
@@ -144,14 +154,8 @@ mod tests {
         analysis.fill(&mut bands);
 
         let bin = (440.0 / (rate as f32 / FFT_LEN as f32)).round() as usize;
-        let expected = analysis
-            .bins
-            .iter()
-            .position(|range| range.contains(&bin))
-            .unwrap();
-        let loudest = (0..bands.len())
-            .max_by(|&a, &b| bands[a].total_cmp(&bands[b]))
-            .unwrap();
+        let expected = analysis.bins.iter().position(|range| range.contains(&bin)).unwrap();
+        let loudest = (0..bands.len()).max_by(|&a, &b| bands[a].total_cmp(&bands[b])).unwrap();
         assert_eq!(loudest, expected);
         assert!(bands[expected] > 0.8);
         assert!(bands[0] < 0.3 && bands[23] < 0.3);
