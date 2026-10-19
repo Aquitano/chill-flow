@@ -15,6 +15,8 @@ struct Info {
     kind: Option<String>,
     id: String,
     title: Option<String>,
+    /// The title without the timestamp yt-dlp appends to live streams.
+    fulltitle: Option<String>,
     channel: Option<String>,
     uploader: Option<String>,
     duration: Option<f64>,
@@ -110,7 +112,7 @@ fn saved_from(url: &str, info: Info) -> Result<Saved> {
     }
     let item = video_item(
         &info.id,
-        info.title,
+        info.fulltitle.or(info.title),
         Some(channel.clone()),
         info.duration,
         is_live(&info.live_status),
