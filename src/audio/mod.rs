@@ -77,6 +77,7 @@ impl Engine {
         let rate = device.as_ref().copied().unwrap_or(FALLBACK_RATE);
         let controls = Arc::new(Controls {
             gain: AtomicF32::new(1.0),
+            music_gain: AtomicF32::new(1.0),
             paused: AtomicBool::new(true),
         });
         let (mixer, ends) = Mixer::new(rate, Arc::clone(&controls));
@@ -133,6 +134,11 @@ impl Engine {
 
     pub fn set_volume(&mut self, volume: f32) {
         self.controls.gain.store(perceptual(volume));
+    }
+
+    /// The music's own level under the master volume, for balancing it against the ambience.
+    pub fn set_music_level(&mut self, level: f32) {
+        self.controls.music_gain.store(perceptual(level));
     }
 
     pub fn set_ambient(&mut self, id: &str, url: &str, level: f32, gain: f32) {

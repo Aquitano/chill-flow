@@ -37,13 +37,16 @@ Paste a YouTube link anywhere in the app to add it to the library and play it. E
 | `space` | play or pause everything |
 | `n` / `p` | next / previous |
 | `f` | like what's playing |
+| `<` / `>` | turn the music or the ambience up against the other |
 | `t` / `T` | start or pause the timer / reset it |
 | `o` | open a YouTube link |
 | `c` | settings |
 | `tab` | move between library, queue, and ambience |
 | `enter` / `a` | play the selection / add it to the queue |
 
-The library has five tabs. Tracks come from the catalog. Liked holds what you liked. YouTube holds every link you opened. Sounds holds the ambience mixes, which play on their own without music. Scenes holds saved setups of source, ambience, and timer.
+The library has five tabs. Tracks come from the catalog. Liked holds what you liked. YouTube holds every link you opened. Sounds holds the ambience mixes, which play on their own without music. Scenes holds saved setups of source, ambience, balance, and timer.
+
+The slider between music and ambience at the top of the Ambience panel turns one down against the other, for a loud stream or quiet rain, without touching the volume. A soundscape has no music, so the balance leaves it alone.
 
 Focus stats count every minute a focus block ran, including blocks you stopped early. Breaks never count. The header shows today's total and a seven-day sparkline; press `i` for the chart.
 

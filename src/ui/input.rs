@@ -142,6 +142,8 @@ fn key_pressed(app: &mut App, ui: &mut Ui, key: KeyEvent) {
         KeyCode::Char('.') => Some(Action::SeekBy(10.0)),
         KeyCode::Char('+') | KeyCode::Char('=') => Some(Action::VolumeBy(0.05)),
         KeyCode::Char('-') => Some(Action::VolumeBy(-0.05)),
+        KeyCode::Char('<') => Some(Action::BalanceBy(-0.1)),
+        KeyCode::Char('>') => Some(Action::BalanceBy(0.1)),
         KeyCode::Char('f') => Some(Action::ToggleLikeCurrent),
         KeyCode::Char('s') => Some(Action::ToggleShuffle),
         KeyCode::Char('r') => Some(Action::CycleRepeat),
@@ -379,6 +381,7 @@ fn set_slider(app: &mut App, ui: &mut Ui, slider: &Slider, value: f32) {
             app.dispatch(Action::SetVolume(value));
             ui.jump_volume(value);
         }
+        Slider::Balance => app.dispatch(Action::SetBalance(value)),
         Slider::Level(id) => {
             let level = (value * 100.0).round() as u8;
             app.dispatch(Action::SetLevel(id.clone(), level));
@@ -501,6 +504,7 @@ fn scrolled(app: &mut App, ui: &mut Ui, x: u16, y: u16, step: isize) {
         Some(Hit::Slider(slider)) => {
             let current = match &slider {
                 Slider::Volume => app.volume,
+                Slider::Balance => app.balance,
                 Slider::Level(id) => f32::from(app.levels.get(id).copied().unwrap_or(0)) / 100.0,
             };
             set_slider(app, ui, &slider, (current - step as f32 * 0.05).clamp(0.0, 1.0));

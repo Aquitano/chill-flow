@@ -90,6 +90,27 @@ pub fn meter(buf: &mut Buffer, area: Rect, fraction: f64, filled: Style, track: 
     }
 }
 
+/// A slider that fills from its middle toward the knob, for a balance between two sides.
+/// Give it an odd width so the middle is a cell.
+pub fn balance(buf: &mut Buffer, area: Rect, value: f32, knob: Style, filled: Style, track: Style) {
+    if area.width < 3 {
+        return;
+    }
+    let middle = (area.width - 1) / 2;
+    let at = (value.clamp(0.0, 1.0) * f32::from(area.width - 1)).round() as u16;
+    let (low, high) = (middle.min(at), middle.max(at));
+    for offset in 0..area.width {
+        let (symbol, style) = match offset {
+            _ if offset == at => ("●", knob),
+            _ if (low..=high).contains(&offset) => ("━", filled),
+            _ => ("─", track),
+        };
+        if let Some(cell) = buf.cell_mut((area.x + offset, area.y)) {
+            cell.set_symbol(symbol).set_style(style);
+        }
+    }
+}
+
 const DIGITS: [[&str; 5]; 11] = [
     ["###", "#.#", "#.#", "#.#", "###"],
     [".#.", "##.", ".#.", ".#.", "###"],

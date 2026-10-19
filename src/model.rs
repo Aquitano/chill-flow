@@ -108,6 +108,15 @@ pub struct Scene {
     pub item_key: Option<String>,
     pub levels: Levels,
     pub timer: TimerMode,
+    #[serde(default = "even")]
+    pub balance: f32,
+}
+
+/// Music and ambience at their own levels, neither turned down for the other.
+pub const EVEN: f32 = 0.5;
+
+fn even() -> f32 {
+    EVEN
 }
 
 /// Everything restored on the next launch.
@@ -118,6 +127,7 @@ pub struct Session {
     pub item_key: Option<String>,
     pub position: f64,
     pub volume: f32,
+    pub balance: f32,
     pub levels: Levels,
     pub timer: TimerMode,
     pub shuffle: bool,
@@ -131,6 +141,7 @@ impl Default for Session {
             item_key: None,
             position: 0.0,
             volume: 0.7,
+            balance: EVEN,
             levels: Levels::new(),
             timer: TimerMode::Pomodoro,
             shuffle: false,

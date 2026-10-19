@@ -12,7 +12,7 @@ use crate::audio::{Engine, EngineEvent, StreamInput};
 use crate::catalog::{Catalog, Levels, Mix};
 use crate::config::{self, Config, Paths};
 use crate::media::{MediaCommand, NowPlaying};
-use crate::model::{Item, Playable, Saved, Scene, Session, Source};
+use crate::model::{self, Item, Playable, Saved, Scene, Session, Source};
 use crate::queue::Queue;
 use crate::store::{FocusDays, Store};
 use crate::timer::{Phase, PhaseEnded, Timer, TimerMode};
@@ -93,6 +93,8 @@ pub struct App {
     pub levels: Levels,
     pub mix_name: Option<String>,
     pub volume: f32,
+    /// 0 favors the music, 1 the ambience, and 0.5 leaves both at their own levels.
+    pub balance: f32,
     pub timer: Timer,
     pub focus_days: FocusDays,
     focus_block: Option<FocusBlock>,
@@ -160,6 +162,7 @@ impl App {
             levels: Levels::new(),
             mix_name: None,
             volume: session.volume.clamp(0.0, 1.0),
+            balance: model::EVEN,
             focus_block: None,
             timer_follows_play: true,
             stream: Stream::Idle,
@@ -184,6 +187,7 @@ impl App {
         app.refresh_mixes();
         app.load_likes();
         app.engine.set_volume(app.volume);
+        app.set_balance(session.balance);
         app.apply_levels(&session.levels);
         app.mix_name = app.matching_mix_name();
         app.fill_queue(&session.source, session.item_key.as_deref());
@@ -475,6 +479,7 @@ impl App {
 
     fn fill_queue(&mut self, source: &Source, start_key: Option<&str>) {
         self.source = source.clone();
+        self.refresh_ambience();
         let items = self.items_for(source);
         self.queue.replace(items, start_key);
         self.events.push(Event::TrackChanged);
@@ -541,6 +546,7 @@ impl App {
         self.stop_stream();
         self.queue.replace(Vec::new(), None);
         self.source = Source::Soundscape;
+        self.refresh_ambience();
         self.events.push(Event::TrackChanged);
         self.resume();
     }
@@ -627,6 +633,8 @@ impl App {
             Action::SeekTo(seconds) => self.seek_to(seconds),
             Action::VolumeBy(delta) => self.set_volume(self.volume + delta),
             Action::SetVolume(volume) => self.set_volume(volume),
+            Action::SetBalance(balance) => self.set_balance(balance),
+            Action::BalanceBy(delta) => self.set_balance(((self.balance + delta) * 10.0).round() / 10.0),
             Action::ToggleShuffle => {
                 self.queue.set_shuffle(!self.queue.shuffle);
             }
@@ -748,6 +756,35 @@ impl App {
         self.engine.set_volume(self.volume);
     }
 
+    fn set_balance(&mut self, balance: f32) {
+        // The middle snaps so a dragged slider can find it.
+        let balance = balance.clamp(0.0, 1.0);
+        self.balance = if (balance - model::EVEN).abs() < 0.03 {
+            model::EVEN
+        } else {
+            balance
+        };
+        self.engine.set_music_level((2.0 * (1.0 - self.balance)).min(1.0));
+        self.refresh_ambience();
+    }
+
+    /// Soundscapes have no music to balance against, so they keep the ambience at its levels.
+    /// The floor is inaudible but keeps the sounds loaded, since a silent lane is dropped and
+    /// would have to be decoded again.
+    fn ambience_share(&self) -> f32 {
+        if self.source == Source::Soundscape {
+            1.0
+        } else {
+            (2.0 * self.balance).clamp(0.1, 1.0)
+        }
+    }
+
+    fn refresh_ambience(&mut self) {
+        for (id, level) in self.levels.clone() {
+            self.set_level(&id, level);
+        }
+    }
+
     fn set_timer_mode(&mut self, mode: TimerMode) {
         let now = Instant::now();
         let was_running = self.timer.is_running();
@@ -765,7 +802,8 @@ impl App {
         let level = level.min(100);
         let url = self.catalog.url(&sound.file);
         let gain = sound.gain_percent as f32 / 100.0;
-        self.engine.set_ambient(id, &url, f32::from(level) / 100.0, gain);
+        self.engine
+            .set_ambient(id, &url, f32::from(level) / 100.0 * self.ambience_share(), gain);
         if level == 0 {
             self.levels.remove(id);
         } else {
@@ -809,6 +847,7 @@ impl App {
         if self.timer.mode() != scene.timer {
             self.set_timer_mode(scene.timer);
         }
+        self.set_balance(scene.balance);
         self.apply_levels(&scene.levels);
         self.mix_name = self.matching_mix_name();
         self.timer_follows_play = true;
@@ -962,6 +1001,7 @@ impl App {
                     item_key: self.current().map(|item| item.key.clone()),
                     levels: self.levels.clone(),
                     timer: self.timer.mode(),
+                    balance: self.balance,
                 };
                 match self.store.save_scene(&scene) {
                     Ok(()) => {
@@ -1141,6 +1181,7 @@ impl App {
                 self.position()
             },
             volume: self.volume,
+            balance: self.balance,
             levels: self.levels.clone(),
             timer: self.timer.mode(),
             shuffle: self.queue.shuffle,

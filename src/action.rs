@@ -155,6 +155,8 @@ pub enum Action {
     SeekTo(f64),
     VolumeBy(f32),
     SetVolume(f32),
+    SetBalance(f32),
+    BalanceBy(f32),
     ToggleShuffle,
     CycleRepeat,
     ToggleLikeCurrent,

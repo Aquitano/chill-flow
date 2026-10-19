@@ -873,7 +873,12 @@ pub fn ambience(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Insta
         ui.hit(rect, Hit::Act(Action::CycleMix(step)));
     }
 
-    let list = Rect::new(inner.x, inner.y + 2, inner.width, inner.height.saturating_sub(2));
+    let show_balance = inner.height >= 8 && inner.width >= 30;
+    if show_balance {
+        balance(buf, Rect::new(inner.x, inner.y + 2, inner.width, 1), app, ui);
+    }
+    let top = if show_balance { 4 } else { 2 };
+    let list = Rect::new(inner.x, inner.y + top, inner.width, inner.height.saturating_sub(top));
     let count = app.catalog.ambient.len();
     if count == 0 || list.height == 0 {
         return;
@@ -931,5 +936,38 @@ pub fn ambience(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Insta
         }
         ui.hit(rect, Hit::Sound(index));
         ui.hit(slider, Hit::Slider(Slider::Level(sound.id.clone())));
+    }
+}
+
+/// Music on the left, ambience on the right. A soundscape has no music to weigh against, so the
+/// row rests there.
+fn balance(buf: &mut Buffer, row: Rect, app: &App, ui: &mut Ui) {
+    let theme = ui.theme;
+    let width = row.width.saturating_sub(21);
+    let slider = Rect::new(row.x + 9, row.y, width.saturating_sub(1 - width % 2), 1);
+    let active = app.source != Source::Soundscape;
+    let hovered = active && ui.hovered(slider);
+    let label = Style::new().fg(match (active, hovered) {
+        (false, _) => theme.line(),
+        (true, true) => theme.text(),
+        (true, false) => theme.muted(),
+    });
+    put(buf, row.x + 2, row.y, "music", label);
+    put(buf, row.right().saturating_sub(10), row.y, "ambience", label);
+    let (knob, filled) = if active {
+        (theme.text(), if hovered { theme.text() } else { theme.calm })
+    } else {
+        (theme.line(), theme.line())
+    };
+    widgets::balance(
+        buf,
+        slider,
+        app.balance,
+        Style::new().fg(knob),
+        Style::new().fg(filled),
+        Style::new().fg(theme.line()),
+    );
+    if active {
+        ui.hit(slider, Hit::Slider(Slider::Balance));
     }
 }

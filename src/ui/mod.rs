@@ -39,6 +39,7 @@ struct Toast {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Slider {
     Volume,
+    Balance,
     Level(String),
 }
 
@@ -452,7 +453,7 @@ mod tests {
     }
 
     fn random_event(rng: &mut fastrand::Rng, width: u16, height: u16) -> Event {
-        const KEYS: &str = " npfsrtTxmo:?ic[]12345adjkhlgG/JK0,.+-qyz";
+        const KEYS: &str = " npfsrtTxmo:?ic[]12345adjkhlgG/JK0,.+-<>qyz";
         let code = |rng: &mut fastrand::Rng| match rng.u8(..12) {
             0 => KeyCode::Enter,
             1 => KeyCode::Esc,

@@ -326,11 +326,12 @@ fn confirm(buf: &mut Buffer, screen: Rect, ui: &mut Ui, message: &str) {
     );
 }
 
-const KEYS: [(&str, &str); 27] = [
+const KEYS: [(&str, &str); 28] = [
     ("space", "play or pause everything"),
     ("n / p", "next / previous"),
     (", / .", "back / forward 10 s"),
     ("- / +", "volume"),
+    ("< / >", "louder music / ambience"),
     ("f", "like what's playing"),
     ("s / r", "shuffle / repeat"),
     ("t / T", "start or pause / reset timer"),

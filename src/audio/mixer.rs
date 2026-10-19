@@ -31,6 +31,7 @@ impl AtomicF32 {
 
 pub(super) struct Controls {
     pub(super) gain: AtomicF32,
+    pub(super) music_gain: AtomicF32,
     pub(super) paused: AtomicBool,
 }
 
@@ -194,6 +195,7 @@ pub(super) struct Mixer {
     pause_gain: f32,
     pause_step: f32,
     gain: f32,
+    music_gain: f32,
     smoothing: f32,
     prime_samples: usize,
     mono: Vec<f32>,
@@ -218,6 +220,7 @@ impl Mixer {
             pause_gain: 0.0,
             pause_step: 1.0 / (PAUSE_FADE_SECS * rate_f),
             gain: 0.0,
+            music_gain: 1.0,
             smoothing: 1.0 - (-1.0 / (SMOOTHING_SECS * rate_f)).exp(),
             prime_samples: (PRIME_SECS * rate_f) as usize * 2,
             mono: vec![0.0; BLOCK_FRAMES],
@@ -269,6 +272,12 @@ impl Mixer {
         if !paused || self.pause_gain > 0.0 {
             if let Some(music) = &mut self.music {
                 music.read_into(out, self.prime_samples);
+                let target = self.controls.music_gain.load();
+                for [left, right] in out.as_chunks_mut::<2>().0 {
+                    self.music_gain += (target - self.music_gain) * self.smoothing;
+                    *left *= self.music_gain;
+                    *right *= self.music_gain;
+                }
             }
             for lane in &mut self.ambient {
                 lane.mix_into(out, self.smoothing);
