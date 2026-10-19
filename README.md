@@ -17,7 +17,7 @@ Then:
 cargo install --git https://github.com/Aquitano/chill-flow
 ```
 
-On Windows the Rust toolchain also needs the Visual Studio C++ build tools. After a winget install, open a new terminal so the tools are on `PATH`. YouTube changes often enough that an old yt-dlp stops working, so run `brew upgrade yt-dlp` or `winget upgrade yt-dlp.yt-dlp` when links stop resolving.
+On Windows the Rust toolchain also needs the Visual Studio C++ build tools. After a winget install, open a new terminal so the tools are on `PATH`. `chill doctor` checks that all three are found and prints where chill keeps its config, library, and cache. YouTube changes often enough that an old yt-dlp stops working, so chill mentions it at startup once your yt-dlp is more than 60 days old; update it with `brew upgrade yt-dlp` or `winget upgrade yt-dlp.yt-dlp`.
 
 ## Use
 
@@ -27,6 +27,7 @@ On Windows the Rust toolchain also needs the Visual Studio C++ build tools. Afte
 chill                                   # resume where you left off
 chill https://youtu.be/…                # play a video, playlist, or live stream
 chill "rainy study"                     # load a saved scene
+chill doctor                            # check ffmpeg, yt-dlp, and deno
 ```
 
 Paste a YouTube link anywhere in the app to add it to the library and play it. Everything responds to the mouse: click rows and buttons, drag the sliders, scroll the lists. Press `?` for every key, or `ctrl+p` to search all commands.

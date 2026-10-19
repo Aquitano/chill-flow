@@ -28,6 +28,15 @@ impl Default for Config {
     }
 }
 
+/// `path` with the home folder shown as `~`.
+pub fn display_path(path: &Path) -> String {
+    let home = etcetera::home_dir().ok();
+    match home.as_deref().and_then(|home| path.strip_prefix(home).ok()) {
+        Some(rest) => format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display()),
+        None => path.display().to_string(),
+    }
+}
+
 pub struct Paths {
     pub config_file: PathBuf,
     pub database: PathBuf,

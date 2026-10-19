@@ -8,6 +8,7 @@ mod model;
 mod queue;
 mod store;
 mod timer;
+mod tools;
 mod ui;
 mod youtube;
 
@@ -15,7 +16,7 @@ use std::io::{Write, stdout};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use crossterm::event::{self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture};
 use crossterm::execute;
 use ratatui::DefaultTerminal;
@@ -23,19 +24,32 @@ use ratatui_image::picker::Picker;
 
 use app::{App, Job, Stream};
 use media::Media;
+use tools::Tool;
 use ui::Ui;
 
 /// Lo-fi, ambience, and a focus timer in your terminal.
 #[derive(Parser)]
-#[command(version)]
+#[command(version, args_conflicts_with_subcommands = true)]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<CliCommand>,
     /// A YouTube link, or the name of a saved scene, to start right away.
     target: Option<String>,
+}
+
+#[derive(Subcommand)]
+enum CliCommand {
+    /// Check that ffmpeg, yt-dlp, and deno are installed, and show where chill keeps its files.
+    Doctor,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let paths = config::Paths::resolve()?;
+    if let Some(CliCommand::Doctor) = cli.command {
+        doctor(&paths);
+        return Ok(());
+    }
     let config = config::load(&paths.config_file)?;
     let store = store::Store::open(&paths.database)?;
     media::run_app(move || {
@@ -76,6 +90,7 @@ fn main() -> Result<()> {
         if let Some(target) = cli.target {
             app.launch(&target);
         }
+        app.check_tools();
 
         let result = run(&mut terminal, &mut app, &mut ui, &mut media);
         app.shutdown();
@@ -83,6 +98,39 @@ fn main() -> Result<()> {
         ratatui::restore();
         result
     })
+}
+
+fn doctor(paths: &config::Paths) {
+    println!("chill {}\n", env!("CARGO_PKG_VERSION"));
+    let today = jiff::Zoned::now().date();
+    let found: Vec<(Tool, Option<String>)> = Tool::ALL.into_iter().map(|tool| (tool, tool.version())).collect();
+    let width = found
+        .iter()
+        .map(|(_, version)| version.as_deref().map_or(7, str::len))
+        .max()
+        .unwrap_or(0)
+        + 2;
+    let indent = 8 + width;
+    for (tool, version) in found {
+        let shown = version.as_deref().unwrap_or("missing");
+        println!("{:<8}{shown:<width$}{}", tool.name(), tool.purpose());
+        match version {
+            None => println!("{:<indent$}install it with: {}", "", tool.install()),
+            Some(version) => {
+                if let Some(days) = tool.stale_days(&version, today) {
+                    println!("{:<indent$}{days} days old, update it with: {}", "", tool.upgrade());
+                }
+            }
+        }
+    }
+    println!();
+    let config = match config::load(&paths.config_file) {
+        Ok(_) => String::new(),
+        Err(error) => format!("  ({error:#})"),
+    };
+    println!("{:<9}{}{config}", "config", config::display_path(&paths.config_file));
+    println!("{:<9}{}", "library", config::display_path(&paths.database));
+    println!("{:<9}{}", "cache", config::display_path(&paths.cache));
 }
 
 fn run(terminal: &mut DefaultTerminal, app: &mut App, ui: &mut Ui, media: &mut Media) -> Result<()> {

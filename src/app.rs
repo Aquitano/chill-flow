@@ -16,6 +16,7 @@ use crate::model::{Item, Playable, Saved, Scene, Session, Source};
 use crate::queue::Queue;
 use crate::store::{FocusDays, Store};
 use crate::timer::{Phase, PhaseEnded, Timer, TimerMode};
+use crate::tools::Tool;
 use crate::youtube;
 
 pub enum Job {
@@ -34,6 +35,7 @@ pub enum Job {
         image: Option<DynamicImage>,
     },
     Media(MediaCommand),
+    Tools(Vec<(Tool, Option<String>)>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -202,6 +204,50 @@ impl App {
             self.load_scene(index);
         } else {
             self.toast(Tone::Error, format!("No scene called \"{target}\""));
+        }
+    }
+
+    /// A missing ffmpeg would otherwise only show up as an error on the first play.
+    pub fn check_tools(&self) {
+        let jobs = self.jobs.clone();
+        std::thread::spawn(move || {
+            let found = Tool::ALL.into_iter().map(|tool| (tool, tool.version())).collect();
+            let _ = jobs.send(Job::Tools(found));
+        });
+    }
+
+    fn tools_checked(&mut self, found: Vec<(Tool, Option<String>)>) {
+        let today = Timestamp::now().to_zoned(self.zone.clone()).date();
+        let has_yt_dlp = found
+            .iter()
+            .any(|(tool, version)| *tool == Tool::YtDlp && version.is_some());
+        for (tool, version) in found {
+            match (tool, version) {
+                (Tool::Ffmpeg, None) => self.toast(
+                    Tone::Error,
+                    "ffmpeg is missing, so nothing can play. Run chill doctor to see how to install it.",
+                ),
+                (Tool::YtDlp, None) => self.toast(
+                    Tone::Info,
+                    "yt-dlp is missing, so YouTube links won't open. Run chill doctor for details.",
+                ),
+                (Tool::Deno, None) if has_yt_dlp => self.toast(
+                    Tone::Info,
+                    "deno is missing, so some YouTube links may fail. Run chill doctor for details.",
+                ),
+                (tool, Some(version)) => {
+                    if let Some(days) = tool.stale_days(&version, today) {
+                        self.toast(
+                            Tone::Info,
+                            format!(
+                                "yt-dlp is {days} days old and may fail on YouTube links. Update it with {}.",
+                                tool.upgrade()
+                            ),
+                        );
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -1244,6 +1290,7 @@ impl App {
                 MediaCommand::SetPosition(at) => self.seek_to(at),
                 MediaCommand::Play | MediaCommand::Pause => {}
             },
+            Job::Tools(found) => self.tools_checked(found),
         }
     }
 }

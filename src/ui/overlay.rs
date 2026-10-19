@@ -517,15 +517,7 @@ fn settings(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, selected: us
             ui.hits.push((more, Hit::Act(Action::AdjustSetting(setting, 1))));
         }
     }
-    let home = etcetera::home_dir().ok();
-    let path = app.config_file().display().to_string();
-    let path = match home
-        .as_ref()
-        .and_then(|home| path.strip_prefix(&*home.display().to_string()))
-    {
-        Some(rest) => format!("~{rest}"),
-        None => path,
-    };
+    let path = crate::config::display_path(app.config_file());
     if fits {
         put(
             buf,
