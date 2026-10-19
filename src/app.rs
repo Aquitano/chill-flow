@@ -850,12 +850,14 @@ impl App {
         if self.source == Source::Soundscape {
             return self.activate(index);
         }
-        let count = items.len();
+        let message = match items.as_slice() {
+            [item] => format!("Queued \"{}\"", item.title),
+            _ => format!("Queued {} tracks", items.len()),
+        };
         for item in items {
             self.queue.enqueue(item);
         }
-        let noun = if count == 1 { "item" } else { "items" };
-        self.toast(Tone::Done, format!("Added {count} {noun} to the queue"));
+        self.toast(Tone::Done, message);
     }
 
     /// The identity and title behind a library row, for a delete that waits on confirmation.
@@ -918,7 +920,7 @@ impl App {
                         self.reload_library();
                         self.toast(
                             Tone::Done,
-                            format!("Saved scene \"{text}\", start it with `chill {text}`"),
+                            format!("Saved \"{text}\". Run chill \"{text}\" to start it."),
                         );
                     }
                     Err(error) => self.toast(Tone::Error, format!("Could not save the scene: {error}")),

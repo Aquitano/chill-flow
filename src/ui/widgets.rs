@@ -49,6 +49,28 @@ pub fn fill(buf: &mut Buffer, area: Rect, style: Style) {
     }
 }
 
+/// Word-wraps `text` into at most `max_lines` lines of `width` columns, ending in an ellipsis
+/// when it still doesn't fit.
+pub fn wrap(text: &str, width: usize, max_lines: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for word in text.split_whitespace() {
+        match lines.last_mut() {
+            Some(line) if line.width() + 1 + word.width() <= width => {
+                line.push(' ');
+                line.push_str(word);
+            }
+            _ => lines.push(word.to_string()),
+        }
+    }
+    if lines.len() > max_lines {
+        let overflow = lines.split_off(max_lines).join(" ");
+        if let Some(last) = lines.last_mut() {
+            *last = format!("{last} {overflow}");
+        }
+    }
+    lines.iter().map(|line| fit(line, width)).collect()
+}
+
 /// A thin line meter with half-cell resolution: `━━━━╸────`.
 pub fn meter(buf: &mut Buffer, area: Rect, fraction: f64, filled: Style, track: Style) {
     if area.width == 0 {
@@ -273,6 +295,13 @@ fn resolve(color: Color, theme: &Theme) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wrap_breaks_on_words_and_ellipsizes_what_does_not_fit() {
+        assert_eq!(wrap("short", 20, 2), ["short"]);
+        assert_eq!(wrap("one two three four", 9, 2), ["one two", "three fo…"]);
+        assert_eq!(wrap("one two three", 9, 2), ["one two", "three"]);
+    }
 
     #[test]
     fn fit_cuts_wide_text_on_column_boundaries() {

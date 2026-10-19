@@ -8,7 +8,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, BorderType, Widget};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use super::widgets::{self, fill, fit, put};
+use super::widgets::{self, fill, fit, put, wrap};
 use super::{BACKDROP_DIM, Hit, Overlay, Ui};
 use crate::action::{Action, Prompt, Setting};
 use crate::app::{App, Tone};
@@ -37,7 +37,7 @@ pub fn commands(app: &App) -> Vec<Command> {
         command("Shuffle", "s", Action::ToggleShuffle),
         command("Repeat", "r", Action::CycleRepeat),
         command("Like what's playing", "f", Action::ToggleLikeCurrent),
-        command("Open a YouTube link…", "o", Action::OpenPrompt(Prompt::OpenUrl)),
+        command("Open a link…", "o", Action::OpenPrompt(Prompt::OpenUrl)),
         command("Save scene…", "", Action::OpenPrompt(Prompt::SaveScene)),
         command("Save ambience mix…", "", Action::OpenPrompt(Prompt::SaveMix)),
         command("Timer: start or pause", "t", Action::TimerToggle),
@@ -108,9 +108,17 @@ fn dialog(buf: &mut Buffer, screen: Rect, width: u16, height: u16, top: Option<u
     let theme = ui.theme;
     let width = width.min(screen.width.saturating_sub(4));
     let height = height.min(screen.height.saturating_sub(2));
-    let y = top.unwrap_or(screen.y + screen.height.saturating_sub(height) / 2);
+    let y = top
+        .unwrap_or(screen.y + screen.height.saturating_sub(height) / 2)
+        .min(screen.bottom().saturating_sub(height + 1));
     let area = Rect::new(screen.x + (screen.width - width) / 2, y, width, height).intersection(screen);
     fill(buf, area, Style::new().bg(theme.panel()));
+    if !theme.has_rgb() {
+        Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(Style::new().fg(theme.line()))
+            .render(area, buf);
+    }
     let inner = area.inner(Margin {
         horizontal: 3,
         vertical: 1,
@@ -183,15 +191,29 @@ pub fn draw(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant
         ui.overlay = Some(overlay);
         return;
     }
+    // Dialogs draw on their own layer and only their panel is copied back, so content that
+    // a short terminal can't fit is cut at the panel's edge instead of spilling over the page.
+    let mut layer = Buffer::empty(buf.area);
+    let first_hit = ui.hits.len();
     match &overlay {
-        Overlay::Palette { query, selected } => palette(buf, screen, app, ui, query, *selected),
-        Overlay::Prompt { kind, input } => prompt(buf, screen, ui, *kind, input),
-        Overlay::Confirm { message, .. } => confirm(buf, screen, ui, message),
-        Overlay::Help => help(buf, screen, app, ui),
-        Overlay::Stats => stats(buf, screen, app, ui, now),
-        Overlay::Settings { selected } => settings(buf, screen, app, ui, *selected),
+        Overlay::Palette { query, selected } => palette(&mut layer, screen, app, ui, query, *selected),
+        Overlay::Prompt { kind, input } => prompt(&mut layer, screen, ui, *kind, input),
+        Overlay::Confirm { message, .. } => confirm(&mut layer, screen, ui, message),
+        Overlay::Help => help(&mut layer, screen, app, ui),
+        Overlay::Stats => stats(&mut layer, screen, app, ui, now),
+        Overlay::Settings { selected } => settings(&mut layer, screen, app, ui, *selected),
     }
     if let Some(area) = ui.dialog_area.take() {
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                buf[(x, y)] = layer[(x, y)].clone();
+            }
+        }
+        let hits = ui.hits.split_off(first_hit);
+        ui.hits.extend(hits.into_iter().filter_map(|(rect, hit)| {
+            let rect = rect.intersection(area);
+            (!rect.is_empty()).then_some((rect, hit))
+        }));
         widgets::dim(buf, area, 1.0 - shown, &ui.theme, None);
     }
     ui.overlay = Some(overlay);
@@ -276,7 +298,7 @@ fn prompt(buf: &mut Buffer, screen: Rect, ui: &mut Ui, kind: Prompt, input: &str
         buf,
         content.x,
         content.bottom().saturating_sub(1),
-        &[("enter", "confirm"), ("esc", "cancel")],
+        &[("enter", kind.verb()), ("esc", "cancel")],
         ui,
     );
 }
@@ -284,18 +306,21 @@ fn prompt(buf: &mut Buffer, screen: Rect, ui: &mut Ui, kind: Prompt, input: &str
 fn confirm(buf: &mut Buffer, screen: Rect, ui: &mut Ui, message: &str) {
     let theme = ui.theme;
     let width = (message.width() as u16 + 8).clamp(44, 72);
-    let content = dialog(buf, screen, width, 7, None, "Remove", ui);
-    put(
-        buf,
-        content.x,
-        content.y,
-        &fit(message, usize::from(content.width)),
-        Style::new().fg(theme.text()),
-    );
+    let lines = wrap(message, usize::from(width - 6), 2);
+    let content = dialog(buf, screen, width, lines.len() as u16 + 6, None, "Remove", ui);
+    for (offset, line) in lines.iter().enumerate() {
+        put(
+            buf,
+            content.x,
+            content.y + offset as u16,
+            line,
+            Style::new().fg(theme.text()),
+        );
+    }
     key_hints(
         buf,
         content.x,
-        content.y + 2,
+        content.y + lines.len() as u16 + 1,
         &[("enter", "remove"), ("esc", "keep")],
         ui,
     );
@@ -308,7 +333,7 @@ const KEYS: [(&str, &str); 27] = [
     ("- / +", "volume"),
     ("f", "like what's playing"),
     ("s / r", "shuffle / repeat"),
-    ("t / T", "timer start-pause / reset"),
+    ("t / T", "start or pause / reset timer"),
     ("x", "skip to the next phase"),
     ("m", "next timer preset"),
     ("o", "open or paste a YouTube link"),
@@ -353,7 +378,7 @@ fn help(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui) {
         } else {
             (content.x + column, content.y + (index - half) as u16)
         };
-        put(buf, x, y, &format!("{key:>11}"), Style::new().fg(theme.accent));
+        put(buf, x, y, &format!("{key:>11}"), Style::new().fg(theme.text()));
         put(
             buf,
             x + 13,
@@ -363,7 +388,7 @@ fn help(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui) {
         );
     }
     let mut y = content.y + half as u16 + 1;
-    if !credits.is_empty() {
+    if !credits.is_empty() && content.height >= half as u16 + credit_rows + 2 {
         put(buf, content.x, y, "Ambient recordings", Style::new().fg(theme.text()));
         for credit in credits {
             y += 1;
@@ -376,13 +401,15 @@ fn help(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui) {
             );
         }
     }
-    put(
-        buf,
-        content.x,
-        content.bottom().saturating_sub(1),
-        "Mouse works too: click, drag the sliders, scroll the lists.",
-        Style::new().fg(theme.faint()),
-    );
+    if content.height >= half as u16 + 2 {
+        put(
+            buf,
+            content.x,
+            content.bottom().saturating_sub(1),
+            "Mouse works too: click, drag the sliders, scroll the lists.",
+            Style::new().fg(theme.faint()),
+        );
+    }
 }
 
 fn stats(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant) {
@@ -428,21 +455,41 @@ fn stats(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant) {
 }
 
 fn settings(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, selected: usize) {
+    enum Line {
+        Group(&'static str),
+        Gap,
+        Row(usize, Setting),
+    }
     let theme = ui.theme;
-    let groups = 3;
-    let height = Setting::ALL.len() as u16 + groups * 2 + 7;
-    let content = dialog(buf, screen, 64, height, None, "Settings", ui);
-    let mut y = content.y;
-    let mut group = "";
+    let mut lines = Vec::new();
     for (index, setting) in Setting::ALL.into_iter().enumerate() {
-        if setting.group() != group {
-            if !group.is_empty() {
-                y += 1;
+        if index == 0 || setting.group() != Setting::ALL[index - 1].group() {
+            if index > 0 {
+                lines.push(Line::Gap);
             }
-            group = setting.group();
-            put(buf, content.x, y, group, Style::new().fg(theme.faint()));
-            y += 1;
+            lines.push(Line::Group(setting.group()));
         }
+        lines.push(Line::Row(index, setting));
+    }
+    let content = dialog(buf, screen, 64, lines.len() as u16 + 8, None, "Settings", ui);
+    // On a short terminal the path line gives up its rows and the list scrolls to the selection.
+    let fits = usize::from(content.height) >= lines.len() + 4;
+    let view = usize::from(content.height.saturating_sub(if fits { 4 } else { 2 }));
+    let selected_line = lines
+        .iter()
+        .position(|line| matches!(line, Line::Row(index, _) if *index == selected))
+        .unwrap_or(0);
+    let offset = (selected_line + 1).saturating_sub(view);
+    for (row, line) in lines.iter().skip(offset).take(view).enumerate() {
+        let y = content.y + row as u16;
+        let (index, setting) = match line {
+            Line::Gap => continue,
+            Line::Group(name) => {
+                put(buf, content.x, y, name, Style::new().fg(theme.faint()));
+                continue;
+            }
+            Line::Row(index, setting) => (*index, *setting),
+        };
         let rect = Rect::new(content.x, y, content.width, 1);
         let is_selected = index == selected;
         if is_selected {
@@ -469,7 +516,6 @@ fn settings(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, selected: us
             ui.hits.push((less, Hit::Act(Action::AdjustSetting(setting, -1))));
             ui.hits.push((more, Hit::Act(Action::AdjustSetting(setting, 1))));
         }
-        y += 1;
     }
     let home = etcetera::home_dir().ok();
     let path = app.config_file().display().to_string();
@@ -480,13 +526,15 @@ fn settings(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, selected: us
         Some(rest) => format!("~{rest}"),
         None => path,
     };
-    put(
-        buf,
-        content.x,
-        y + 1,
-        &fit(&format!("Changes save to {path}"), usize::from(content.width)),
-        Style::new().fg(theme.faint()),
-    );
+    if fits {
+        put(
+            buf,
+            content.x,
+            content.bottom().saturating_sub(3),
+            &fit(&format!("Changes save to {path}"), usize::from(content.width)),
+            Style::new().fg(theme.faint()),
+        );
+    }
     key_hints(
         buf,
         content.x,
@@ -498,7 +546,7 @@ fn settings(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, selected: us
 
 pub fn toasts(buf: &mut Buffer, footer: Rect, ui: &mut Ui, now: Instant) {
     let theme = ui.theme;
-    let mut bottom = footer.y;
+    let mut bottom = footer.y.saturating_sub(1);
     let count = ui.toasts.len();
     for index in (0..count).rev() {
         let toast = &ui.toasts[index];
@@ -516,22 +564,24 @@ pub fn toasts(buf: &mut Buffer, footer: Rect, ui: &mut Ui, now: Instant) {
         let room = usize::from(width.saturating_sub(6));
         let lines = wrap(&toast.message, room, 2);
         let height = lines.len() as u16 + 2;
-        let x = footer.right().saturating_sub(width + 1);
+        let x = footer.right().saturating_sub(width + 2);
         let y = bottom.saturating_sub(height);
         if y < 1 {
             break;
         }
-        let area = Rect::new(x, y, footer.right().saturating_sub(x + 1).min(width), height);
+        let area = Rect::new(x, y, footer.right().saturating_sub(x + 2).min(width), height);
         let color = match toast.tone {
             Tone::Info => theme.calm,
             Tone::Done => theme.rest,
             Tone::Error => theme.alert,
         };
-        fill(buf, area, Style::new().bg(theme.panel()));
-        Block::bordered()
-            .border_type(BorderType::Rounded)
-            .border_style(Style::new().fg(theme.mix(0.24)))
-            .render(area, buf);
+        fill(buf, area, Style::new().bg(theme.raised()));
+        if !theme.has_rgb() {
+            Block::bordered()
+                .border_type(BorderType::Rounded)
+                .border_style(Style::new().fg(theme.line()))
+                .render(area, buf);
+        }
         put(buf, area.x + 2, y + 1, "●", Style::new().fg(color));
         for (offset, line) in lines.iter().enumerate() {
             put(
@@ -545,39 +595,5 @@ pub fn toasts(buf: &mut Buffer, footer: Rect, ui: &mut Ui, now: Instant) {
         widgets::dim(buf, area, fade, &theme, None);
         ui.hits.push((area, Hit::Toast(index)));
         bottom = y;
-    }
-}
-
-/// Word-wraps `text` into at most `max_lines` lines of `width` columns, ending in an ellipsis
-/// when it still doesn't fit.
-fn wrap(text: &str, width: usize, max_lines: usize) -> Vec<String> {
-    let mut lines: Vec<String> = Vec::new();
-    for word in text.split_whitespace() {
-        match lines.last_mut() {
-            Some(line) if line.width() + 1 + word.width() <= width => {
-                line.push(' ');
-                line.push_str(word);
-            }
-            _ => lines.push(word.to_string()),
-        }
-    }
-    if lines.len() > max_lines {
-        let overflow = lines.split_off(max_lines).join(" ");
-        if let Some(last) = lines.last_mut() {
-            *last = format!("{last} {overflow}");
-        }
-    }
-    lines.iter().map(|line| fit(line, width)).collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn wrap_breaks_on_words_and_ellipsizes_what_does_not_fit() {
-        assert_eq!(wrap("short", 20, 2), ["short"]);
-        assert_eq!(wrap("one two three four", 9, 2), ["one two", "three fo…"]);
-        assert_eq!(wrap("one two three", 9, 2), ["one two", "three"]);
     }
 }
