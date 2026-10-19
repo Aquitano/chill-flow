@@ -246,7 +246,7 @@ fn confirm(buf: &mut Buffer, screen: Rect, ui: &mut Ui, message: &str) {
     );
 }
 
-const KEYS: [(&str, &str); 24] = [
+const KEYS: [(&str, &str); 26] = [
     ("space", "play or pause everything"),
     ("n / p", "next / previous"),
     (", / .", "back / forward 10 s"),
@@ -263,9 +263,11 @@ const KEYS: [(&str, &str); 24] = [
     ("← → / h l", "tabs, or a sound's level"),
     ("enter", "play the selection"),
     ("a", "add the selection to the queue"),
+    ("right click", "add a row to the queue"),
     ("d", "remove the selection"),
     ("J / K", "move a queued item"),
     ("[ / ]", "previous / next ambience mix"),
+    ("0", "mute the selected sound"),
     ("/", "filter the library"),
     ("^p or :", "command palette"),
     ("i", "focus stats"),

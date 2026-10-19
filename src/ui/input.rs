@@ -14,7 +14,9 @@ pub fn coalesce(events: Vec<Event>) -> Vec<Event> {
     let mut out = Vec::with_capacity(events.len());
     let mut run = String::new();
     let flush = |run: &mut String, out: &mut Vec<Event>| {
-        if run.chars().count() >= PASTE_MIN {
+        let first = run.chars().next();
+        // A held key repeats one character, and a stalled frame must not turn that into a paste.
+        if run.chars().count() >= PASTE_MIN && run.chars().any(|ch| Some(ch) != first) {
             out.push(Event::Paste(std::mem::take(run)));
         } else {
             out.extend(
@@ -100,8 +102,13 @@ fn pasted(app: &mut App, ui: &mut Ui, text: &str) {
     }
 }
 
+/// Ctrl without Alt. Windows reports AltGr as Ctrl+Alt, and AltGr only types characters.
+fn chord(key: &KeyEvent) -> bool {
+    key.modifiers.contains(KeyModifiers::CONTROL) && !key.modifiers.contains(KeyModifiers::ALT)
+}
+
 fn key_pressed(app: &mut App, ui: &mut Ui, key: KeyEvent) {
-    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let ctrl = chord(&key);
     if ctrl && key.code == KeyCode::Char('c') {
         app.quit = true;
         return;
@@ -116,6 +123,14 @@ fn key_pressed(app: &mut App, ui: &mut Ui, key: KeyEvent) {
     }
     if ctrl && key.code == KeyCode::Char('p') {
         return apply(app, ui, Action::OpenPalette);
+    }
+    if ctrl {
+        return;
+    }
+    if key.code == KeyCode::Char('/') {
+        ui.set_focus(Panel::Library);
+        ui.filtering = true;
+        return;
     }
     let global = match key.code {
         KeyCode::Char(' ') => Some(Action::TogglePlay),
@@ -189,10 +204,6 @@ fn library_key(app: &mut App, ui: &mut Ui, key: KeyEvent) {
         KeyCode::Enter => Action::Activate(selected),
         KeyCode::Char('a') => Action::Enqueue(selected),
         KeyCode::Char('d') | KeyCode::Delete if len > 0 => Action::RemoveRow(selected),
-        KeyCode::Char('/') => {
-            ui.filtering = true;
-            return;
-        }
         KeyCode::Esc => {
             app.filter.clear();
             return;
@@ -224,7 +235,7 @@ fn filter_key(app: &mut App, ui: &mut Ui, key: KeyEvent) {
                 ui.selected[tab] = index;
             }
         }
-        KeyCode::Char(ch) => {
+        KeyCode::Char(ch) if !chord(&key) => {
             app.filter.push(ch);
             ui.selected[tab] = 0;
         }
@@ -278,7 +289,7 @@ fn ambience_key(app: &mut App, ui: &mut Ui, key: KeyEvent) {
 }
 
 fn overlay_key(app: &mut App, ui: &mut Ui, key: KeyEvent) {
-    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let ctrl = chord(&key);
     let Some(overlay) = ui.overlay.as_mut() else { return };
     match overlay {
         Overlay::Palette { query, selected } => {
@@ -342,8 +353,9 @@ fn slider_value(rect: Rect, column: u16) -> f32 {
     if rect.width <= 1 {
         return 0.0;
     }
-    let offset = column.saturating_sub(rect.x).min(rect.width);
-    (f32::from(offset) / f32::from(rect.width)).clamp(0.0, 1.0)
+    let last = rect.width - 1;
+    let offset = column.saturating_sub(rect.x).min(last);
+    f32::from(offset) / f32::from(last)
 }
 
 fn set_slider(app: &mut App, ui: &mut Ui, slider: &Slider, value: f32) {
@@ -398,22 +410,25 @@ fn mouse_event(app: &mut App, ui: &mut Ui, mouse: MouseEvent) {
 }
 
 fn click(app: &mut App, ui: &mut Ui, rect: Rect, hit: Hit, x: u16) {
+    // A row plays on its second click, not on the first click of a row that was only
+    // selected by default or by keyboard.
+    let again = ui.last_click.replace(hit.clone()) == Some(hit.clone());
     match hit {
         Hit::Act(action) => apply(app, ui, action),
         Hit::Row(index) => {
             let tab = app.tab.index();
-            let again = ui.focus == Panel::Library && ui.selected[tab] == index;
             ui.selected[tab] = index;
             ui.set_focus(Panel::Library);
             if again {
+                ui.last_click = None;
                 apply(app, ui, Action::Activate(index));
             }
         }
         Hit::Queue(index) => {
-            let again = ui.focus == Panel::Queue && ui.queue_selected == index;
             ui.queue_selected = index;
             ui.set_focus(Panel::Queue);
             if again {
+                ui.last_click = None;
                 apply(app, ui, Action::JumpQueue(index));
             }
         }
@@ -502,5 +517,6 @@ mod tests {
             [Event::Paste("https://youtu.be/abc".into())]
         );
         assert_eq!(coalesce(keys("n")), keys("n"));
+        assert_eq!(coalesce(keys("jjjjjjjjjj")), keys("jjjjjjjjjj"));
     }
 }

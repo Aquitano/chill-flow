@@ -87,6 +87,7 @@ pub struct Ui {
     hits: Vec<(Rect, Hit)>,
     pub hover: Option<(u16, u16)>,
     pub drag: Option<Drag>,
+    pub last_click: Option<Hit>,
     pub seek_preview: Option<f64>,
     cover_rect: Option<Rect>,
     bars: Bars,
@@ -128,6 +129,7 @@ impl Ui {
             hits: Vec::new(),
             hover: None,
             drag: None,
+            last_click: None,
             seek_preview: None,
             cover_rect: None,
             bars: Bars::default(),
@@ -212,6 +214,7 @@ impl Ui {
         app.tab = tab;
         app.filter.clear();
         self.filtering = false;
+        self.last_click = None;
     }
 
     pub fn open(&mut self, overlay: Overlay) {
