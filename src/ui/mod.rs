@@ -27,6 +27,7 @@ pub enum Overlay {
     Confirm { message: String, action: Action },
     Help,
     Stats,
+    Settings { selected: usize },
 }
 
 struct Toast {
@@ -51,6 +52,7 @@ pub enum Hit {
     Slider(Slider),
     Seek,
     Palette(usize),
+    Setting(usize),
     Backdrop,
     Dialog,
     Toast(usize),
@@ -289,6 +291,7 @@ impl Ui {
                 aspect,
             });
         }
+        self.motion = !app.config.reduce_motion;
         self.volume.set(app.volume, now, self.duration(FAST));
         let duration = self.duration(SMOOTH);
         for sound in &app.catalog.ambient {
@@ -428,7 +431,7 @@ mod tests {
 
     use super::*;
     use crate::audio::Engine;
-    use crate::config::Config;
+    use crate::config::{Config, Paths};
     use crate::store::Store;
 
     /// Nothing listens on port 9, so streams, downloads, and the catalog fetch fail fast
@@ -440,12 +443,17 @@ mod tests {
             catalog_url: "http://127.0.0.1:9/catalog.json".into(),
             ..Config::default()
         };
+        let paths = Paths {
+            config_file: cache.join("config.toml"),
+            database: cache.join("unused.db"),
+            cache: cache.clone(),
+        };
         let store = Store::open(Path::new(":memory:")).unwrap();
-        App::new(config, cache.clone(), store, Engine::start(cache))
+        App::new(config, paths, store, Engine::start(cache))
     }
 
     fn random_event(rng: &mut fastrand::Rng, width: u16, height: u16) -> Event {
-        const KEYS: &str = " npfsrtTxmo:?i[]12345adjkhlgG/JK0,.+-qyz";
+        const KEYS: &str = " npfsrtTxmo:?ic[]12345adjkhlgG/JK0,.+-qyz";
         let code = |rng: &mut fastrand::Rng| match rng.u8(..12) {
             0 => KeyCode::Enter,
             1 => KeyCode::Esc,

@@ -3,7 +3,7 @@ use ratatui::layout::Rect;
 
 use super::overlay;
 use super::{Drag, Hit, Overlay, Slider, Ui};
-use crate::action::{Action, Panel, Prompt, Tab};
+use crate::action::{Action, Panel, Prompt, Setting, Tab};
 use crate::app::App;
 use crate::youtube;
 
@@ -75,6 +75,7 @@ pub fn apply(app: &mut App, ui: &mut Ui, action: Action) {
         }),
         Action::OpenHelp => ui.open(Overlay::Help),
         Action::OpenStats => ui.open(Overlay::Stats),
+        Action::OpenSettings => ui.open(Overlay::Settings { selected: 0 }),
         Action::RemoveRow(index) => {
             if let Some((removal, title)) = app.removal(index) {
                 let message = format!("Remove \"{title}\" from {}?", app.tab.label());
@@ -152,6 +153,7 @@ fn key_pressed(app: &mut App, ui: &mut Ui, key: KeyEvent) {
         KeyCode::Char(':') => Some(Action::OpenPalette),
         KeyCode::Char('?') => Some(Action::OpenHelp),
         KeyCode::Char('i') => Some(Action::OpenStats),
+        KeyCode::Char('c') => Some(Action::OpenSettings),
         KeyCode::Char('[') => Some(Action::CycleMix(-1)),
         KeyCode::Char(']') => Some(Action::CycleMix(1)),
         KeyCode::Char(digit @ '1'..='5') => Tab::ALL
@@ -346,6 +348,19 @@ fn overlay_key(app: &mut App, ui: &mut Ui, key: KeyEvent) {
                 ui.close();
             }
         }
+        Overlay::Settings { selected } => {
+            let setting = Setting::ALL[(*selected).min(Setting::ALL.len() - 1)];
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q' | 'c') => ui.close(),
+                KeyCode::Up | KeyCode::Char('k') => *selected = selected.saturating_sub(1),
+                KeyCode::Down | KeyCode::Char('j') => *selected = (*selected + 1).min(Setting::ALL.len() - 1),
+                KeyCode::Left | KeyCode::Char('h') => app.dispatch(Action::AdjustSetting(setting, -1)),
+                KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ') => {
+                    app.dispatch(Action::AdjustSetting(setting, 1))
+                }
+                _ => {}
+            }
+        }
     }
 }
 
@@ -458,6 +473,14 @@ fn click(app: &mut App, ui: &mut Ui, rect: Rect, hit: Hit, x: u16) {
             ui.close();
             if let Some(command) = chosen {
                 apply(app, ui, command.action);
+            }
+        }
+        Hit::Setting(index) => {
+            if let Some(Overlay::Settings { selected }) = &mut ui.overlay {
+                *selected = index;
+            }
+            if let Some(setting) = Setting::ALL.get(index).filter(|setting| setting.is_toggle()) {
+                app.dispatch(Action::AdjustSetting(*setting, 1));
             }
         }
         Hit::Backdrop => ui.close(),

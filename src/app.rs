@@ -7,10 +7,10 @@ use image::DynamicImage;
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 
-use crate::action::{Action, Prompt, Removal, Tab};
+use crate::action::{Action, Prompt, Removal, Setting, Tab};
 use crate::audio::{Engine, EngineEvent, StreamInput};
 use crate::catalog::{Catalog, Levels, Mix};
-use crate::config::Config;
+use crate::config::{self, Config, Paths};
 use crate::media::{MediaCommand, NowPlaying};
 use crate::model::{Item, Playable, Saved, Scene, Session, Source};
 use crate::queue::Queue;
@@ -78,6 +78,7 @@ struct FocusBlock {
 pub struct App {
     pub config: Config,
     cache_dir: PathBuf,
+    config_file: PathBuf,
     store: Store,
     pub catalog: Catalog,
     pub engine: Engine,
@@ -122,7 +123,12 @@ pub enum Event {
 }
 
 impl App {
-    pub fn new(config: Config, cache_dir: PathBuf, store: Store, engine: Engine) -> App {
+    pub fn new(config: Config, paths: Paths, store: Store, engine: Engine) -> App {
+        let Paths {
+            config_file,
+            cache: cache_dir,
+            ..
+        } = paths;
         let (jobs, inbox) = mpsc::channel();
         let session = store.session();
         let catalog = Catalog::offline(&cache_dir, &config.catalog_url);
@@ -136,6 +142,7 @@ impl App {
             mixes: Vec::new(),
             config,
             cache_dir,
+            config_file,
             store,
             catalog,
             engine,
@@ -632,6 +639,7 @@ impl App {
             }
             Action::LoadScene(index) => self.load_scene(index),
             Action::Submit(prompt, text) => self.submit(prompt, text.trim()),
+            Action::AdjustSetting(setting, delta) => self.adjust_setting(setting, delta),
             Action::Quit => self.quit = true,
             Action::ShowTab(_)
             | Action::RemoveRow(_)
@@ -639,7 +647,8 @@ impl App {
             | Action::OpenPrompt(_)
             | Action::OpenPalette
             | Action::OpenHelp
-            | Action::OpenStats => {}
+            | Action::OpenStats
+            | Action::OpenSettings => {}
         }
     }
 
@@ -954,7 +963,9 @@ impl App {
             self.track_focus(Instant::now());
             return;
         }
-        self.engine.chime();
+        if self.config.chime {
+            self.engine.chime();
+        }
         let minutes = self.timer.phase_length().as_secs() / 60;
         let (title, body) = match (ended.ended, ended.next) {
             (Phase::Focus, Phase::Focus) => ("Focus block done".to_string(), "Nice work.".to_string()),
@@ -968,14 +979,61 @@ impl App {
             ),
         };
         self.toast(Tone::Done, format!("{title} · {body}"));
-        std::thread::spawn(move || {
-            let _ = notify_rust::Notification::new()
-                .summary(&title)
-                .body(&body)
-                .appname("chill")
-                .show();
-        });
+        if self.config.notifications {
+            std::thread::spawn(move || {
+                let _ = notify_rust::Notification::new()
+                    .summary(&title)
+                    .body(&body)
+                    .appname("chill")
+                    .show();
+            });
+        }
         self.track_focus(Instant::now());
+    }
+
+    pub fn setting_value(&self, setting: Setting) -> String {
+        let pomodoro = &self.config.pomodoro;
+        let toggle = |on: bool| if on { "on" } else { "off" }.to_string();
+        match setting {
+            Setting::FocusMinutes => format!("{} min", pomodoro.focus_minutes),
+            Setting::BreakMinutes => format!("{} min", pomodoro.break_minutes),
+            Setting::LongBreakMinutes => format!("{} min", pomodoro.long_break_minutes),
+            Setting::LongBreakEvery => format!("{} blocks", pomodoro.long_break_every),
+            Setting::AutoStartBreaks => toggle(pomodoro.auto_start_breaks),
+            Setting::AutoStartFocus => toggle(pomodoro.auto_start_focus),
+            Setting::Chime => toggle(self.config.chime),
+            Setting::Notifications => toggle(self.config.notifications),
+            Setting::ReduceMotion => toggle(self.config.reduce_motion),
+        }
+    }
+
+    /// Steps a number by `delta` or flips a toggle, applies it, and writes config.toml.
+    fn adjust_setting(&mut self, setting: Setting, delta: i8) {
+        let step = |value: u32, by: i32, min: u32, max: u32| {
+            value
+                .saturating_add_signed(by * i32::from(delta.signum()))
+                .clamp(min, max)
+        };
+        let pomodoro = &mut self.config.pomodoro;
+        match setting {
+            Setting::FocusMinutes => pomodoro.focus_minutes = step(pomodoro.focus_minutes, 5, 5, 180),
+            Setting::BreakMinutes => pomodoro.break_minutes = step(pomodoro.break_minutes, 1, 1, 60),
+            Setting::LongBreakMinutes => pomodoro.long_break_minutes = step(pomodoro.long_break_minutes, 5, 5, 90),
+            Setting::LongBreakEvery => pomodoro.long_break_every = step(pomodoro.long_break_every, 1, 2, 8),
+            Setting::AutoStartBreaks => pomodoro.auto_start_breaks = !pomodoro.auto_start_breaks,
+            Setting::AutoStartFocus => pomodoro.auto_start_focus = !pomodoro.auto_start_focus,
+            Setting::Chime => self.config.chime = !self.config.chime,
+            Setting::Notifications => self.config.notifications = !self.config.notifications,
+            Setting::ReduceMotion => self.config.reduce_motion = !self.config.reduce_motion,
+        }
+        self.timer.set_settings(self.config.pomodoro);
+        if let Err(error) = config::save(&self.config_file, &self.config) {
+            self.toast(Tone::Error, format!("Could not save settings: {error}"));
+        }
+    }
+
+    pub fn config_file(&self) -> &std::path::Path {
+        &self.config_file
     }
 
     pub fn session(&self) -> Session {

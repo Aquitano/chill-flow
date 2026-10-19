@@ -11,6 +11,8 @@ use crate::timer::PomodoroSettings;
 pub struct Config {
     pub catalog_url: String,
     pub reduce_motion: bool,
+    pub chime: bool,
+    pub notifications: bool,
     pub pomodoro: PomodoroSettings,
 }
 
@@ -19,6 +21,8 @@ impl Default for Config {
         Config {
             catalog_url: "https://chill-data.aquitano.me/catalog.json".into(),
             reduce_motion: false,
+            chime: true,
+            notifications: true,
             pomodoro: PomodoroSettings::default(),
         }
     }
@@ -50,5 +54,53 @@ pub fn load(path: &Path) -> Result<Config> {
         Ok(text) => toml::from_str(&text).with_context(|| format!("reading {}", path.display())),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
         Err(error) => Err(error).with_context(|| format!("reading {}", path.display())),
+    }
+}
+
+/// Writes the settings the app can change into `config.toml`, keeping everything else in the
+/// file (comments, catalog_url) as the user left it.
+pub fn save(path: &Path, config: &Config) -> Result<()> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
+    };
+    let mut document: toml_edit::DocumentMut = text.parse().with_context(|| format!("reading {}", path.display()))?;
+    document["reduce_motion"] = toml_edit::value(config.reduce_motion);
+    document["chime"] = toml_edit::value(config.chime);
+    document["notifications"] = toml_edit::value(config.notifications);
+    let pomodoro = &config.pomodoro;
+    let table = document["pomodoro"].or_insert(toml_edit::table());
+    table["focus_minutes"] = toml_edit::value(i64::from(pomodoro.focus_minutes));
+    table["break_minutes"] = toml_edit::value(i64::from(pomodoro.break_minutes));
+    table["long_break_minutes"] = toml_edit::value(i64::from(pomodoro.long_break_minutes));
+    table["long_break_every"] = toml_edit::value(i64::from(pomodoro.long_break_every));
+    table["auto_start_breaks"] = toml_edit::value(pomodoro.auto_start_breaks);
+    table["auto_start_focus"] = toml_edit::value(pomodoro.auto_start_focus);
+    if let Some(folder) = path.parent() {
+        std::fs::create_dir_all(folder).with_context(|| format!("creating {}", folder.display()))?;
+    }
+    std::fs::write(path, document.to_string()).with_context(|| format!("writing {}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saving_keeps_the_users_comments_and_other_keys() {
+        let path = std::env::temp_dir().join(format!("chill-config-{}.toml", std::process::id()));
+        std::fs::write(&path, "# mine\ncatalog_url = \"https://example.com/catalog.json\"\n").unwrap();
+        let mut config = load(&path).unwrap();
+        config.chime = false;
+        config.pomodoro.focus_minutes = 40;
+        save(&path, &config).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        let reloaded = load(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert!(text.starts_with("# mine"));
+        assert_eq!(reloaded.catalog_url, "https://example.com/catalog.json");
+        assert_eq!((reloaded.chime, reloaded.pomodoro.focus_minutes), (false, 40));
     }
 }

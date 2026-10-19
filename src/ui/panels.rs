@@ -147,7 +147,11 @@ pub fn footer(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
         ],
     });
     hints.push(("o", "open link", Some(Action::OpenPrompt(Prompt::OpenUrl))));
-    let pinned = [("^p", "commands", Action::OpenPalette), ("?", "keys", Action::OpenHelp)];
+    let pinned = [
+        ("^p", "commands", Action::OpenPalette),
+        ("c", "settings", Action::OpenSettings),
+        ("?", "keys", Action::OpenHelp),
+    ];
 
     let mut draw = |x: u16, (key, label, action): (&str, &str, Option<Action>), ui: &mut Ui| {
         let width = (key.width() + 1 + label.width()) as u16;

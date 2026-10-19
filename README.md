@@ -38,6 +38,7 @@ Paste a YouTube link anywhere in the app to add it to the library and play it. E
 | `f` | like what's playing |
 | `t` / `T` | start or pause the timer / reset it |
 | `o` | open a YouTube link |
+| `c` | settings |
 | `tab` | move between library, queue, and ambience |
 | `enter` / `a` | play the selection / add it to the queue |
 
@@ -57,11 +58,13 @@ To add a track, upload the MP3 (and optionally a cover image) to the bucket, add
 
 ## Configuration
 
-`config.toml` is optional. It lives in `~/.config/chill/` on macOS and `%APPDATA%\chill\` on Windows. These are the defaults:
+Press `c` for settings: timer lengths, auto-start, the chime, notifications, and reduced motion. Changes save to `config.toml` right away, keeping anything else you wrote in it. The file is optional and lives in `~/.config/chill/` on macOS and `%APPDATA%\chill\` on Windows. These are the defaults:
 
 ```toml
 catalog_url = "https://chill-data.aquitano.me/catalog.json"
 reduce_motion = false   # true turns off transitions and the visualizer
+chime = true            # a soft bell when a focus block or break ends
+notifications = true    # an OS notification at the same moments
 
 [pomodoro]
 focus_minutes = 25

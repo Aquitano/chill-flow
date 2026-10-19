@@ -42,7 +42,7 @@ fn main() -> Result<()> {
         let theme = ui::theme::Theme::detect();
         let engine = audio::Engine::start(paths.cache.clone());
         let crash_log = paths.cache.join("crash.log");
-        let mut app = App::new(config, paths.cache, store, engine);
+        let mut app = App::new(config, paths, store, engine);
 
         let mut terminal = ratatui::init();
         let _ = execute!(stdout(), EnableMouseCapture, EnableBracketedPaste);

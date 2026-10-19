@@ -10,7 +10,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::widgets::{self, fill, fit, put};
 use super::{BACKDROP_DIM, Hit, Overlay, Ui};
-use crate::action::{Action, Prompt};
+use crate::action::{Action, Prompt, Setting};
 use crate::app::{App, Tone};
 use crate::timer::TimerMode;
 
@@ -76,6 +76,7 @@ pub fn commands(app: &App) -> Vec<Command> {
         });
     }
     list.push(command("Focus stats", "i", Action::OpenStats));
+    list.push(command("Settings", "c", Action::OpenSettings));
     list.push(command("Keyboard shortcuts", "?", Action::OpenHelp));
     list.push(command("Quit", "q", Action::Quit));
     list
@@ -188,6 +189,7 @@ pub fn draw(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant
         Overlay::Confirm { message, .. } => confirm(buf, screen, ui, message),
         Overlay::Help => help(buf, screen, app, ui),
         Overlay::Stats => stats(buf, screen, app, ui, now),
+        Overlay::Settings { selected } => settings(buf, screen, app, ui, *selected),
     }
     if let Some(area) = ui.dialog_area.take() {
         widgets::dim(buf, area, 1.0 - shown, &ui.theme, None);
@@ -299,7 +301,7 @@ fn confirm(buf: &mut Buffer, screen: Rect, ui: &mut Ui, message: &str) {
     );
 }
 
-const KEYS: [(&str, &str); 26] = [
+const KEYS: [(&str, &str); 27] = [
     ("space", "play or pause everything"),
     ("n / p", "next / previous"),
     (", / .", "back / forward 10 s"),
@@ -324,6 +326,7 @@ const KEYS: [(&str, &str); 26] = [
     ("/", "filter the library"),
     ("^p or :", "command palette"),
     ("i", "focus stats"),
+    ("c", "settings"),
     ("esc", "close or clear"),
     ("q", "quit"),
 ];
@@ -420,6 +423,79 @@ fn stats(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant) {
         content.x,
         content.bottom().saturating_sub(1),
         "Counts every minute a focus block ran. Breaks never count.",
+        Style::new().fg(theme.faint()),
+    );
+}
+
+fn settings(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, selected: usize) {
+    let theme = ui.theme;
+    let groups = 3;
+    let height = Setting::ALL.len() as u16 + groups * 2 + 6;
+    let content = dialog(buf, screen, 64, height, None, "Settings", ui);
+    let mut y = content.y;
+    let mut group = "";
+    for (index, setting) in Setting::ALL.into_iter().enumerate() {
+        if setting.group() != group {
+            if !group.is_empty() {
+                y += 1;
+            }
+            group = setting.group();
+            put(buf, content.x, y, group, Style::new().fg(theme.faint()));
+            y += 1;
+        }
+        let rect = Rect::new(content.x, y, content.width, 1);
+        let is_selected = index == selected;
+        if is_selected {
+            fill(buf, rect, Style::new().bg(theme.raised()));
+        } else if ui.hovered(rect) {
+            fill(buf, rect, Style::new().bg(theme.mix(0.09)));
+        }
+        let label_color = if is_selected { theme.text() } else { theme.muted() };
+        put(buf, rect.x + 1, y, setting.label(), Style::new().fg(label_color));
+        ui.hits.push((rect, Hit::Setting(index)));
+
+        let value = app.setting_value(setting);
+        let more = Rect::new(rect.right().saturating_sub(2), y, 1, 1);
+        let value_x = more.x.saturating_sub(value.width() as u16 + 1);
+        if setting.is_toggle() {
+            let color = if value == "on" { theme.accent } else { theme.faint() };
+            put(buf, value_x, y, &value, Style::new().fg(color));
+        } else {
+            let arrow = |hovered: bool| Style::new().fg(if hovered { theme.accent } else { theme.faint() });
+            let less = Rect::new(value_x.saturating_sub(2), y, 1, 1);
+            put(buf, less.x, y, "‹", arrow(ui.hovered(less)));
+            put(buf, value_x, y, &value, Style::new().fg(theme.text()));
+            put(buf, more.x, y, "›", arrow(ui.hovered(more)));
+            ui.hits.push((less, Hit::Act(Action::AdjustSetting(setting, -1))));
+            ui.hits.push((more, Hit::Act(Action::AdjustSetting(setting, 1))));
+        }
+        y += 1;
+    }
+    let home = etcetera::home_dir().ok();
+    let path = app.config_file().display().to_string();
+    let path = match home
+        .as_ref()
+        .and_then(|home| path.strip_prefix(&*home.display().to_string()))
+    {
+        Some(rest) => format!("~{rest}"),
+        None => path,
+    };
+    key_hints(
+        buf,
+        content.x,
+        content.bottom().saturating_sub(1),
+        &[("↑↓", "choose"), ("←→", "change")],
+        ui,
+    );
+    let saved = fit(
+        &format!("saved to {path}"),
+        usize::from(content.width.saturating_sub(30)),
+    );
+    put(
+        buf,
+        content.right().saturating_sub(saved.width() as u16),
+        content.bottom().saturating_sub(1),
+        &saved,
         Style::new().fg(theme.faint()),
     );
 }

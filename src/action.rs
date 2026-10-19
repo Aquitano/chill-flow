@@ -67,6 +67,67 @@ impl Prompt {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Setting {
+    FocusMinutes,
+    BreakMinutes,
+    LongBreakMinutes,
+    LongBreakEvery,
+    AutoStartBreaks,
+    AutoStartFocus,
+    Chime,
+    Notifications,
+    ReduceMotion,
+}
+
+impl Setting {
+    pub const ALL: [Setting; 9] = [
+        Setting::FocusMinutes,
+        Setting::BreakMinutes,
+        Setting::LongBreakMinutes,
+        Setting::LongBreakEvery,
+        Setting::AutoStartBreaks,
+        Setting::AutoStartFocus,
+        Setting::Chime,
+        Setting::Notifications,
+        Setting::ReduceMotion,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Setting::FocusMinutes => "Pomodoro focus",
+            Setting::BreakMinutes => "Short break",
+            Setting::LongBreakMinutes => "Long break",
+            Setting::LongBreakEvery => "Long break after",
+            Setting::AutoStartBreaks => "Start breaks on their own",
+            Setting::AutoStartFocus => "Start focus on its own",
+            Setting::Chime => "Chime between phases",
+            Setting::Notifications => "Notify between phases",
+            Setting::ReduceMotion => "Reduce motion",
+        }
+    }
+
+    /// The heading this setting sits under, shown above its first row.
+    pub fn group(self) -> &'static str {
+        match self {
+            Setting::Chime | Setting::Notifications => "Sound",
+            Setting::ReduceMotion => "Display",
+            _ => "Timer",
+        }
+    }
+
+    pub fn is_toggle(self) -> bool {
+        matches!(
+            self,
+            Setting::AutoStartBreaks
+                | Setting::AutoStartFocus
+                | Setting::Chime
+                | Setting::Notifications
+                | Setting::ReduceMotion
+        )
+    }
+}
+
 /// What a confirmed delete removes, named by identity so that a list reordered while the
 /// confirmation was open can't redirect it to another row.
 #[derive(Debug, Clone, PartialEq)]
@@ -117,5 +178,7 @@ pub enum Action {
     OpenPalette,
     OpenHelp,
     OpenStats,
+    OpenSettings,
+    AdjustSetting(Setting, i8),
     Quit,
 }

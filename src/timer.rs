@@ -79,6 +79,9 @@ pub struct Timer {
     mode: TimerMode,
     settings: PomodoroSettings,
     phase: Phase,
+    /// Fixed when the phase starts, so changing settings mid-phase can't rewrite how much
+    /// of it has already elapsed.
+    length: Duration,
     remaining: Duration,
     deadline: Option<Instant>,
     focus_blocks_done: u32,
@@ -90,12 +93,26 @@ impl Timer {
             mode,
             settings,
             phase: Phase::Focus,
+            length: Duration::ZERO,
             remaining: Duration::ZERO,
             deadline: None,
             focus_blocks_done: 0,
         };
-        timer.remaining = timer.phase_length();
+        timer.rearm();
         timer
+    }
+
+    fn rearm(&mut self) {
+        self.length = self.planned_length();
+        self.remaining = self.length;
+    }
+
+    /// Takes effect from the next phase, or right away when the current one hasn't started.
+    pub fn set_settings(&mut self, settings: PomodoroSettings) {
+        self.settings = settings;
+        if self.deadline.is_none() && self.remaining == self.length {
+            self.rearm();
+        }
     }
 
     pub fn mode(&self) -> TimerMode {
@@ -111,6 +128,10 @@ impl Timer {
     }
 
     pub fn phase_length(&self) -> Duration {
+        self.length
+    }
+
+    fn planned_length(&self) -> Duration {
         let minutes = match (self.mode, self.phase) {
             (TimerMode::Focus { minutes }, _) => minutes,
             (TimerMode::Pomodoro, Phase::Focus) => self.settings.focus_minutes,
@@ -166,7 +187,7 @@ impl Timer {
 
     pub fn reset(&mut self) {
         self.deadline = None;
-        self.remaining = self.phase_length();
+        self.rearm();
     }
 
     pub fn set_mode(&mut self, mode: TimerMode, settings: PomodoroSettings) {
@@ -199,7 +220,7 @@ impl Timer {
         };
         let auto_start = auto_start && was_running;
         self.phase = next;
-        self.remaining = self.phase_length();
+        self.rearm();
         self.deadline = auto_start.then(|| now + self.remaining);
         PhaseEnded {
             ended,
@@ -283,6 +304,24 @@ mod tests {
             (ended.next, ended.auto_started, timer.is_running()),
             (Phase::Break, false, false)
         );
+    }
+
+    #[test]
+    fn changing_lengths_mid_block_keeps_the_time_already_focused() {
+        let start = Instant::now();
+        let mut timer = Timer::new(TimerMode::Pomodoro, PomodoroSettings::default());
+        timer.start(start);
+        let longer = PomodoroSettings {
+            focus_minutes: 50,
+            ..Default::default()
+        };
+        timer.set_settings(longer);
+        assert_eq!(timer.elapsed(start + 10 * MINUTE), 10 * MINUTE);
+        assert_eq!(timer.phase_length(), 25 * MINUTE);
+
+        let mut idle = Timer::new(TimerMode::Pomodoro, PomodoroSettings::default());
+        idle.set_settings(longer);
+        assert_eq!(idle.remaining(start), 50 * MINUTE);
     }
 
     #[test]
