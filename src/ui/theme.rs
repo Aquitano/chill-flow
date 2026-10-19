@@ -22,6 +22,11 @@ impl Theme {
             let (br, bg, bb) = palette.background.scale_to_8bit();
             ([fr, fg, fb], [br, bg, bb])
         });
+        Theme::new(known)
+    }
+
+    /// `known` is the terminal's (foreground, background); `None` falls back to named colors.
+    pub fn new(known: Option<([u8; 3], [u8; 3])>) -> Theme {
         Theme {
             known,
             accent: Color::Yellow,

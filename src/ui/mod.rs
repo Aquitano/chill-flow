@@ -378,3 +378,135 @@ impl Ui {
         (Some(cover.url.as_str()) == url).then_some(cover.aspect)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    use super::*;
+    use crate::audio::Engine;
+    use crate::config::Config;
+    use crate::store::Store;
+
+    /// Nothing listens on port 9, so streams, downloads, and the catalog fetch fail fast
+    /// instead of reaching the network.
+    fn offline_app() -> App {
+        let cache = std::env::temp_dir().join(format!("chill-fuzz-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&cache);
+        let config = Config {
+            catalog_url: "http://127.0.0.1:9/catalog.json".into(),
+            ..Config::default()
+        };
+        let store = Store::open(Path::new(":memory:")).unwrap();
+        App::new(config, cache.clone(), store, Engine::start(cache))
+    }
+
+    fn random_event(rng: &mut fastrand::Rng, width: u16, height: u16) -> Event {
+        const KEYS: &str = " npfsrtTxmo:?i[]12345adjkhlgG/JK0,.+-qyz";
+        let code = |rng: &mut fastrand::Rng| match rng.u8(..12) {
+            0 => KeyCode::Enter,
+            1 => KeyCode::Esc,
+            2 => KeyCode::Tab,
+            3 => KeyCode::BackTab,
+            4 => KeyCode::Backspace,
+            5 => [KeyCode::Up, KeyCode::Down, KeyCode::Left, KeyCode::Right][rng.usize(..4)],
+            6 => [
+                KeyCode::PageUp,
+                KeyCode::PageDown,
+                KeyCode::Home,
+                KeyCode::End,
+                KeyCode::Delete,
+            ][rng.usize(..5)],
+            _ => KeyCode::Char(KEYS.chars().nth(rng.usize(..KEYS.chars().count())).unwrap_or(' ')),
+        };
+        let modifiers = match rng.u8(..10) {
+            0 => KeyModifiers::CONTROL,
+            1 => KeyModifiers::SHIFT,
+            _ => KeyModifiers::NONE,
+        };
+        let (column, row) = (rng.u16(..width.saturating_add(3)), rng.u16(..height.saturating_add(3)));
+        match rng.u8(..10) {
+            0..=5 => Event::Key(KeyEvent::new(code(rng), modifiers)),
+            6..=8 => {
+                let kind = match rng.u8(..6) {
+                    0 | 1 => MouseEventKind::Down(MouseButton::Left),
+                    2 => MouseEventKind::Down(MouseButton::Right),
+                    3 => MouseEventKind::Drag(MouseButton::Left),
+                    4 => MouseEventKind::Up(MouseButton::Left),
+                    _ => [
+                        MouseEventKind::ScrollUp,
+                        MouseEventKind::ScrollDown,
+                        MouseEventKind::Moved,
+                    ][rng.usize(..3)],
+                };
+                Event::Mouse(MouseEvent {
+                    kind,
+                    column,
+                    row,
+                    modifiers,
+                })
+            }
+            _ => {
+                let pieces = [
+                    "日本語のタイトル",
+                    "a",
+                    " ",
+                    "🎃",
+                    "\u{0301}",
+                    "long text that keeps going and going",
+                    "\t",
+                    "",
+                ];
+                Event::Paste((0..rng.usize(..6)).map(|_| pieces[rng.usize(..pieces.len())]).collect())
+            }
+        }
+    }
+
+    #[test]
+    fn random_input_at_any_terminal_size_never_panics() {
+        let mut rng = fastrand::Rng::with_seed(0x5eed);
+        let mut app = offline_app();
+        let mut ui = Ui::new(
+            Theme::new(Some(([205, 214, 244], [30, 30, 46]))),
+            Picker::halfblocks(),
+            false,
+        );
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let edges = [
+            (1, 1),
+            (2, 3),
+            (12, 4),
+            (24, 8),
+            (40, 12),
+            (83, 20),
+            (84, 21),
+            (117, 21),
+            (118, 22),
+            (160, 45),
+        ];
+        for step in 0..3000 {
+            if step % 30 == 0 {
+                let (width, height) = if rng.bool() {
+                    edges[rng.usize(..edges.len())]
+                } else {
+                    (rng.u16(1..240), rng.u16(1..70))
+                };
+                terminal.backend_mut().resize(width, height);
+                if step % 300 == 0 {
+                    ui.theme = Theme::new(None);
+                    ui.motion = !ui.motion;
+                }
+            }
+            let area = terminal.size().unwrap();
+            let event = random_event(&mut rng, area.width, area.height);
+            input::handle(&mut app, &mut ui, event);
+            app.quit = false;
+            app.tick(Instant::now());
+            terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        }
+    }
+}

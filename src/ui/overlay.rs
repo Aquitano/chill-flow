@@ -132,6 +132,10 @@ pub fn draw(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant
     widgets::dim(buf, screen, shown * 0.6, &ui.theme, None);
     let Some(overlay) = ui.overlay.take() else { return };
     ui.hits.push((screen, Hit::Backdrop));
+    if screen.width < 30 || screen.height < 10 {
+        ui.overlay = Some(overlay);
+        return;
+    }
     match &overlay {
         Overlay::Palette { query, selected } => palette(buf, screen, app, ui, query, *selected),
         Overlay::Prompt { kind, input } => prompt(buf, screen, ui, *kind, input),
@@ -230,7 +234,7 @@ fn confirm(buf: &mut Buffer, screen: Rect, ui: &mut Ui, message: &str) {
         buf,
         inner.x + 1,
         inner.y + 1,
-        &fit(message, usize::from(inner.width - 2)),
+        &fit(message, usize::from(inner.width.saturating_sub(2))),
         Style::new().fg(theme.text()),
     );
     put(
@@ -312,7 +316,7 @@ fn help(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui) {
                 buf,
                 inner.x + 2,
                 y,
-                &fit(&credit, usize::from(inner.width - 4)),
+                &fit(&credit, usize::from(inner.width.saturating_sub(4))),
                 Style::new().fg(theme.faint()),
             );
         }
