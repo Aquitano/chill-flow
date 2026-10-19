@@ -13,11 +13,10 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
-use ratatui_image::{Resize, StatefulImage};
+use ratatui_image::{FilterType, Resize, StatefulImage};
 
 use crate::action::{Action, Panel, Prompt, Tab};
 use crate::app::{App, Event, Tone};
-use crate::model::Source;
 use anim::{Bars, Tween};
 use theme::Theme;
 
@@ -341,12 +340,7 @@ impl Ui {
             ])
             .spacing(1)
             .areas(body);
-            let upcoming = if app.source == Source::Soundscape {
-                0
-            } else {
-                app.queue.upcoming().count()
-            };
-            let queue_height = (upcoming as u16 + 2).clamp(4, (center.height / 3).max(4));
+            let queue_height = (center.height / 5).max(5);
             let [player, queue] =
                 Layout::vertical([Constraint::Fill(1), Constraint::Length(queue_height)]).areas(center);
             let [focus, ambience] = Layout::vertical([Constraint::Length(13), Constraint::Fill(1)]).areas(side);
@@ -401,7 +395,11 @@ impl Ui {
                 }),
                 _ => &mut cover.protocol,
             };
-            frame.render_stateful_widget(StatefulImage::default().resize(Resize::Fit(None)), rect, protocol);
+            frame.render_stateful_widget(
+                StatefulImage::default().resize(Resize::Scale(Some(FilterType::Triangle))),
+                rect,
+                protocol,
+            );
         }
         overlay::draw(frame.buffer_mut(), area, app, self, now);
     }

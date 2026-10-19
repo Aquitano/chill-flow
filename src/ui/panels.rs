@@ -7,7 +7,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Widget};
 use unicode_width::UnicodeWidthStr;
 
-use super::widgets::{self, fill, fit, meter, put};
+use super::widgets::{self, fill, fit, meter, put, wrap};
 use super::{Hit, Slider, Ui};
 use crate::action::{Action, Panel, Prompt, Tab};
 use crate::app::{App, Stream, format_clock};
@@ -109,6 +109,9 @@ pub fn header(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant
         Style::new().fg(theme.text()).add_modifier(Modifier::BOLD),
     );
     let room = |x: u16| usize::from(right_edge.saturating_sub(x + 2));
+    if room(x + 3) < 8 {
+        return;
+    }
     x = put(
         buf,
         x + 3,
@@ -147,11 +150,19 @@ pub fn footer(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
         ],
     });
     hints.push(("o", "open link", Some(Action::OpenPrompt(Prompt::OpenUrl))));
-    let pinned = [
+    let mut pinned = vec![
         ("^p", "commands", Action::OpenPalette),
         ("c", "settings", Action::OpenSettings),
         ("?", "keys", Action::OpenHelp),
     ];
+    if area.width < 80 {
+        pinned.drain(..2);
+    }
+    // Typing goes into the filter, so the usual keys would only add letters to it.
+    if ui.filtering {
+        hints = vec![("enter", "done", None), ("esc", "clear", None), ("↑↓", "move", None)];
+        pinned.clear();
+    }
 
     let mut draw = |x: u16, (key, label, action): (&str, &str, Option<Action>), ui: &mut Ui| {
         let width = (key.width() + 1 + label.width()) as u16;
@@ -264,15 +275,18 @@ pub fn library(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instan
             (Tab::Liked, _) => "Press f while something plays to keep it here",
             (Tab::YouTube, _) => "Paste a YouTube link anywhere, or press o",
             (Tab::Sounds, _) => "No ambient sounds in the catalog",
-            (Tab::Scenes, _) => "Save the current setup with ^p, Save scene",
+            (Tab::Scenes, _) => "Save what plays as a scene from the command palette (^p)",
         };
-        centered(
-            buf,
-            list,
-            list.y + list.height / 3,
-            message,
-            Style::new().fg(theme.faint()),
-        );
+        let lines = wrap(message, usize::from(list.width.saturating_sub(4)), 3);
+        for (offset, line) in lines.iter().enumerate() {
+            centered(
+                buf,
+                list,
+                list.y + list.height / 3 + offset as u16,
+                line,
+                Style::new().fg(theme.faint()),
+            );
+        }
         return;
     }
     ui.selected[tab] = ui.selected[tab].min(rows.len() - 1);
@@ -342,7 +356,7 @@ pub fn library(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instan
         let title = fit(&row.title, available);
         let after = put(buf, text_x, y, &title, title_style);
         let room = available.saturating_sub(title.width() + 2);
-        if room > 3 && !row.detail.is_empty() {
+        if room > 8 && !row.detail.is_empty() {
             put(
                 buf,
                 after + 2,
@@ -366,7 +380,11 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
     let item = app.current().cloned();
     let soundscape = app.source == Source::Soundscape;
 
-    let cover_height = (inner.height * 3 / 10).clamp(5, 12);
+    let controls_y = inner.bottom() - 1;
+    let progress_y = controls_y.saturating_sub(2);
+    let cover_height = (inner.height * 3 / 10)
+        .clamp(5, 12)
+        .min(progress_y.saturating_sub(inner.y + 1));
     let aspect = ui.cover_for(item.as_ref().and_then(|item| item.cover.as_deref()));
     let cover_width = ((f32::from(cover_height) * 2.0 * aspect.unwrap_or(1.0)).round() as u16).min(inner.width / 2);
     let cover = Rect::new(inner.x, inner.y, cover_width, cover_height);
@@ -443,7 +461,7 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
 
     let status_y = meta_y + 4;
     let mut x = meta_x;
-    if let Some(item) = item.as_ref().filter(|_| !soundscape) {
+    if let Some(item) = item.as_ref().filter(|_| !soundscape && status_y < progress_y) {
         let liked = app.is_liked(&item.key);
         let pop = ui.heart.value(now);
         let heart_rect = Rect::new(meta_x, status_y, 2, 1);
@@ -492,12 +510,10 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
         _ if !app.is_playing() => Some(("paused".into(), Style::new().fg(theme.faint()))),
         _ => None,
     };
-    if let Some((text, style)) = status {
+    if let Some((text, style)) = status.filter(|_| status_y < progress_y) {
         put(buf, x, status_y, &text, style);
     }
 
-    let controls_y = inner.bottom() - 1;
-    let progress_y = controls_y.saturating_sub(2);
     let viz_top = cover.bottom() + 1;
     let viz = Rect::new(inner.x, viz_top, inner.width, progress_y.saturating_sub(viz_top + 1));
     if ui.motion && viz.height >= 2 {
@@ -564,15 +580,6 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
                 ui.hit(bar, Hit::Seek);
             }
         }
-        _ if soundscape => {
-            let count = app.levels.len();
-            let label = match count {
-                0 => "silence".to_string(),
-                1 => "1 sound".to_string(),
-                n => format!("{n} sounds"),
-            };
-            centered(buf, inner, progress_y, &label, Style::new().fg(theme.faint()));
-        }
         _ => {}
     }
 
@@ -610,9 +617,15 @@ fn controls(buf: &mut Buffer, inner: Rect, y: u16, app: &App, ui: &mut Ui) {
     } else {
         inner.x
     };
+    let soundscape = app.source == Source::Soundscape;
     let mut x = start;
     for (index, (label, action, on)) in buttons.into_iter().enumerate() {
         let rect = Rect::new(x, y, label.width() as u16, 1);
+        if soundscape && index != 2 {
+            put(buf, x, y, label, Style::new().fg(theme.line()));
+            x += slot(index, label) + gap;
+            continue;
+        }
         let hovered = ui.hovered(rect);
         let style = match index {
             2 => {
@@ -634,10 +647,11 @@ fn controls(buf: &mut Buffer, inner: Rect, y: u16, app: &App, ui: &mut Ui) {
         x += slot(index, label) + gap;
     }
 
-    let volume_x = inner.right().saturating_sub(volume_width);
-    if volume_x > x + 2 {
+    let bar_width = inner.right().saturating_sub(x + 11).min(13);
+    if bar_width >= 4 {
+        let volume_x = inner.right().saturating_sub(bar_width + 9);
         let label_end = put(buf, volume_x, y, "vol ", Style::new().fg(theme.faint()));
-        let bar = Rect::new(label_end, y, 13, 1);
+        let bar = Rect::new(label_end, y, bar_width, 1);
         let shown = ui.volume.value(Instant::now());
         let filled = if ui.hovered(bar) { theme.text() } else { theme.muted() };
         meter(
@@ -674,11 +688,16 @@ pub fn queue(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
     let inner = panel(buf, area, &title, glow, ui);
     ui.hit(area, Hit::Panel(Panel::Queue));
     if upcoming.is_empty() {
+        let message = if app.source == Source::Soundscape {
+            "Pick a track to bring the music back"
+        } else {
+            "Nothing up next"
+        };
         centered(
             buf,
             inner,
             inner.y + inner.height / 2,
-            "Nothing up next",
+            message,
             Style::new().fg(theme.faint()),
         );
         return;
@@ -719,7 +738,7 @@ pub fn queue(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
         let title = fit(&item.title, available);
         let after = put(buf, x + 2, y, &title, Style::new().fg(theme.text()));
         let room = available.saturating_sub(title.width() + 2);
-        if room > 3 && !item.artist.is_empty() {
+        if room > 8 && !item.artist.is_empty() {
             put(
                 buf,
                 after + 2,
