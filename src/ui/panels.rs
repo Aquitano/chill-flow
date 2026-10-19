@@ -117,7 +117,7 @@ pub fn footer(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
     let hints: [(&str, &str, Option<Action>); 7] = [
         (
             "space",
-            if app.is_playing() { "pause" } else { "play" },
+            if app.is_playing() { "pause" } else { "play " },
             Some(Action::TogglePlay),
         ),
         ("n", "next", Some(Action::Next)),
@@ -545,7 +545,7 @@ fn controls(buf: &mut Buffer, inner: Rect, y: u16, app: &App, ui: &mut Ui) {
         Repeat::One => "repeat 1",
         _ => "repeat",
     };
-    let play = if app.is_playing() { " ❚❚ " } else { " ▶ " };
+    let play = if app.is_playing() { " ❚❚ " } else { "  ▶ " };
     let buttons: [(&str, Action, bool); 5] = [
         ("shuffle", Action::ToggleShuffle, app.queue.shuffle),
         ("◂◂", Action::Previous, false),
@@ -718,18 +718,16 @@ pub fn focus(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant)
         Style::new().fg(colon),
     );
 
-    let state = if timer.is_running() {
-        timer.phase().label().to_string()
-    } else if timer.elapsed(now).as_secs() > 0 {
-        format!("{} · paused", timer.phase().label())
-    } else {
-        format!("{} · ready", timer.phase().label())
-    };
     let label = match timer.cycle() {
-        Some((block, of)) => format!("{state} · {block} of {of}"),
-        None => state,
+        Some((block, of)) => format!("{} · {block} of {of}", timer.phase().label()),
+        None => format!(
+            "{} · {} min",
+            timer.phase().label(),
+            timer.phase_length().as_secs() / 60
+        ),
     };
-    centered(buf, inner, clock_y + 4, &label, Style::new().fg(phase_color));
+    let label_color = if timer.is_running() { phase_color } else { theme.muted() };
+    centered(buf, inner, clock_y + 4, &label, Style::new().fg(label_color));
     let bar_width = inner.width.saturating_sub(8);
     let bar = Rect::new(inner.x + (inner.width - bar_width) / 2, clock_y + 5, bar_width, 1);
     meter(
@@ -741,11 +739,8 @@ pub fn focus(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant)
     );
 
     let buttons_y = inner.bottom().saturating_sub(3);
-    let start_label = if timer.is_running() {
-        "❚❚ pause"
-    } else {
-        "▶ start"
-    };
+    let [start, pause] = ["▶ start ", "❚❚ pause"];
+    let start_label = if timer.is_running() { pause } else { start };
     let buttons = [
         (start_label, Action::TimerToggle),
         ("↺ reset", Action::TimerReset),
