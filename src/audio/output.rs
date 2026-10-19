@@ -61,14 +61,17 @@ struct Supervisor {
 
 impl Supervisor {
     fn run(self, device: Result<(), String>) {
-        // Without a device at startup we never probe again: on Linux every failed ALSA open
-        // prints to stderr, which would scribble over the TUI.
+        // On Linux a device missing at startup is never probed again, because every failed
+        // ALSA open prints to stderr over the TUI. Elsewhere it is retried like a lost one.
+        let mut reported = false;
         if let Err(reason) = device {
             let _ = self.events.send(EngineEvent::NoDevice(reason));
-            self.null_sink(None);
-            return;
+            if cfg!(target_os = "linux") {
+                self.null_sink(None);
+                return;
+            }
+            reported = true;
         }
-        let mut reported = false;
         while !self.stopping() {
             let lost = Arc::new(AtomicBool::new(false));
             match self.open(&lost) {
