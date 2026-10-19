@@ -52,7 +52,7 @@ fn scroll(selected: usize, offset: &mut usize, height: usize) {
     }
 }
 
-pub fn header(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant) {
+pub fn header(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant, show_timer: bool) {
     let theme = ui.theme;
     let glyph = match (app.is_playing(), ui.motion) {
         (true, true) => ["◐", "◓", "◑", "◒"][(now.duration_since(ui.started).as_millis() / 300) as usize % 4],
@@ -94,6 +94,22 @@ pub fn header(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant
         x = put(buf, x, area.y, &ch.to_string(), Style::new().fg(color));
     }
     ui.hit(rect, Hit::Act(Action::OpenStats));
+
+    if show_timer {
+        let timer = &app.timer;
+        let remaining = timer.remaining(now).as_secs_f64().ceil() as u64;
+        let label = format!("{} {:02}:{:02}", timer.phase().label(), remaining / 60, remaining % 60);
+        let timer_x = start.saturating_sub(label.width() as u16 + 4);
+        let rect = Rect::new(timer_x, area.y, label.width() as u16, 1);
+        let color = match (timer.is_running(), timer.phase()) {
+            (false, _) => theme.muted(),
+            (true, Phase::Focus) => theme.accent,
+            (true, Phase::Break) => theme.rest,
+            (true, Phase::LongBreak) => theme.calm,
+        };
+        put(buf, timer_x, area.y, &label, Style::new().fg(color));
+        ui.hit(rect, Hit::Act(Action::TimerToggle));
+    }
 }
 
 pub fn footer(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
@@ -536,7 +552,7 @@ fn controls(buf: &mut Buffer, inner: Rect, y: u16, app: &App, ui: &mut Ui) {
         ("▸▸", Action::Next, false),
         (repeat_label, Action::CycleRepeat, app.queue.repeat != Repeat::Off),
     ];
-    let gap = 4;
+    let gap = if inner.width >= 80 { 4 } else { 3 };
     let total: u16 = buttons.iter().map(|(label, ..)| label.width() as u16).sum::<u16>() + gap * 4;
     let volume_width = 22;
     let start = if inner.width >= total + 2 * (volume_width + 2) {
@@ -823,8 +839,16 @@ pub fn ambience(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Insta
             .get(&sound.id)
             .map_or(f32::from(level) / 100.0, |tween| tween.value(now));
         let label_color = if level > 0 { theme.text() } else { theme.muted() };
-        put(buf, rect.x + 2, y, &fit(&sound.label, 12), Style::new().fg(label_color));
-        let slider = Rect::new(rect.x + 15, y, rect.width.saturating_sub(21), 1);
+        let label_width = (rect.width / 3).clamp(6, 12);
+        put(
+            buf,
+            rect.x + 2,
+            y,
+            &fit(&sound.label, usize::from(label_width)),
+            Style::new().fg(label_color),
+        );
+        let slider_x = rect.x + label_width + 3;
+        let slider = Rect::new(slider_x, y, rect.right().saturating_sub(slider_x + 5), 1);
         let filled = if ui.hovered(slider) { theme.text() } else { theme.calm };
         meter(
             buf,

@@ -372,11 +372,11 @@ impl Ui {
         let [header, body, footer] =
             Layout::vertical([Constraint::Length(1), Constraint::Fill(1), Constraint::Length(1)]).areas(area);
         let buf = frame.buffer_mut();
-        panels::header(buf, header, app, self, now);
         panels::footer(buf, footer, app, self);
 
         let wide = body.width >= 118 && body.height >= 22;
         let medium = !wide && body.width >= 84;
+        panels::header(buf, header, app, self, now, !wide && !medium);
         if wide {
             let library_width = (body.width * 30 / 100).clamp(34, 50);
             let [library, center, side] = Layout::horizontal([
@@ -405,17 +405,26 @@ impl Ui {
                 .spacing(1)
                 .areas(body);
             let [player, bottom] = Layout::vertical([Constraint::Fill(1), Constraint::Length(13)]).areas(center);
-            let [focus, ambience] = Layout::horizontal([Constraint::Length(40), Constraint::Fill(1)])
+            let [focus, side] = Layout::horizontal([Constraint::Length(40), Constraint::Fill(1)])
                 .spacing(1)
                 .areas(bottom);
             panels::library(buf, library, app, self, now);
             panels::player(buf, player, app, self, now, elapsed);
             panels::focus(buf, focus, app, self, now);
-            panels::ambience(buf, ambience, app, self, now);
+            match self.focus {
+                Panel::Queue => panels::queue(buf, side, app, self),
+                _ => panels::ambience(buf, side, app, self, now),
+            }
         } else {
-            let [player, focus] = Layout::vertical([Constraint::Fill(1), Constraint::Length(13)]).areas(body);
+            let bottom_height = (body.height / 2).clamp(6, 14);
+            let [player, bottom] =
+                Layout::vertical([Constraint::Fill(1), Constraint::Length(bottom_height)]).areas(body);
             panels::player(buf, player, app, self, now, elapsed);
-            panels::focus(buf, focus, app, self, now);
+            match self.focus {
+                Panel::Library => panels::library(buf, bottom, app, self, now),
+                Panel::Queue => panels::queue(buf, bottom, app, self),
+                Panel::Ambience => panels::ambience(buf, bottom, app, self, now),
+            }
         }
 
         overlay::toasts(buf, footer, self, now);
