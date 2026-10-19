@@ -99,6 +99,7 @@ pub struct App {
     failures_in_a_row: u32,
     resume_at: Option<f64>,
     pending_seek: Option<(f64, Instant)>,
+    pending_resolve: Option<(String, f64, Instant)>,
     cover_requested: Option<String>,
     pub jobs: Sender<Job>,
     inbox: Receiver<Job>,
@@ -150,6 +151,7 @@ impl App {
             failures_in_a_row: 0,
             resume_at: (session.position > 1.0).then_some(session.position),
             pending_seek: None,
+            pending_resolve: None,
             cover_requested: None,
             jobs,
             inbox,
@@ -430,11 +432,7 @@ impl App {
             Playable::YouTube { url, .. } => {
                 self.engine.stop_stream();
                 self.stream = Stream::Resolving;
-                let (jobs, generation) = (self.jobs.clone(), self.generation);
-                std::thread::spawn(move || {
-                    let result = youtube::resolve(&url, start_secs);
-                    let _ = jobs.send(Job::Resolved { generation, result });
-                });
+                self.pending_resolve = Some((url, start_secs, Instant::now()));
             }
         }
     }
@@ -442,6 +440,7 @@ impl App {
     fn stop_stream(&mut self) {
         self.generation += 1;
         self.pending_seek = None;
+        self.pending_resolve = None;
         self.engine.stop_stream();
         self.stream = Stream::Idle;
     }
@@ -1003,6 +1002,17 @@ impl App {
 
     /// Everything that happens without input: finished jobs, audio events, the timer.
     pub fn tick(&mut self, now: Instant) {
+        // Each resolve is a yt-dlp process, so skipping through a playlist settles first.
+        if let Some((_, _, asked)) = &self.pending_resolve
+            && now.duration_since(*asked) >= Duration::from_millis(300)
+            && let Some((url, start_secs, _)) = self.pending_resolve.take()
+        {
+            let (jobs, generation) = (self.jobs.clone(), self.generation);
+            std::thread::spawn(move || {
+                let result = youtube::resolve(&url, start_secs);
+                let _ = jobs.send(Job::Resolved { generation, result });
+            });
+        }
         // Every seek restarts ffmpeg, so a held key or a scrolled wheel settles first.
         if let Some((at, asked)) = self.pending_seek
             && now.duration_since(asked) >= Duration::from_millis(150)
