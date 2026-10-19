@@ -60,7 +60,7 @@ impl Prompt {
 
     pub fn hint(self) -> &'static str {
         match self {
-            Prompt::OpenUrl => "A YouTube video, playlist, or live stream. It's kept under YouTube.",
+            Prompt::OpenUrl => "A YouTube video, playlist, or stream. Saved under YouTube.",
             Prompt::SaveScene => "Keeps what plays, the ambience, and the timer. Start it with `chill <name>`.",
             Prompt::SaveMix => "Keeps the current ambience levels under Sounds.",
         }

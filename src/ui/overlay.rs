@@ -311,13 +311,13 @@ const KEYS: [(&str, &str); 27] = [
     ("t / T", "timer start-pause / reset"),
     ("x", "skip to the next phase"),
     ("m", "next timer preset"),
-    ("o", "open a YouTube link (or paste)"),
+    ("o", "open or paste a YouTube link"),
     ("tab", "move between panels"),
     ("1-5", "library tabs"),
     ("↑↓ / j k", "move"),
     ("← → / h l", "tabs, or a sound's level"),
     ("enter", "play the selection"),
-    ("a", "add the selection to the queue"),
+    ("a", "queue the selection"),
     ("right click", "add a row to the queue"),
     ("d", "remove the selection"),
     ("J / K", "move a queued item"),
@@ -430,7 +430,7 @@ fn stats(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant) {
 fn settings(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, selected: usize) {
     let theme = ui.theme;
     let groups = 3;
-    let height = Setting::ALL.len() as u16 + groups * 2 + 6;
+    let height = Setting::ALL.len() as u16 + groups * 2 + 7;
     let content = dialog(buf, screen, 64, height, None, "Settings", ui);
     let mut y = content.y;
     let mut group = "";
@@ -480,23 +480,19 @@ fn settings(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, selected: us
         Some(rest) => format!("~{rest}"),
         None => path,
     };
+    put(
+        buf,
+        content.x,
+        y + 1,
+        &fit(&format!("Changes save to {path}"), usize::from(content.width)),
+        Style::new().fg(theme.faint()),
+    );
     key_hints(
         buf,
         content.x,
         content.bottom().saturating_sub(1),
         &[("↑↓", "choose"), ("←→", "change")],
         ui,
-    );
-    let saved = fit(
-        &format!("saved to {path}"),
-        usize::from(content.width.saturating_sub(30)),
-    );
-    put(
-        buf,
-        content.right().saturating_sub(saved.width() as u16),
-        content.bottom().saturating_sub(1),
-        &saved,
-        Style::new().fg(theme.faint()),
     );
 }
 
