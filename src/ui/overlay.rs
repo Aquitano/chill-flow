@@ -3,14 +3,13 @@ use std::time::Instant;
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
+use ratatui::layout::{Margin, Rect};
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Widget};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::widgets::{self, fill, fit, put};
-use super::{Hit, Overlay, Ui};
+use super::{BACKDROP_DIM, Hit, Overlay, Ui};
 use crate::action::{Action, Prompt};
 use crate::app::{App, Tone};
 use crate::timer::TimerMode;
@@ -102,34 +101,81 @@ pub fn matching(app: &App, query: &str) -> Vec<Command> {
     scored.into_iter().map(|(_, command)| command).collect()
 }
 
+/// A floating panel on a raised background, with the title and a clickable `esc` on its
+/// first row. Returns the area below them for the content.
 fn dialog(buf: &mut Buffer, screen: Rect, width: u16, height: u16, top: Option<u16>, title: &str, ui: &mut Ui) -> Rect {
     let theme = ui.theme;
     let width = width.min(screen.width.saturating_sub(4));
     let height = height.min(screen.height.saturating_sub(2));
     let y = top.unwrap_or(screen.y + screen.height.saturating_sub(height) / 2);
     let area = Rect::new(screen.x + (screen.width - width) / 2, y, width, height).intersection(screen);
-    fill(buf, area, Style::new().bg(theme.background()));
-    let block = Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(theme.mix(0.42)))
-        .style(Style::new().bg(theme.background()))
-        .title(Line::from(vec![
-            Span::raw(" "),
-            Span::styled(
-                title.to_string(),
-                Style::new().fg(theme.text()).add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" "),
-        ]));
-    let inner = block.inner(area);
-    block.render(area, buf);
+    fill(buf, area, Style::new().bg(theme.panel()));
+    let inner = area.inner(Margin {
+        horizontal: 3,
+        vertical: 1,
+    });
+    put(
+        buf,
+        inner.x,
+        inner.y,
+        &fit(title, usize::from(inner.width.saturating_sub(5))),
+        Style::new().fg(theme.text()).add_modifier(Modifier::BOLD),
+    );
+    let esc = Rect::new(inner.right().saturating_sub(3), inner.y, 3, 1);
+    let esc_color = if ui.hovered(esc) { theme.text() } else { theme.faint() };
+    put(buf, esc.x, esc.y, "esc", Style::new().fg(esc_color));
     ui.hits.push((area, Hit::Dialog));
-    inner
+    ui.hits.push((esc, Hit::Backdrop));
+    ui.dialog_area = Some(area);
+    Rect::new(inner.x, inner.y + 2, inner.width, inner.height.saturating_sub(2))
+}
+
+/// A one-line text field with a block cursor, scrolled so the end of long text stays visible.
+fn field(buf: &mut Buffer, area: Rect, text: &str, placeholder: &str, ui: &Ui) {
+    let theme = ui.theme;
+    let background = theme.raised();
+    fill(buf, area, Style::new().bg(background));
+    let start = put(buf, area.x + 1, area.y, "›", Style::new().fg(theme.accent)) + 1;
+    let room = usize::from(area.right().saturating_sub(start + 2));
+    let cursor = if text.is_empty() {
+        put(
+            buf,
+            start,
+            area.y,
+            &fit(placeholder, room),
+            Style::new().fg(theme.faint()),
+        );
+        start
+    } else {
+        let mut width = 0;
+        let mut first = text.len();
+        for (index, ch) in text.char_indices().rev() {
+            width += ch.width().unwrap_or(0);
+            if width > room {
+                break;
+            }
+            first = index;
+        }
+        put(buf, start, area.y, &text[first..], Style::new().fg(theme.text()))
+    };
+    if let Some(cell) = buf.cell_mut((cursor, area.y)) {
+        cell.set_bg(theme.text()).set_fg(background);
+    }
+}
+
+/// Key hints in the footer's style: the key, then what it does.
+fn key_hints(buf: &mut Buffer, x: u16, y: u16, hints: &[(&str, &str)], ui: &Ui) {
+    let theme = ui.theme;
+    let mut x = x;
+    for (key, label) in hints {
+        x = put(buf, x, y, key, Style::new().fg(theme.muted()));
+        x = put(buf, x + 1, y, label, Style::new().fg(theme.faint())) + 3;
+    }
 }
 
 pub fn draw(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant) {
     let shown = ui.overlay_shown.value(now);
-    widgets::dim(buf, screen, shown * 0.6, &ui.theme, None);
+    widgets::dim(buf, screen, shown * BACKDROP_DIM, &ui.theme, ui.cover_rect);
     let Some(overlay) = ui.overlay.take() else { return };
     ui.hits.push((screen, Hit::Backdrop));
     if screen.width < 30 || screen.height < 10 {
@@ -143,6 +189,9 @@ pub fn draw(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant
         Overlay::Help => help(buf, screen, app, ui),
         Overlay::Stats => stats(buf, screen, app, ui, now),
     }
+    if let Some(area) = ui.dialog_area.take() {
+        widgets::dim(buf, area, 1.0 - shown, &ui.theme, None);
+    }
     ui.overlay = Some(overlay);
 }
 
@@ -151,15 +200,15 @@ fn palette(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, query: &str, 
     let entries = matching(app, query);
     let rows = entries.len().clamp(1, 12) as u16;
     let top = screen.y + screen.height / 6;
-    let inner = dialog(buf, screen, 66, rows + 4, Some(top), "Commands", ui);
-    let x = put(buf, inner.x + 1, inner.y, "› ", Style::new().fg(theme.accent));
-    if query.is_empty() {
-        put(buf, x, inner.y, "type to search", Style::new().fg(theme.faint()));
-    } else {
-        let end = put(buf, x, inner.y, query, Style::new().fg(theme.text()));
-        put(buf, end, inner.y, "▏", Style::new().fg(theme.accent));
-    }
-    let list = Rect::new(inner.x, inner.y + 2, inner.width, inner.height.saturating_sub(2));
+    let content = dialog(buf, screen, 68, rows + 6, Some(top), "Commands", ui);
+    let search = Rect::new(content.x, content.y, content.width, 1);
+    field(buf, search, query, "search commands", ui);
+    let list = Rect::new(
+        content.x,
+        content.y + 2,
+        content.width,
+        content.height.saturating_sub(2),
+    );
     if entries.is_empty() {
         put(
             buf,
@@ -176,26 +225,26 @@ fn palette(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, query: &str, 
         let y = list.y + (index - offset) as u16;
         let rect = Rect::new(list.x, y, list.width, 1);
         if index == selected {
-            fill(buf, rect, Style::new().bg(theme.surface()));
-            put(buf, rect.x, y, "▎", Style::new().fg(theme.accent));
-        } else if ui.hover.is_some_and(|(hx, hy)| rect.contains((hx, hy).into())) {
-            fill(buf, rect, Style::new().bg(theme.hover()));
+            fill(buf, rect, Style::new().bg(theme.raised()));
+        } else if ui.hovered(rect) {
+            fill(buf, rect, Style::new().bg(theme.mix(0.09)));
         }
         let key_width = entry.key.width() as u16;
         put(
             buf,
-            rect.right().saturating_sub(key_width + 2),
+            rect.right().saturating_sub(key_width + 1),
             y,
             entry.key,
             Style::new().fg(theme.faint()),
         );
-        let available = usize::from(rect.width.saturating_sub(key_width + 6));
+        let available = usize::from(rect.width.saturating_sub(key_width + 4));
+        let color = if index == selected { theme.text() } else { theme.muted() };
         put(
             buf,
-            rect.x + 2,
+            rect.x + 1,
             y,
             &fit(&entry.label, available),
-            Style::new().fg(theme.text()),
+            Style::new().fg(color),
         );
         ui.hits.push((rect, Hit::Palette(index)));
     }
@@ -203,46 +252,50 @@ fn palette(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, query: &str, 
 
 fn prompt(buf: &mut Buffer, screen: Rect, ui: &mut Ui, kind: Prompt, input: &str) {
     let theme = ui.theme;
-    let inner = dialog(buf, screen, 64, 5, None, kind.title(), ui);
-    let y = inner.y + 1;
-    let x = put(buf, inner.x + 1, y, "› ", Style::new().fg(theme.accent));
-    let room = usize::from(inner.width.saturating_sub(5));
-    if input.is_empty() {
-        put(buf, x, y, kind.placeholder(), Style::new().fg(theme.faint()));
-    } else {
-        let visible: String = {
-            let skip = input.width().saturating_sub(room);
-            input.chars().skip(skip).collect()
-        };
-        let end = put(buf, x, y, &visible, Style::new().fg(theme.text()));
-        put(buf, end, y, "▏", Style::new().fg(theme.accent));
-    }
-    put(
+    let lines = wrap(kind.hint(), 58, 2);
+    let content = dialog(buf, screen, 64, lines.len() as u16 + 8, None, kind.title(), ui);
+    field(
         buf,
-        inner.x + 1,
-        inner.bottom() - 1,
-        "enter to confirm · esc to cancel",
-        Style::new().fg(theme.faint()),
+        Rect::new(content.x, content.y, content.width, 1),
+        input,
+        kind.placeholder(),
+        ui,
+    );
+    for (offset, line) in lines.iter().enumerate() {
+        put(
+            buf,
+            content.x,
+            content.y + 2 + offset as u16,
+            line,
+            Style::new().fg(theme.faint()),
+        );
+    }
+    key_hints(
+        buf,
+        content.x,
+        content.bottom().saturating_sub(1),
+        &[("enter", "confirm"), ("esc", "cancel")],
+        ui,
     );
 }
 
 fn confirm(buf: &mut Buffer, screen: Rect, ui: &mut Ui, message: &str) {
     let theme = ui.theme;
-    let width = (message.width() as u16 + 6).clamp(40, 70);
-    let inner = dialog(buf, screen, width, 5, None, "Are you sure?", ui);
+    let width = (message.width() as u16 + 8).clamp(44, 72);
+    let content = dialog(buf, screen, width, 7, None, "Remove", ui);
     put(
         buf,
-        inner.x + 1,
-        inner.y + 1,
-        &fit(message, usize::from(inner.width.saturating_sub(2))),
+        content.x,
+        content.y,
+        &fit(message, usize::from(content.width)),
         Style::new().fg(theme.text()),
     );
-    put(
+    key_hints(
         buf,
-        inner.x + 1,
-        inner.bottom() - 1,
-        "enter to confirm · esc to cancel",
-        Style::new().fg(theme.faint()),
+        content.x,
+        content.y + 2,
+        &[("enter", "remove"), ("esc", "keep")],
+        ui,
     );
 }
 
@@ -284,49 +337,46 @@ fn help(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui) {
         .iter()
         .filter_map(|sound| sound.credit.as_ref().map(|credit| format!("{}: {credit}", sound.label)))
         .collect();
-    let height = half as u16
-        + 5
-        + if credits.is_empty() {
-            0
-        } else {
-            credits.len() as u16 + 2
-        };
-    let inner = dialog(buf, screen, 92, height, None, "Keys", ui);
-    let column = inner.width / 2;
+    let credit_rows = if credits.is_empty() {
+        0
+    } else {
+        credits.len() as u16 + 2
+    };
+    let content = dialog(buf, screen, 94, half as u16 + credit_rows + 6, None, "Keys", ui);
+    let column = content.width / 2;
     for (index, (key, what)) in KEYS.iter().enumerate() {
         let (x, y) = if index < half {
-            (inner.x + 2, inner.y + 1 + index as u16)
+            (content.x, content.y + index as u16)
         } else {
-            (inner.x + column + 1, inner.y + 1 + (index - half) as u16)
+            (content.x + column, content.y + (index - half) as u16)
         };
-        put(buf, x, y, &format!("{key:>10}"), Style::new().fg(theme.accent));
+        put(buf, x, y, &format!("{key:>11}"), Style::new().fg(theme.accent));
         put(
             buf,
-            x + 12,
+            x + 13,
             y,
             &fit(what, usize::from(column.saturating_sub(15))),
             Style::new().fg(theme.muted()),
         );
     }
-    let mut y = inner.y + half as u16 + 2;
+    let mut y = content.y + half as u16 + 1;
     if !credits.is_empty() {
-        put(buf, inner.x + 2, y, "Ambient recordings", Style::new().fg(theme.text()));
-        y += 1;
+        put(buf, content.x, y, "Ambient recordings", Style::new().fg(theme.text()));
         for credit in credits {
             y += 1;
             put(
                 buf,
-                inner.x + 2,
+                content.x,
                 y,
-                &fit(&credit, usize::from(inner.width.saturating_sub(4))),
+                &fit(&credit, usize::from(content.width)),
                 Style::new().fg(theme.faint()),
             );
         }
     }
     put(
         buf,
-        inner.x + 2,
-        inner.bottom() - 1,
+        content.x,
+        content.bottom().saturating_sub(1),
         "Mouse works too: click, drag the sliders, scroll the lists.",
         Style::new().fg(theme.faint()),
     );
@@ -334,44 +384,41 @@ fn help(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui) {
 
 fn stats(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant) {
     let theme = ui.theme;
-    let inner = dialog(buf, screen, 64, 18, None, "Focus", ui);
+    let content = dialog(buf, screen, 66, 19, None, "Focus", ui);
     let days = &app.focus_days.days;
     let week: u32 = days.iter().map(|(_, minutes)| *minutes).sum();
-    let x = put(buf, inner.x + 2, inner.y + 1, "today ", Style::new().fg(theme.faint()));
+    let x = put(buf, content.x, content.y, "today ", Style::new().fg(theme.faint()));
     let x = put(
         buf,
         x,
-        inner.y + 1,
+        content.y,
         &widgets::long_minutes(app.focus_days.today()),
         Style::new().fg(theme.text()).add_modifier(Modifier::BOLD),
     );
-    let x = put(buf, x + 4, inner.y + 1, "last 7 days ", Style::new().fg(theme.faint()));
+    let x = put(buf, x + 4, content.y, "last 7 days ", Style::new().fg(theme.faint()));
     put(
         buf,
         x,
-        inner.y + 1,
+        content.y,
         &widgets::long_minutes(week),
         Style::new().fg(theme.text()),
     );
     let bars: Vec<(String, u32, bool)> = days
         .iter()
         .enumerate()
-        .map(|(index, (date, minutes))| {
-            let label = date.strftime("%a").to_string();
-            (label, *minutes, index + 1 == days.len())
-        })
+        .map(|(index, (date, minutes))| (date.strftime("%a").to_string(), *minutes, index + 1 == days.len()))
         .collect();
     let chart = Rect::new(
-        inner.x + 2,
-        inner.y + 3,
-        inner.width.saturating_sub(4),
-        inner.height.saturating_sub(5),
+        content.x,
+        content.y + 2,
+        content.width,
+        content.height.saturating_sub(4),
     );
     widgets::bar_chart(buf, chart, &bars, ui.stats_grow.value(now), &theme);
     put(
         buf,
-        inner.x + 2,
-        inner.bottom() - 1,
+        content.x,
+        content.bottom().saturating_sub(1),
         "Counts every minute a focus block ran. Breaks never count.",
         Style::new().fg(theme.faint()),
     );
@@ -408,10 +455,10 @@ pub fn toasts(buf: &mut Buffer, footer: Rect, ui: &mut Ui, now: Instant) {
             Tone::Done => theme.rest,
             Tone::Error => theme.alert,
         };
-        fill(buf, area, Style::new().bg(theme.background()));
+        fill(buf, area, Style::new().bg(theme.panel()));
         Block::bordered()
             .border_type(BorderType::Rounded)
-            .border_style(Style::new().fg(theme.mix(0.3)))
+            .border_style(Style::new().fg(theme.mix(0.24)))
             .render(area, buf);
         put(buf, area.x + 2, y + 1, "●", Style::new().fg(color));
         for (offset, line) in lines.iter().enumerate() {

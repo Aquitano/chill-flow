@@ -61,6 +61,10 @@ impl Theme {
         self.known.is_some()
     }
 
+    pub fn background_rgb(&self) -> Option<[u8; 3]> {
+        self.known.map(|(_, bg)| bg)
+    }
+
     pub fn text(&self) -> Color {
         self.mix(1.0)
     }
@@ -85,6 +89,22 @@ impl Theme {
     pub fn surface(&self) -> Color {
         match self.known {
             Some(_) => self.mix(0.09),
+            None => Color::Reset,
+        }
+    }
+
+    /// Floating panels sit a step above the page.
+    pub fn panel(&self) -> Color {
+        match self.known {
+            Some(_) => self.mix(0.06),
+            None => Color::Reset,
+        }
+    }
+
+    /// Inputs and the selected row inside a floating panel.
+    pub fn raised(&self) -> Color {
+        match self.known {
+            Some(_) => self.mix(0.13),
             None => Color::Reset,
         }
     }

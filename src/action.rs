@@ -44,17 +44,25 @@ pub enum Prompt {
 impl Prompt {
     pub fn title(self) -> &'static str {
         match self {
-            Prompt::OpenUrl => "Open a YouTube link",
-            Prompt::SaveScene => "Save this scene as",
-            Prompt::SaveMix => "Save this ambience mix as",
+            Prompt::OpenUrl => "Open a link",
+            Prompt::SaveScene => "Save scene",
+            Prompt::SaveMix => "Save ambience mix",
         }
     }
 
     pub fn placeholder(self) -> &'static str {
         match self {
-            Prompt::OpenUrl => "https://www.youtube.com/watch?v=…",
+            Prompt::OpenUrl => "youtube.com/watch?v=…",
             Prompt::SaveScene => "rainy study",
             Prompt::SaveMix => "my rain",
+        }
+    }
+
+    pub fn hint(self) -> &'static str {
+        match self {
+            Prompt::OpenUrl => "A YouTube video, playlist, or live stream. It's kept under YouTube.",
+            Prompt::SaveScene => "Keeps what plays, the ambience, and the timer. Start it with `chill <name>`.",
+            Prompt::SaveMix => "Keeps the current ambience levels under Sounds.",
         }
     }
 }
