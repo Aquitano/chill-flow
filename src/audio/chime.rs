@@ -8,12 +8,7 @@ const PEAK: f32 = 0.25;
 
 /// (frequency ratio, amplitude, decay time constant in seconds). The ratios are the
 /// inharmonic partials of a struck bell.
-const PARTIALS: [(f32, f32, f32); 4] = [
-    (1.0, 1.0, 0.4),
-    (2.76, 0.45, 0.25),
-    (5.40, 0.2, 0.15),
-    (8.93, 0.1, 0.1),
-];
+const PARTIALS: [(f32, f32, f32); 4] = [(1.0, 1.0, 0.4), (2.76, 0.45, 0.25), (5.40, 0.2, 0.15), (8.93, 0.1, 0.1)];
 
 pub(super) fn synthesize(rate: u32) -> Box<[f32]> {
     let rate = rate as f32;
@@ -33,9 +28,7 @@ pub(super) fn synthesize(rate: u32) -> Box<[f32]> {
             tone * attack * release
         })
         .collect();
-    let peak = samples
-        .iter()
-        .fold(0.0_f32, |max, sample| max.max(sample.abs()));
+    let peak = samples.iter().fold(0.0_f32, |max, sample| max.max(sample.abs()));
     if peak > 0.0 {
         samples.iter_mut().for_each(|sample| *sample *= PEAK / peak);
     }

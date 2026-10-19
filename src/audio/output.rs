@@ -17,9 +17,7 @@ pub(super) fn device_rate() -> Result<u32, String> {
     let device = cpal::default_host()
         .default_output_device()
         .ok_or("no audio output device")?;
-    let config = device
-        .default_output_config()
-        .map_err(|error| error.to_string())?;
+    let config = device.default_output_config().map_err(|error| error.to_string())?;
     Ok(config.sample_rate())
 }
 
@@ -31,12 +29,7 @@ pub(super) struct Output {
 }
 
 impl Output {
-    pub(super) fn start(
-        mixer: Mixer,
-        rate: u32,
-        device: Result<(), String>,
-        events: Sender<EngineEvent>,
-    ) -> Self {
+    pub(super) fn start(mixer: Mixer, rate: u32, device: Result<(), String>, events: Sender<EngineEvent>) -> Self {
         let shutdown = Arc::new(AtomicBool::new(false));
         let supervisor = Supervisor {
             mixer: Arc::new(Mutex::new(mixer)),
@@ -44,9 +37,7 @@ impl Output {
             events,
             shutdown: Arc::clone(&shutdown),
         };
-        let thread = thread::spawn(move || supervisor.run(device))
-            .thread()
-            .clone();
+        let thread = thread::spawn(move || supervisor.run(device)).thread().clone();
         Self { shutdown, thread }
     }
 }
@@ -107,9 +98,7 @@ impl Supervisor {
         let device = cpal::default_host()
             .default_output_device()
             .ok_or("no audio output device")?;
-        let supported = device
-            .default_output_config()
-            .map_err(|error| error.to_string())?;
+        let supported = device.default_output_config().map_err(|error| error.to_string())?;
         let config = StreamConfig {
             channels: supported.channels(),
             sample_rate: self.rate,
@@ -195,12 +184,8 @@ impl Supervisor {
 
 /// Writes the stereo mix into a device buffer of any sample format and channel count:
 /// mono devices get the downmix, extra channels stay silent.
-fn write_frames<T>(
-    out: &mut [T],
-    channels: usize,
-    stereo: &mut [f32],
-    mut render: impl FnMut(&mut [f32]),
-) where
+fn write_frames<T>(out: &mut [T], channels: usize, stereo: &mut [f32], mut render: impl FnMut(&mut [f32]))
+where
     T: SizedSample + FromSample<f32>,
 {
     let channels = channels.max(1);

@@ -115,15 +115,9 @@ impl MusicLane {
         if !self.primed && (available >= prime_samples || finished) {
             self.primed = true;
         }
-        let count = if self.primed {
-            available.min(out.len())
-        } else {
-            0
-        };
+        let count = if self.primed { available.min(out.len()) } else { 0 };
         let _ = self.samples.pop_partial_slice(&mut out[..count]);
-        self.state
-            .frames
-            .fetch_add((count / 2) as u64, Ordering::Relaxed);
+        self.state.frames.fetch_add((count / 2) as u64, Ordering::Relaxed);
         let starved = count < out.len();
         self.state.starved.store(starved, Ordering::Relaxed);
         if starved && !finished {
@@ -285,12 +279,7 @@ impl Mixer {
         let pause_target = if paused { 0.0 } else { 1.0 };
         let target_gain = self.controls.gain.load();
         let frames = out.len() / 2;
-        for ([out_left, out_right], mono) in out
-            .as_chunks_mut::<2>()
-            .0
-            .iter_mut()
-            .zip(&mut self.mono[..frames])
-        {
+        for ([out_left, out_right], mono) in out.as_chunks_mut::<2>().0.iter_mut().zip(&mut self.mono[..frames]) {
             self.pause_gain = step_toward(self.pause_gain, pause_target, self.pause_step);
             self.gain += (target_gain - self.gain) * self.smoothing;
             let left = *out_left * self.pause_gain;

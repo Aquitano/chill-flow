@@ -97,11 +97,7 @@ impl Engine {
     }
 
     pub fn play_stream(&mut self, input: StreamInput) {
-        let start_secs = if input.live {
-            0.0
-        } else {
-            input.start_secs.max(0.0)
-        };
+        let start_secs = if input.live { 0.0 } else { input.start_secs.max(0.0) };
         self.start_decoder(input, start_secs);
     }
 
@@ -173,9 +169,7 @@ impl Engine {
     pub fn is_buffering(&self) -> bool {
         self.stream.as_ref().is_some_and(|playing| {
             let state = playing.decoder.state();
-            !self.is_paused()
-                && state.starved.load(Ordering::Relaxed)
-                && !state.finished.load(Ordering::Acquire)
+            !self.is_paused() && state.starved.load(Ordering::Relaxed) && !state.finished.load(Ordering::Acquire)
         })
     }
 

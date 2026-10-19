@@ -28,28 +28,22 @@ pub(super) struct LoadRequest {
     pub(super) level: Arc<LaneLevel>,
 }
 
-pub(super) fn spawn_load(
-    request: LoadRequest,
-    loaded: Sender<LoadedLoop>,
-    events: Sender<EngineEvent>,
-) {
-    thread::spawn(
-        move || match load(&request.url, &request.cache_dir, request.rate) {
-            Ok(samples) => {
-                let _ = loaded.send(LoadedLoop {
-                    samples,
-                    level: request.level,
-                });
-            }
-            Err(message) => {
-                request.level.retire();
-                let _ = events.send(EngineEvent::AmbientFailed {
-                    id: request.id,
-                    message,
-                });
-            }
-        },
-    );
+pub(super) fn spawn_load(request: LoadRequest, loaded: Sender<LoadedLoop>, events: Sender<EngineEvent>) {
+    thread::spawn(move || match load(&request.url, &request.cache_dir, request.rate) {
+        Ok(samples) => {
+            let _ = loaded.send(LoadedLoop {
+                samples,
+                level: request.level,
+            });
+        }
+        Err(message) => {
+            request.level.retire();
+            let _ = events.send(EngineEvent::AmbientFailed {
+                id: request.id,
+                message,
+            });
+        }
+    });
 }
 
 fn load(url: &str, cache_dir: &Path, rate: u32) -> Result<Box<[i16]>, String> {
@@ -98,26 +92,16 @@ fn decode(path: &Path, rate: u32) -> Result<Vec<i16>, String> {
     let output = ffmpeg::command()
         .arg("-i")
         .arg(path)
-        .args([
-            "-vn",
-            "-f",
-            "s16le",
-            "-ac",
-            "2",
-            "-ar",
-            &rate.to_string(),
-            "pipe:1",
-        ])
+        .args(["-vn", "-f", "s16le", "-ac", "2", "-ar", &rate.to_string(), "pipe:1"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
         .map_err(ffmpeg::spawn_error)?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(ffmpeg::last_line(&stderr).map_or_else(
-            || format!("ffmpeg exited with {}", output.status),
-            str::to_owned,
-        ));
+        return Err(
+            ffmpeg::last_line(&stderr).map_or_else(|| format!("ffmpeg exited with {}", output.status), str::to_owned)
+        );
     }
     let (frames, _) = output.stdout.as_chunks::<4>();
     Ok(frames
@@ -133,9 +117,7 @@ fn trim_quiet_ends(samples: &mut Vec<i16>, window_frames: usize) {
     if window == 0 || samples.is_empty() {
         return;
     }
-    let power = |chunk: &[i16]| {
-        chunk.iter().map(|&s| f64::from(s).powi(2)).sum::<f64>() / chunk.len() as f64
-    };
+    let power = |chunk: &[i16]| chunk.iter().map(|&s| f64::from(s).powi(2)).sum::<f64>() / chunk.len() as f64;
     let threshold = power(samples) * QUIET_POWER_RATIO;
     let loud = |chunk: &[i16]| power(chunk) >= threshold;
     let (Some(first), Some(last)) = (
@@ -161,9 +143,7 @@ fn close_loop(samples: &mut Vec<i16>, seam_frames: usize) {
         let t = ((index / 2) as f32 + 0.5) / seam as f32;
         let head = f32::from(samples[index]) * (t * FRAC_PI_2).sin();
         let tail = f32::from(samples[tail_start + index]) * (t * FRAC_PI_2).cos();
-        samples[index] = (head + tail)
-            .round()
-            .clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16;
+        samples[index] = (head + tail).round().clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16;
     }
     samples.truncate(tail_start);
 }
@@ -175,8 +155,7 @@ mod tests {
     fn stereo_sine(frames: usize, period: f32) -> Vec<i16> {
         (0..frames)
             .flat_map(|frame| {
-                let value =
-                    (10_000.0 * (std::f32::consts::TAU * frame as f32 / period).sin()) as i16;
+                let value = (10_000.0 * (std::f32::consts::TAU * frame as f32 / period).sin()) as i16;
                 [value, value]
             })
             .collect()
@@ -195,19 +174,13 @@ mod tests {
 
         assert_eq!(samples.len(), (4_800 - 240) * 2);
         assert!(wrap_jump(&samples) <= largest_step);
-        assert!(
-            samples
-                .windows(4)
-                .step_by(2)
-                .all(|w| jump(w[2], w[0]) <= largest_step)
-        );
+        assert!(samples.windows(4).step_by(2).all(|w| jump(w[2], w[0]) <= largest_step));
     }
 
     #[test]
     fn quiet_ends_are_trimmed_but_quiet_moments_inside_are_kept() {
         let loud = stereo_sine(1_000, 50.0);
-        let samples: Vec<i16> =
-            [vec![0; 300], loud.clone(), vec![3; 200], loud, vec![0; 500]].concat();
+        let samples: Vec<i16> = [vec![0; 300], loud.clone(), vec![3; 200], loud, vec![0; 500]].concat();
         let mut trimmed = samples.clone();
 
         trim_quiet_ends(&mut trimmed, 50);
