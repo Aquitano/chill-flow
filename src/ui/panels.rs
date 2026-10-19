@@ -581,7 +581,10 @@ fn controls(buf: &mut Buffer, inner: Rect, y: u16, app: &App, ui: &mut Ui) {
         Repeat::One => "repeat 1",
         _ => "repeat  ",
     };
-    let play = if app.is_playing() { " ❚❚ " } else { "  ▶ " };
+    // Each pill is padded evenly around its glyph; the slot keeps the row still when the
+    // narrower play pill replaces pause.
+    let play = if app.is_playing() { " ❚❚ " } else { " ▶ " };
+    let play_slot = 4;
     let buttons: [(&str, Action, bool); 5] = [
         ("shuffle", Action::ToggleShuffle, app.queue.shuffle),
         ("◂◂", Action::Previous, false),
@@ -590,7 +593,13 @@ fn controls(buf: &mut Buffer, inner: Rect, y: u16, app: &App, ui: &mut Ui) {
         (repeat_label, Action::CycleRepeat, app.queue.repeat != Repeat::Off),
     ];
     let gap = if inner.width >= 80 { 4 } else { 3 };
-    let total: u16 = buttons.iter().map(|(label, ..)| label.width() as u16).sum::<u16>() + gap * 4;
+    let slot = |index: usize, label: &str| if index == 2 { play_slot } else { label.width() as u16 };
+    let total: u16 = buttons
+        .iter()
+        .enumerate()
+        .map(|(index, (label, ..))| slot(index, label))
+        .sum::<u16>()
+        + gap * 4;
     let volume_width = 22;
     let start = if inner.width >= total + 2 * (volume_width + 2) {
         inner.x + (inner.width - total) / 2
@@ -618,7 +627,7 @@ fn controls(buf: &mut Buffer, inner: Rect, y: u16, app: &App, ui: &mut Ui) {
         };
         put(buf, x, y, label, style);
         ui.hit(rect, Hit::Act(action));
-        x += rect.width + gap;
+        x += slot(index, label) + gap;
     }
 
     let volume_x = inner.right().saturating_sub(volume_width);
