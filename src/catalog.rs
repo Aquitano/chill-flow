@@ -27,8 +27,6 @@ pub struct CatalogTrack {
     pub file: String,
     pub cover: Option<String>,
     pub duration_sec: u32,
-    #[serde(default)]
-    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

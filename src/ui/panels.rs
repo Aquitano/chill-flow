@@ -309,6 +309,7 @@ pub fn library(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instan
         let meta_x = rect.right().saturating_sub(meta_width + 1);
         put(buf, meta_x, y, &row.meta, Style::new().fg(theme.faint()));
         let heart_x = meta_x.saturating_sub(2);
+        ui.hit(rect, Hit::Row(index));
         if let Some(key) = &row.like_key {
             let heart_rect = Rect::new(heart_x, y, 1, 1);
             let liked = app.is_liked(key);
@@ -325,10 +326,7 @@ pub fn library(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instan
                 (false, false) => (" ", theme.faint()),
             };
             put(buf, heart_x, y, symbol, Style::new().fg(color));
-            ui.hit(rect, Hit::Row(index));
             ui.hit(heart_rect, Hit::Act(Action::ToggleLikeRow(index)));
-        } else {
-            ui.hit(rect, Hit::Row(index));
         }
 
         let text_x = rect.x + 2;
@@ -391,11 +389,7 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
     let width = usize::from(meta_width);
     let (title, artist, detail) = match (&item, soundscape) {
         (_, true) => {
-            let sounds: Vec<&str> = app
-                .levels
-                .keys()
-                .filter_map(|id| app.catalog.sound(id).map(|sound| sound.label.as_str()))
-                .collect();
+            let sounds = app.sound_labels(&app.levels);
             let detail = if sounds.is_empty() {
                 "turn a sound up on the right".into()
             } else {

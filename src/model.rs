@@ -88,7 +88,6 @@ pub struct Saved {
     pub url: String,
     pub title: String,
     pub channel: String,
-    pub thumbnail: Option<String>,
     pub items: Vec<Item>,
 }
 

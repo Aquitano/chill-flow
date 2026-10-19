@@ -148,7 +148,7 @@ pub fn spectrum(buf: &mut Buffer, area: Rect, levels: &[f32], peaks: &[f32], the
                 put(buf, x + column, y, EIGHTHS[usize::from(filled)], style);
             }
         }
-        let peak_row = (peak.clamp(0.0, 1.0) * f32::from(rows) * 8.0 / 8.0) as u16;
+        let peak_row = (peak.clamp(0.0, 1.0) * f32::from(rows)) as u16;
         let top_row = eighths.div_ceil(8);
         if *peak > 0.02 && peak_row >= top_row && peak_row < rows {
             let y = area.bottom() - 1 - peak_row;

@@ -105,7 +105,6 @@ fn saved_from(url: &str, info: Info) -> Result<Saved> {
             id: format!("ytpl:{}", info.id),
             url: url.to_string(),
             title: info.title.unwrap_or(info.id),
-            thumbnail: items[0].cover.clone(),
             channel,
             items,
         });
@@ -121,7 +120,6 @@ fn saved_from(url: &str, info: Info) -> Result<Saved> {
         id: item.key.clone(),
         url: url.to_string(),
         title: item.title.clone(),
-        thumbnail: item.cover.clone(),
         channel,
         items: vec![item],
     })

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use etcetera::BaseStrategy;
@@ -45,7 +45,7 @@ impl Paths {
     }
 }
 
-pub fn load(path: &PathBuf) -> Result<Config> {
+pub fn load(path: &Path) -> Result<Config> {
     match std::fs::read_to_string(path) {
         Ok(text) => toml::from_str(&text).with_context(|| format!("reading {}", path.display())),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),

@@ -244,7 +244,14 @@ impl App {
     }
 
     pub fn source_label(&self) -> String {
-        match &self.source {
+        match (&self.source, &self.mix_name) {
+            (Source::Soundscape, Some(mix)) => mix.clone(),
+            (source, _) => self.source_name(source),
+        }
+    }
+
+    fn source_name(&self, source: &Source) -> String {
+        match source {
             Source::Tracks => "Tracks".into(),
             Source::Liked => "Liked".into(),
             Source::Saved { id } => self
@@ -252,8 +259,15 @@ impl App {
                 .iter()
                 .find(|saved| &saved.id == id)
                 .map_or_else(|| "YouTube".into(), |saved| saved.title.clone()),
-            Source::Soundscape => self.mix_name.clone().unwrap_or_else(|| "Soundscape".into()),
+            Source::Soundscape => "Ambience only".into(),
         }
+    }
+
+    pub fn sound_labels(&self, levels: &Levels) -> Vec<&str> {
+        levels
+            .keys()
+            .filter_map(|id| self.catalog.sound(id).map(|sound| sound.label.as_str()))
+            .collect()
     }
 
     pub fn rows(&self, tab: Tab) -> Vec<Row> {
@@ -314,12 +328,7 @@ impl App {
                 .enumerate()
                 .map(|(index, mix)| Row {
                     title: mix.name.clone(),
-                    detail: mix
-                        .levels
-                        .keys()
-                        .filter_map(|id| self.catalog.sound(id).map(|sound| sound.label.clone()))
-                        .collect::<Vec<_>>()
-                        .join(" · "),
+                    detail: self.sound_labels(&mix.levels).join(" · "),
                     meta: if mix.id.starts_with("saved:") {
                         "yours".into()
                     } else {
@@ -354,21 +363,8 @@ impl App {
     }
 
     fn describe_scene(&self, scene: &Scene) -> String {
-        let source = match &scene.source {
-            Source::Tracks => "Tracks".to_string(),
-            Source::Liked => "Liked".to_string(),
-            Source::Saved { id } => self
-                .saved
-                .iter()
-                .find(|saved| &saved.id == id)
-                .map_or_else(|| "YouTube".to_string(), |saved| saved.title.clone()),
-            Source::Soundscape => "Ambience only".to_string(),
-        };
-        let sounds = scene
-            .levels
-            .keys()
-            .filter_map(|id| self.catalog.sound(id).map(|sound| sound.label.as_str()))
-            .collect::<Vec<_>>();
+        let source = self.source_name(&scene.source);
+        let sounds = self.sound_labels(&scene.levels);
         if sounds.is_empty() {
             source
         } else {
@@ -560,7 +556,7 @@ impl App {
                 }
             }
             Action::ToggleLikeRow(index) => {
-                if let Some(item) = self.row_item(self.tab, index) {
+                if let Some(item) = self.row_item(index) {
                     self.toggle_like(item);
                 }
             }
@@ -745,8 +741,12 @@ impl App {
         self.toast(Tone::Done, format!("Scene \"{}\"", scene.name));
     }
 
-    pub fn row_item(&self, tab: Tab, index: usize) -> Option<Item> {
-        let row = self.rows(tab).into_iter().nth(index)?;
+    fn row(&self, index: usize) -> Option<Row> {
+        self.rows(self.tab).into_iter().nth(index)
+    }
+
+    pub fn row_item(&self, index: usize) -> Option<Item> {
+        let row = self.row(index)?;
         match row.target {
             Target::Track(i) => self
                 .catalog
@@ -775,7 +775,7 @@ impl App {
     }
 
     fn activate(&mut self, index: usize) {
-        let Some(row) = self.rows(self.tab).into_iter().nth(index) else {
+        let Some(row) = self.row(index) else {
             return;
         };
         match row.target {
@@ -800,14 +800,14 @@ impl App {
     }
 
     fn enqueue(&mut self, index: usize) {
-        let Some(row) = self.rows(self.tab).into_iter().nth(index) else {
+        let Some(row) = self.row(index) else {
             return;
         };
         let items = match row.target {
             Target::Saved(i) => self.saved.get(i).map(|saved| saved.items.clone()).unwrap_or_default(),
             Target::Mix(i) => return self.apply_mix(i),
             Target::Scene(_) => return,
-            _ => self.row_item(self.tab, index).into_iter().collect(),
+            _ => self.row_item(index).into_iter().collect(),
         };
         if self.source == Source::Soundscape {
             return self.activate(index);
@@ -822,7 +822,7 @@ impl App {
 
     /// The identity and title behind a library row, for a delete that waits on confirmation.
     pub fn removal(&self, index: usize) -> Option<(Removal, String)> {
-        let row = self.rows(self.tab).into_iter().nth(index)?;
+        let row = self.row(index)?;
         let removal = match row.target {
             Target::Saved(i) => Removal::Saved(self.saved.get(i)?.id.clone()),
             Target::Liked(i) => Removal::Like(self.likes.get(i)?.key.clone()),

@@ -244,9 +244,7 @@ impl Ui {
     }
 
     fn hit(&mut self, rect: Rect, hit: Hit) {
-        if self.overlay.is_none() || matches!(hit, Hit::Palette(_) | Hit::Backdrop | Hit::Act(_)) {
-            self.hits.push((rect, hit));
-        }
+        self.hits.push((rect, hit));
     }
 
     fn hovered(&self, rect: Rect) -> bool {
