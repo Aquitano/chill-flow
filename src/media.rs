@@ -4,7 +4,14 @@ use souvlaki::{
     MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig, SeekDirection,
 };
 
-use crate::model::Item;
+/// What the OS media overlay shows: a track, or the ambience when no music plays.
+pub struct NowPlaying<'a> {
+    pub title: &'a str,
+    pub artist: &'a str,
+    pub album: &'a str,
+    pub cover: Option<&'a str>,
+    pub duration: Option<u32>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MediaCommand {
@@ -60,19 +67,19 @@ impl Media {
         }
     }
 
-    pub fn show(&mut self, item: Option<&Item>, playing: bool, position: f64) {
+    pub fn show(&mut self, now: Option<NowPlaying>, playing: bool, position: f64) {
         let Some(controls) = self.controls.as_mut() else { return };
-        let key = item.map(|item| item.key.clone());
-        if key != self.shown_key {
-            let metadata = item.map_or_else(MediaMetadata::default, |item| MediaMetadata {
-                title: Some(&item.title),
-                artist: Some(&item.artist),
-                album: Some(item.origin()),
-                cover_url: item.cover.as_deref(),
-                duration: item.duration.map(|seconds| Duration::from_secs(u64::from(seconds))),
+        let key = now.as_ref().map(|now| now.title);
+        if key != self.shown_key.as_deref() {
+            let metadata = now.as_ref().map_or_else(MediaMetadata::default, |now| MediaMetadata {
+                title: Some(now.title),
+                artist: Some(now.artist),
+                album: Some(now.album),
+                cover_url: now.cover,
+                duration: now.duration.map(|seconds| Duration::from_secs(u64::from(seconds))),
             });
             let _ = controls.set_metadata(metadata);
-            self.shown_key = key;
+            self.shown_key = key.map(str::to_owned);
             self.shown_playback = None;
         }
         let whole_seconds = position.max(0.0) as u64;
@@ -81,7 +88,7 @@ impl Media {
         }
         self.shown_playback = Some((playing, whole_seconds));
         let progress = Some(MediaPosition(Duration::from_secs_f64(position.max(0.0))));
-        let playback = match (item, playing) {
+        let playback = match (now, playing) {
             (None, _) => MediaPlayback::Stopped,
             (Some(_), true) => MediaPlayback::Playing { progress },
             (Some(_), false) => MediaPlayback::Paused { progress },

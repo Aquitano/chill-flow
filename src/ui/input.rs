@@ -95,7 +95,7 @@ fn pasted(app: &mut App, ui: &mut Ui, text: &str) {
         }
         Some(_) => {}
         None if ui.filtering => app.filter.push_str(text.trim()),
-        None if youtube::looks_like_url(text) => app.open_url(text.trim(), true),
+        None if youtube::looks_like_url(text) => app.open_url(text.trim()),
         None => {}
     }
 }

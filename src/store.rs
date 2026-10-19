@@ -54,6 +54,7 @@ fn now() -> i64 {
 impl Store {
     pub fn open(path: &Path) -> Result<Store> {
         let db = Connection::open(path)?;
+        db.busy_timeout(std::time::Duration::from_secs(2))?;
         db.pragma_update(None, "journal_mode", "WAL")?;
         db.execute_batch(SCHEMA)?;
         Ok(Store { db })
@@ -188,32 +189,36 @@ impl Store {
         Ok(())
     }
 
+    /// A block that runs past midnight is split between the two days it touched.
     pub fn focus_days(&self, count: i64, zone: &TimeZone) -> Result<FocusDays> {
         let today = Timestamp::now().to_zoned(zone.clone()).date();
         let first = today.checked_sub((count - 1).days())?;
-        let since = first.to_zoned(zone.clone())?.timestamp().as_second();
+        let dates: Vec<Date> = (0..count)
+            .filter_map(|offset| first.checked_add(offset.days()).ok())
+            .collect();
+        let starts = dates
+            .iter()
+            .map(|date| Ok(date.to_zoned(zone.clone())?.timestamp().as_second()))
+            .collect::<Result<Vec<i64>>>()?;
+        let since = starts.first().copied().unwrap_or(0);
         let mut statement = self
             .db
-            .prepare("SELECT started_at, focused_sec FROM focus_blocks WHERE started_at >= ?1")?;
+            .prepare("SELECT started_at, focused_sec FROM focus_blocks WHERE started_at + focused_sec > ?1")?;
         let rows = statement.query_map([since], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?;
-        let mut days: Vec<(Date, u32)> = (0..count)
-            .filter_map(|offset| first.checked_add(offset.days()).ok())
-            .map(|date| (date, 0))
-            .collect();
-        let mut seconds = vec![0i64; days.len()];
+        let mut seconds = vec![0i64; dates.len()];
         for row in rows {
             let (started_at, focused_sec) = row?;
-            let Ok(timestamp) = Timestamp::from_second(started_at) else {
-                continue;
-            };
-            let date = timestamp.to_zoned(zone.clone()).date();
-            if let Some(index) = days.iter().position(|(day, _)| *day == date) {
-                seconds[index] += focused_sec;
+            let ended_at = started_at + focused_sec;
+            for (index, total) in seconds.iter_mut().enumerate() {
+                let day_end = starts.get(index + 1).copied().unwrap_or(i64::MAX);
+                *total += (ended_at.min(day_end) - started_at.max(starts[index])).max(0);
             }
         }
-        for ((_, minutes), seconds) in days.iter_mut().zip(seconds) {
-            *minutes = u32::try_from(seconds / 60).unwrap_or(u32::MAX);
-        }
+        let days = dates
+            .into_iter()
+            .zip(seconds)
+            .map(|(date, seconds)| (date, u32::try_from(seconds / 60).unwrap_or(u32::MAX)))
+            .collect();
         Ok(FocusDays { days })
     }
 }
@@ -226,10 +231,14 @@ mod tests {
     fn focus_minutes_land_on_their_local_day() {
         let store = Store::open(Path::new(":memory:")).unwrap();
         let zone = TimeZone::get("Europe/Vienna").unwrap();
-        let now = Timestamp::now();
-        let yesterday = now.to_zoned(zone.clone()).checked_sub(1.day()).unwrap().timestamp();
+        let midnight = Timestamp::now()
+            .to_zoned(zone.clone())
+            .start_of_day()
+            .unwrap()
+            .timestamp();
+        let (today, yesterday) = (midnight + 1.hour(), midnight - 12.hours());
 
-        let block = store.begin_focus_block(now, 1500).unwrap();
+        let block = store.begin_focus_block(today, 1500).unwrap();
         store.update_focus_block(block, 600, false).unwrap();
         let earlier = store.begin_focus_block(yesterday, 1500).unwrap();
         store.update_focus_block(earlier, 1500, true).unwrap();
@@ -238,5 +247,21 @@ mod tests {
         assert_eq!(days.days.len(), 7);
         assert_eq!(days.today(), 10);
         assert_eq!(days.days[5].1, 25);
+    }
+
+    #[test]
+    fn a_block_across_midnight_is_split_between_the_days() {
+        let store = Store::open(Path::new(":memory:")).unwrap();
+        let zone = TimeZone::get("Europe/Vienna").unwrap();
+        let midnight = Timestamp::now()
+            .to_zoned(zone.clone())
+            .start_of_day()
+            .unwrap()
+            .timestamp();
+        let block = store.begin_focus_block(midnight - 5.minutes(), 1500).unwrap();
+        store.update_focus_block(block, 1500, true).unwrap();
+
+        let days = store.focus_days(2, &zone).unwrap();
+        assert_eq!((days.days[0].1, days.today()), (5, 20));
     }
 }

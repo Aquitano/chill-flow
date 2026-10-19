@@ -11,7 +11,7 @@ use crate::action::{Action, Prompt, Removal, Tab};
 use crate::audio::{Engine, EngineEvent, StreamInput};
 use crate::catalog::{Catalog, Levels, Mix};
 use crate::config::Config;
-use crate::media::MediaCommand;
+use crate::media::{MediaCommand, NowPlaying};
 use crate::model::{Item, Playable, Saved, Scene, Session, Source};
 use crate::queue::Queue;
 use crate::store::{FocusDays, Store};
@@ -22,7 +22,7 @@ pub enum Job {
     Catalog(Result<Catalog>),
     Inspected {
         url: String,
-        play: bool,
+        generation: u64,
         result: Result<Saved>,
     },
     Resolved {
@@ -97,6 +97,8 @@ pub struct App {
     generation: u64,
     failures_in_a_row: u32,
     resume_at: Option<f64>,
+    pending_seek: Option<(f64, Instant)>,
+    cover_requested: Option<String>,
     pub jobs: Sender<Job>,
     inbox: Receiver<Job>,
     pub events: Vec<Event>,
@@ -146,6 +148,8 @@ impl App {
             generation: 0,
             failures_in_a_row: 0,
             resume_at: (session.position > 1.0).then_some(session.position),
+            pending_seek: None,
+            cover_requested: None,
             jobs,
             inbox,
             events: Vec::new(),
@@ -161,6 +165,9 @@ impl App {
         app.apply_levels(&session.levels);
         app.mix_name = app.matching_mix_name();
         app.fill_queue(&session.source, session.item_key.as_deref());
+        if app.queue.current().map(|item| item.key.as_str()) != session.item_key.as_deref() {
+            app.resume_at = None;
+        }
         app.fetch_catalog();
         app
     }
@@ -168,7 +175,7 @@ impl App {
     /// `chill <url>` or `chill <scene>`: start that instead of the paused resume.
     pub fn launch(&mut self, target: &str) {
         if youtube::looks_like_url(target) {
-            self.open_url(target.trim(), true);
+            self.open_url(target.trim());
         } else if let Some(index) = self
             .scenes
             .iter()
@@ -203,9 +210,30 @@ impl App {
         }
     }
 
+    pub fn now_playing(&self) -> Option<NowPlaying<'_>> {
+        match (self.current(), &self.source) {
+            (Some(item), _) => Some(NowPlaying {
+                title: &item.title,
+                artist: &item.artist,
+                album: item.origin(),
+                cover: item.cover.as_deref(),
+                duration: item.duration,
+            }),
+            (None, Source::Soundscape) if !self.levels.is_empty() => Some(NowPlaying {
+                title: self.mix_name.as_deref().unwrap_or("Ambience"),
+                artist: "chill",
+                album: "Soundscape",
+                cover: None,
+                duration: None,
+            }),
+            (None, _) => None,
+        }
+    }
+
     pub fn position(&self) -> f64 {
-        match self.stream {
-            Stream::Playing => self.engine.position(),
+        match (&self.stream, self.pending_seek) {
+            (Stream::Playing, Some((at, _))) => at,
+            (Stream::Playing, None) => self.engine.position(),
             _ => self.resume_at.unwrap_or(0.0),
         }
     }
@@ -381,6 +409,7 @@ impl App {
 
     fn start(&mut self, item: Item, start_secs: f64) {
         self.generation += 1;
+        self.pending_seek = None;
         self.resume_at = (start_secs > 0.0).then_some(start_secs);
         self.events.push(Event::TrackChanged);
         self.load_cover();
@@ -409,6 +438,7 @@ impl App {
 
     fn stop_stream(&mut self) {
         self.generation += 1;
+        self.pending_seek = None;
         self.engine.stop_stream();
         self.stream = Stream::Idle;
     }
@@ -430,10 +460,14 @@ impl App {
         self.resume();
     }
 
-    fn load_cover(&self) {
+    fn load_cover(&mut self) {
         let Some(url) = self.current().and_then(|item| item.cover.clone()) else {
             return;
         };
+        if self.cover_requested.as_ref() == Some(&url) {
+            return;
+        }
+        self.cover_requested = Some(url.clone());
         let jobs = self.jobs.clone();
         std::thread::spawn(move || {
             let image = fetch_cover(&url);
@@ -473,13 +507,14 @@ impl App {
             self.track_focus(now);
         } else {
             self.timer.pause(now);
-            self.save_focus_block(now, false);
+            self.save_focus_block(now);
         }
     }
 
     fn skip(&mut self, forward: bool) {
         self.failures_in_a_row = 0;
         if !forward && self.position() > 3.0 && self.stream == Stream::Playing {
+            self.pending_seek = None;
             self.engine.seek(0.0);
             return;
         }
@@ -546,14 +581,14 @@ impl App {
                 self.set_timer_running(running);
             }
             Action::TimerReset => {
-                self.save_focus_block(Instant::now(), false);
+                self.save_focus_block(Instant::now());
                 self.focus_block = None;
                 self.timer.reset();
                 self.timer_follows_play = true;
             }
             Action::TimerSkip => {
                 let now = Instant::now();
-                self.save_focus_block(now, false);
+                self.save_focus_block(now);
                 self.focus_block = None;
                 let ended = self.timer.skip(now);
                 self.on_phase_ended(ended, false);
@@ -618,7 +653,7 @@ impl App {
         let end = item.duration.map_or(f64::MAX, |duration| f64::from(duration) - 1.0);
         let seconds = seconds.clamp(0.0, end.max(0.0));
         match self.stream {
-            Stream::Playing => self.engine.seek(seconds),
+            Stream::Playing => self.pending_seek = Some((seconds, Instant::now())),
             _ => self.resume_at = Some(seconds),
         }
     }
@@ -631,7 +666,7 @@ impl App {
     fn set_timer_mode(&mut self, mode: TimerMode) {
         let now = Instant::now();
         let was_running = self.timer.is_running();
-        self.save_focus_block(now, false);
+        self.save_focus_block(now);
         self.focus_block = None;
         self.timer.set_mode(mode, self.config.pomodoro);
         if was_running {
@@ -827,7 +862,8 @@ impl App {
             return;
         }
         match prompt {
-            Prompt::OpenUrl => self.open_url(text, true),
+            Prompt::OpenUrl if youtube::looks_like_url(text) => self.open_url(text),
+            Prompt::OpenUrl => self.toast(Tone::Error, "That doesn't look like a link"),
             Prompt::SaveScene => {
                 let scene = Scene {
                     name: text.to_string(),
@@ -857,12 +893,16 @@ impl App {
         }
     }
 
-    pub fn open_url(&mut self, url: &str, play: bool) {
+    pub fn open_url(&mut self, url: &str) {
         self.toast(Tone::Info, "Looking up that link…");
-        let (jobs, url) = (self.jobs.clone(), url.to_string());
+        let (jobs, url, generation) = (self.jobs.clone(), url.to_string(), self.generation);
         std::thread::spawn(move || {
             let result = youtube::inspect(&url);
-            let _ = jobs.send(Job::Inspected { url, play, result });
+            let _ = jobs.send(Job::Inspected {
+                url,
+                generation,
+                result,
+            });
         });
     }
 
@@ -872,19 +912,22 @@ impl App {
         }
         let started = Timestamp::now() - jiff::SignedDuration::try_from(self.timer.elapsed(now)).unwrap_or_default();
         let planned = self.timer.phase_length().as_secs();
-        if let Ok(id) = self.store.begin_focus_block(started, planned) {
-            self.focus_block = Some(FocusBlock { id, saved_at: now });
+        match self.store.begin_focus_block(started, planned) {
+            Ok(id) => self.focus_block = Some(FocusBlock { id, saved_at: now }),
+            Err(error) => self.toast(Tone::Error, format!("Could not record focus time: {error}")),
         }
     }
 
-    fn save_focus_block(&mut self, now: Instant, completed: bool) {
+    fn save_focus_block(&mut self, now: Instant) {
         if self.timer.phase() != Phase::Focus {
             return;
         }
         let Some(block) = self.focus_block.as_mut() else { return };
         block.saved_at = now;
-        let focused = self.timer.elapsed(now).as_secs();
-        let _ = self.store.update_focus_block(block.id, focused, completed);
+        let (id, focused) = (block.id, self.timer.elapsed(now).as_secs());
+        if let Err(error) = self.store.update_focus_block(id, focused, false) {
+            self.toast(Tone::Error, format!("Could not record focus time: {error}"));
+        }
         self.refresh_stats();
     }
 
@@ -896,8 +939,10 @@ impl App {
 
     fn on_phase_ended(&mut self, ended: PhaseEnded, natural: bool) {
         if ended.ended == Phase::Focus && natural {
-            if let Some(block) = self.focus_block.take() {
-                let _ = self.store.update_focus_block(block.id, ended.length.as_secs(), true);
+            if let Some(block) = self.focus_block.take()
+                && let Err(error) = self.store.update_focus_block(block.id, ended.length.as_secs(), true)
+            {
+                self.toast(Tone::Error, format!("Could not record focus time: {error}"));
             }
             self.refresh_stats();
         }
@@ -949,12 +994,19 @@ impl App {
     }
 
     pub fn shutdown(&mut self) {
-        self.save_focus_block(Instant::now(), false);
+        self.save_focus_block(Instant::now());
         let _ = self.store.save_session(&self.session());
     }
 
     /// Everything that happens without input: finished jobs, audio events, the timer.
     pub fn tick(&mut self, now: Instant) {
+        // Every seek restarts ffmpeg, so a held key or a scrolled wheel settles first.
+        if let Some((at, asked)) = self.pending_seek
+            && now.duration_since(asked) >= Duration::from_millis(150)
+        {
+            self.pending_seek = None;
+            self.engine.seek(at);
+        }
         while let Ok(job) = self.inbox.try_recv() {
             self.handle_job(job);
         }
@@ -968,7 +1020,7 @@ impl App {
             && self.timer.is_running()
             && now.duration_since(block.saved_at) >= Duration::from_secs(30)
         {
-            self.save_focus_block(now, false);
+            self.save_focus_block(now);
         }
         if now.duration_since(self.session_saved_at) >= Duration::from_secs(15) {
             self.session_saved_at = now;
@@ -1023,19 +1075,24 @@ impl App {
                 }
             }
             Job::Catalog(Err(_)) => {}
-            Job::Inspected { url, play, result } => match result {
+            Job::Inspected {
+                url,
+                generation,
+                result,
+            } => match result {
                 Ok(saved) => {
-                    let title = saved.title.clone();
-                    let source = Source::Saved { id: saved.id.clone() };
                     if let Err(error) = self.store.save(&saved) {
                         self.toast(Tone::Error, format!("Could not save it: {error}"));
+                        return;
                     }
                     self.reload_library();
-                    if play {
-                        self.timer_follows_play = self.timer.is_running() || self.timer_follows_play;
+                    // Something else started while yt-dlp was looking; keep that playing.
+                    if generation == self.generation {
+                        let source = Source::Saved { id: saved.id };
                         self.play_source(source, youtube::start_key(&url).as_deref());
+                    } else {
+                        self.toast(Tone::Done, format!("Added \"{}\" to YouTube", saved.title));
                     }
-                    self.toast(Tone::Done, format!("Added \"{title}\" to YouTube"));
                 }
                 Err(error) => self.toast(Tone::Error, error.to_string()),
             },

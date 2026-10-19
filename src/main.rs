@@ -77,7 +77,7 @@ fn main() -> Result<()> {
 fn run(terminal: &mut DefaultTerminal, app: &mut App, ui: &mut Ui, media: &mut Media) -> Result<()> {
     loop {
         app.tick(Instant::now());
-        media.show(app.current(), app.is_playing(), app.position());
+        media.show(app.now_playing(), app.is_playing(), app.position());
         media.pump();
         terminal.draw(|frame| ui.draw(frame, app))?;
         if app.quit {
