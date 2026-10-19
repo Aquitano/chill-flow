@@ -74,12 +74,11 @@ pub fn apply(app: &mut App, ui: &mut Ui, action: Action) {
         Action::OpenHelp => ui.open(Overlay::Help),
         Action::OpenStats => ui.open(Overlay::Stats),
         Action::RemoveRow(index) => {
-            let title = app.rows(app.tab).get(index).map(|row| row.title.clone());
-            if let Some(title) = title {
+            if let Some((removal, title)) = app.removal(index) {
                 let message = format!("Remove \"{title}\" from {}?", app.tab.label());
                 ui.open(Overlay::Confirm {
                     message,
-                    action: Action::RemoveRow(index),
+                    action: Action::Remove(removal),
                 });
             }
         }
@@ -282,29 +281,32 @@ fn overlay_key(app: &mut App, ui: &mut Ui, key: KeyEvent) {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     let Some(overlay) = ui.overlay.as_mut() else { return };
     match overlay {
-        Overlay::Palette { query, selected } => match key.code {
-            KeyCode::Esc => ui.close(),
-            KeyCode::Enter => {
-                let chosen = overlay::matching(app, query).into_iter().nth(*selected);
-                ui.close();
-                if let Some(command) = chosen {
-                    apply(app, ui, command.action);
+        Overlay::Palette { query, selected } => {
+            let last = overlay::matching(app, query).len().saturating_sub(1);
+            match key.code {
+                KeyCode::Esc => ui.close(),
+                KeyCode::Enter => {
+                    let chosen = overlay::matching(app, query).into_iter().nth(*selected);
+                    ui.close();
+                    if let Some(command) = chosen {
+                        apply(app, ui, command.action);
+                    }
                 }
+                KeyCode::Up => *selected = selected.saturating_sub(1),
+                KeyCode::Char('p') if ctrl => *selected = selected.saturating_sub(1),
+                KeyCode::Down => *selected = (*selected + 1).min(last),
+                KeyCode::Char('n') if ctrl => *selected = (*selected + 1).min(last),
+                KeyCode::Backspace => {
+                    query.pop();
+                    *selected = 0;
+                }
+                KeyCode::Char(ch) if !ctrl => {
+                    query.push(ch);
+                    *selected = 0;
+                }
+                _ => {}
             }
-            KeyCode::Up => *selected = selected.saturating_sub(1),
-            KeyCode::Char('p') if ctrl => *selected = selected.saturating_sub(1),
-            KeyCode::Down => *selected += 1,
-            KeyCode::Char('n') if ctrl => *selected += 1,
-            KeyCode::Backspace => {
-                query.pop();
-                *selected = 0;
-            }
-            KeyCode::Char(ch) if !ctrl => {
-                query.push(ch);
-                *selected = 0;
-            }
-            _ => {}
-        },
+        }
         Overlay::Prompt { kind, input } => match key.code {
             KeyCode::Esc => ui.close(),
             KeyCode::Enter => {
@@ -451,8 +453,9 @@ fn click(app: &mut App, ui: &mut Ui, rect: Rect, hit: Hit, x: u16) {
 }
 
 fn scrolled(app: &mut App, ui: &mut Ui, x: u16, y: u16, step: isize) {
-    if let Some(Overlay::Palette { selected, .. }) = &mut ui.overlay {
-        *selected = selected.saturating_add_signed(step);
+    if let Some(Overlay::Palette { query, selected }) = &mut ui.overlay {
+        let last = overlay::matching(app, query).len().saturating_sub(1);
+        *selected = selected.saturating_add_signed(step).min(last);
         return;
     }
     let hit = ui.hit_at(x, y).map(|(_, hit)| hit);

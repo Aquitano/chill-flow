@@ -7,7 +7,7 @@ use image::DynamicImage;
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 
-use crate::action::{Action, Prompt, Tab};
+use crate::action::{Action, Prompt, Removal, Tab};
 use crate::audio::{Engine, EngineEvent, StreamInput};
 use crate::catalog::{Catalog, Levels, Mix};
 use crate::config::Config;
@@ -371,6 +371,7 @@ impl App {
     fn play_source(&mut self, source: Source, start_key: Option<&str>) {
         self.fill_queue(&source, start_key);
         self.resume_at = None;
+        self.failures_in_a_row = 0;
         match self.queue.current().cloned() {
             Some(item) => self.start(item, 0.0),
             None => self.stop_stream(),
@@ -380,6 +381,7 @@ impl App {
 
     fn start(&mut self, item: Item, start_secs: f64) {
         self.generation += 1;
+        self.resume_at = (start_secs > 0.0).then_some(start_secs);
         self.events.push(Event::TrackChanged);
         self.load_cover();
         match item.play {
@@ -391,6 +393,7 @@ impl App {
                     live: false,
                 });
                 self.stream = Stream::Playing;
+                self.resume_at = None;
             }
             Playable::YouTube { url, .. } => {
                 self.engine.stop_stream();
@@ -408,6 +411,23 @@ impl App {
         self.generation += 1;
         self.engine.stop_stream();
         self.stream = Stream::Idle;
+    }
+
+    /// The queue ran out or gave up. Without ambience nothing is audible any more, so show it
+    /// as paused; the timer keeps running either way.
+    fn music_ended(&mut self) {
+        self.stop_stream();
+        if self.levels.is_empty() {
+            self.engine.set_paused(true);
+        }
+    }
+
+    fn enter_soundscape(&mut self) {
+        self.stop_stream();
+        self.queue.replace(Vec::new(), None);
+        self.source = Source::Soundscape;
+        self.events.push(Event::TrackChanged);
+        self.resume();
     }
 
     fn load_cover(&self) {
@@ -438,7 +458,8 @@ impl App {
         if self.stream == Stream::Idle
             && let Some(item) = self.current().cloned()
         {
-            let at = self.resume_at.take().unwrap_or(0.0);
+            let at = self.resume_at.unwrap_or(0.0);
+            self.failures_in_a_row = 0;
             self.start(item, at);
         }
         self.resume();
@@ -456,6 +477,7 @@ impl App {
     }
 
     fn skip(&mut self, forward: bool) {
+        self.failures_in_a_row = 0;
         if !forward && self.position() > 3.0 && self.stream == Stream::Playing {
             self.engine.seek(0.0);
             return;
@@ -468,7 +490,7 @@ impl App {
         match next.cloned() {
             Some(item) => self.start(item, 0.0),
             None => {
-                self.stop_stream();
+                self.music_ended();
                 self.toast(Tone::Info, "End of the queue");
             }
         }
@@ -505,9 +527,10 @@ impl App {
             }
             Action::Activate(index) => self.activate(index),
             Action::Enqueue(index) => self.enqueue(index),
-            Action::RemoveRow(index) => self.remove_row(index),
+            Action::Remove(removal) => self.remove(removal),
             Action::JumpQueue(offset) => {
                 if let Some(item) = self.queue.jump(offset).cloned() {
+                    self.failures_in_a_row = 0;
                     self.start(item, 0.0);
                     self.resume();
                 }
@@ -555,10 +578,7 @@ impl App {
             Action::ApplyMix(index) => self.apply_mix(index),
             Action::PlaySoundscape(index) => {
                 self.apply_mix(index);
-                self.stop_stream();
-                self.source = Source::Soundscape;
-                self.events.push(Event::TrackChanged);
-                self.resume();
+                self.enter_soundscape();
             }
             Action::CycleMix(step) => {
                 if self.mixes.is_empty() {
@@ -580,6 +600,7 @@ impl App {
             Action::Submit(prompt, text) => self.submit(prompt, text.trim()),
             Action::Quit => self.quit = true,
             Action::ShowTab(_)
+            | Action::RemoveRow(_)
             | Action::Focus(_)
             | Action::OpenPrompt(_)
             | Action::OpenPalette
@@ -670,14 +691,17 @@ impl App {
         self.apply_levels(&scene.levels);
         self.mix_name = self.matching_mix_name();
         self.timer_follows_play = true;
-        match scene.source {
-            Source::Soundscape => {
-                self.stop_stream();
-                self.source = Source::Soundscape;
-                self.events.push(Event::TrackChanged);
-                self.resume();
-            }
-            source => self.play_source(source, scene.item_key.as_deref()),
+        if scene.source == Source::Soundscape {
+            self.enter_soundscape();
+        } else if self.items_for(&scene.source).is_empty() {
+            self.enter_soundscape();
+            self.toast(
+                Tone::Error,
+                format!("The music in \"{}\" is gone, playing its ambience only", scene.name),
+            );
+            return;
+        } else {
+            self.play_source(scene.source, scene.item_key.as_deref());
         }
         self.toast(Tone::Done, format!("Scene \"{}\"", scene.name));
     }
@@ -746,40 +770,46 @@ impl App {
             Target::Scene(_) => return,
             _ => self.row_item(self.tab, index).into_iter().collect(),
         };
+        if self.source == Source::Soundscape {
+            return self.activate(index);
+        }
         let count = items.len();
-        let was_empty = self.queue.is_empty() || self.source == Source::Soundscape;
         for item in items {
             self.queue.enqueue(item);
-        }
-        if was_empty && self.source == Source::Soundscape {
-            self.source = Source::Tracks;
         }
         let noun = if count == 1 { "item" } else { "items" };
         self.toast(Tone::Done, format!("Added {count} {noun} to the queue"));
     }
 
-    fn remove_row(&mut self, index: usize) {
-        let Some(row) = self.rows(self.tab).into_iter().nth(index) else {
-            return;
+    /// The identity and title behind a library row, for a delete that waits on confirmation.
+    pub fn removal(&self, index: usize) -> Option<(Removal, String)> {
+        let row = self.rows(self.tab).into_iter().nth(index)?;
+        let removal = match row.target {
+            Target::Saved(i) => Removal::Saved(self.saved.get(i)?.id.clone()),
+            Target::Liked(i) => Removal::Like(self.likes.get(i)?.key.clone()),
+            Target::Mix(i) => {
+                let mix = self.mixes.get(i).filter(|mix| mix.id.starts_with("saved:"))?;
+                Removal::Mix(mix.name.clone())
+            }
+            Target::Scene(i) => Removal::Scene(self.scenes.get(i)?.name.clone()),
+            Target::Track(_) => return None,
         };
-        let result = match row.target {
-            Target::Saved(i) => self.saved.get(i).map(|saved| self.store.forget(&saved.id)),
-            Target::Liked(i) => self.likes.get(i).map(|item| self.store.set_liked(item, false)),
-            Target::Mix(i) => self
-                .mixes
-                .get(i)
-                .filter(|mix| mix.id.starts_with("saved:"))
-                .map(|mix| self.store.delete_mix(&mix.name)),
-            Target::Scene(i) => self.scenes.get(i).map(|scene| self.store.delete_scene(&scene.name)),
-            Target::Track(_) => None,
+        Some((removal, row.title))
+    }
+
+    fn remove(&mut self, removal: Removal) {
+        let result = match &removal {
+            Removal::Saved(id) => self.store.forget(id),
+            Removal::Like(key) => match self.likes.iter().find(|item| &item.key == key) {
+                Some(item) => self.store.set_liked(item, false),
+                None => Ok(()),
+            },
+            Removal::Mix(name) => self.store.delete_mix(name),
+            Removal::Scene(name) => self.store.delete_scene(name),
         };
         match result {
-            Some(Ok(())) => {
-                self.toast(Tone::Done, format!("Removed \"{}\"", row.title));
-                self.reload_library();
-            }
-            Some(Err(error)) => self.toast(Tone::Error, format!("Could not remove it: {error}")),
-            None => {}
+            Ok(()) => self.reload_library(),
+            Err(error) => self.toast(Tone::Error, format!("Could not remove it: {error}")),
         }
     }
 
@@ -951,7 +981,7 @@ impl App {
                 self.failures_in_a_row = 0;
                 match self.queue.advance().cloned() {
                     Some(item) => self.start(item, 0.0),
-                    None => self.stop_stream(),
+                    None => self.music_ended(),
                 }
             }
             EngineEvent::Failed(message) => {
@@ -973,6 +1003,7 @@ impl App {
         self.failures_in_a_row += 1;
         if self.failures_in_a_row >= 3 || self.queue.upcoming().next().is_none() {
             self.failures_in_a_row = 0;
+            self.music_ended();
             return;
         }
         if let Some(item) = self.queue.next().cloned() {
@@ -1012,10 +1043,14 @@ impl App {
                     return;
                 }
                 match result {
-                    Ok(input) => {
+                    Ok(mut input) => {
+                        if let Some(at) = self.resume_at.take()
+                            && !input.live
+                        {
+                            input.start_secs = at;
+                        }
                         self.engine.play_stream(input);
                         self.stream = Stream::Playing;
-                        self.failures_in_a_row = 0;
                     }
                     Err(error) => {
                         self.stream = Stream::Idle;

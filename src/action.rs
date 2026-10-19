@@ -59,6 +59,16 @@ impl Prompt {
     }
 }
 
+/// What a confirmed delete removes, named by identity so that a list reordered while the
+/// confirmation was open can't redirect it to another row.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Removal {
+    Saved(String),
+    Like(String),
+    Mix(String),
+    Scene(String),
+}
+
 /// Everything the user can ask for, whether by key, mouse, media key, or the palette.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
@@ -77,6 +87,7 @@ pub enum Action {
     Activate(usize),
     Enqueue(usize),
     RemoveRow(usize),
+    Remove(Removal),
     JumpQueue(usize),
     RemoveQueued(usize),
     MoveQueued(usize, isize),

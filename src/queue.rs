@@ -25,18 +25,18 @@ impl Queue {
         }
     }
 
-    pub fn replace(&mut self, items: Vec<Item>, start_key: Option<&str>) {
+    pub fn replace(&mut self, mut items: Vec<Item>, start_key: Option<&str>) {
         let start = start_key
             .and_then(|key| items.iter().position(|item| item.key == key))
             .unwrap_or(0);
+        let last = items.len().saturating_sub(1);
+        items.rotate_left(start.min(last));
         self.next_ordinal = items.len();
         self.entries = items
             .into_iter()
             .enumerate()
             .map(|(ordinal, item)| Entry { item, ordinal })
             .collect();
-        let last = self.entries.len().saturating_sub(1);
-        self.entries.rotate_left(start.min(last));
         self.cursor = 0;
         if self.shuffle {
             self.shuffle_upcoming();
@@ -45,10 +45,6 @@ impl Queue {
 
     pub fn current(&self) -> Option<&Item> {
         self.entries.get(self.cursor).map(|entry| &entry.item)
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
     }
 
     pub fn upcoming(&self) -> impl Iterator<Item = &Item> {
@@ -188,6 +184,15 @@ mod tests {
         queue.set_shuffle(false);
         assert_eq!(queue.current().unwrap().key, "a");
         assert_eq!(keys(&queue), ["b", "c", "d"]);
+    }
+
+    #[test]
+    fn unshuffling_a_queue_started_mid_list_keeps_its_wrapped_order() {
+        let mut queue = Queue::default();
+        queue.replace(items(&["a", "b", "c", "d"]), Some("c"));
+        queue.set_shuffle(true);
+        queue.set_shuffle(false);
+        assert_eq!(keys(&queue), ["d", "a", "b"]);
     }
 
     #[test]

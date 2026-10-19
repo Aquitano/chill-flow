@@ -328,7 +328,11 @@ impl Ui {
                     .play(1.0, 0.0, now, self.duration(Duration::from_millis(700))),
             }
         }
+        let wanted = app.current().and_then(|item| item.cover.clone());
         for (url, image) in std::mem::take(&mut app.covers) {
+            if Some(&url) != wanted.as_ref() {
+                continue;
+            }
             let aspect = image.width() as f32 / image.height().max(1) as f32;
             let protocol = self.picker.new_resize_protocol(image);
             self.cover = Some(Cover { url, protocol, aspect });
