@@ -7,11 +7,10 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Widget};
-use tachyonfx::{Interpolation, fx};
 use unicode_width::UnicodeWidthStr;
 
 use super::widgets::{self, fill, fit, put};
-use super::{Hit, Overlay, Slot, Ui};
+use super::{Hit, Overlay, Ui};
 use crate::action::{Action, Prompt};
 use crate::app::{App, Tone};
 use crate::timer::TimerMode;
@@ -105,11 +104,9 @@ pub fn matching(app: &App, query: &str) -> Vec<Command> {
 
 fn dialog(buf: &mut Buffer, screen: Rect, width: u16, height: u16, top: Option<u16>, title: &str, ui: &mut Ui) -> Rect {
     let theme = ui.theme;
-    let now = Instant::now();
     let width = width.min(screen.width.saturating_sub(4));
     let height = height.min(screen.height.saturating_sub(2));
-    let rise = ((1.0 - ui.overlay_shown.value(now)) * 2.0).round() as u16;
-    let y = top.unwrap_or(screen.y + screen.height.saturating_sub(height) / 2) + rise;
+    let y = top.unwrap_or(screen.y + screen.height.saturating_sub(height) / 2);
     let area = Rect::new(screen.x + (screen.width - width) / 2, y, width, height).intersection(screen);
     fill(buf, area, Style::new().bg(theme.background()));
     let block = Block::bordered()
@@ -126,12 +123,7 @@ fn dialog(buf: &mut Buffer, screen: Rect, width: u16, height: u16, top: Option<u
         ]));
     let inner = block.inner(area);
     block.render(area, buf);
-    ui.slots.insert(Slot::Dialog, area);
     ui.hits.push((area, Hit::Dialog));
-    if std::mem::take(&mut ui.fresh_dialog) && ui.motion {
-        ui.effects
-            .push(fx::coalesce((260, Interpolation::QuadOut)).with_area(area));
-    }
     inner
 }
 
@@ -387,13 +379,8 @@ pub fn toasts(buf: &mut Buffer, footer: Rect, ui: &mut Ui, now: Instant) {
         let toast = &ui.toasts[index];
         let age = now.duration_since(toast.born).as_secs_f32();
         let remaining = toast.life.as_secs_f32() - age;
-        let slide = if ui.motion {
-            (1.0 - (age / 0.28).min(1.0)).powi(3)
-        } else {
-            0.0
-        };
         let fade = if ui.motion {
-            (1.0 - remaining / 0.4).clamp(0.0, 1.0)
+            (1.0 - age / 0.2).max(1.0 - remaining / 0.4).clamp(0.0, 1.0)
         } else {
             0.0
         };
@@ -401,7 +388,7 @@ pub fn toasts(buf: &mut Buffer, footer: Rect, ui: &mut Ui, now: Instant) {
             .min(64)
             .min(footer.width.saturating_sub(4))
             .max(12);
-        let x = footer.right().saturating_sub(width + 1) + (slide * f32::from(width)) as u16;
+        let x = footer.right().saturating_sub(width + 1);
         let y = bottom.saturating_sub(3);
         if y < 1 {
             break;

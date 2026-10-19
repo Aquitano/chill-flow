@@ -22,7 +22,6 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 souvlaki = { version = "0.8.3", default-features = false, features = ["use_zbus"] }
-tachyonfx = { version = "0.25.2", default-features = false, features = ["std", "std-duration"] }
 terminal-colorsaurus = "1.0.3"
 toml = "1.1.8"
 unicode-width = "0.2.2"

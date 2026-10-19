@@ -8,7 +8,7 @@ use ratatui::widgets::{Block, BorderType, Widget};
 use unicode_width::UnicodeWidthStr;
 
 use super::widgets::{self, fill, fit, meter, put};
-use super::{Hit, Slider, Slot, Ui};
+use super::{Hit, Slider, Ui};
 use crate::action::{Action, Panel, Prompt, Tab};
 use crate::app::{App, Stream, format_clock};
 use crate::model::{Repeat, Source};
@@ -201,7 +201,6 @@ pub fn library(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instan
         inner.width,
         inner.height - 2 - u16::from(show_filter),
     );
-    ui.slots.insert(Slot::List, list);
     if show_filter {
         let y = inner.bottom() - 1;
         let x = put(buf, inner.x + 1, y, "/ ", Style::new().fg(theme.accent));
@@ -349,7 +348,6 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
     let meta_x = cover.right() + 3;
     let meta_width = inner.right().saturating_sub(meta_x);
     let meta_y = cover.y + cover.height.saturating_sub(5) / 2;
-    ui.slots.insert(Slot::Meta, Rect::new(meta_x, meta_y, meta_width, 5));
     let width = usize::from(meta_width);
     let (title, artist, detail) = match (&item, soundscape) {
         (_, true) => {
@@ -382,19 +380,22 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
             String::new(),
         ),
     };
+    let shown = ui.title_shown.value(now);
     put(
         buf,
         meta_x,
         meta_y,
         &fit(&title, width),
-        Style::new().fg(theme.text()).add_modifier(Modifier::BOLD),
+        Style::new()
+            .fg(theme.mix(0.3 + 0.7 * shown))
+            .add_modifier(Modifier::BOLD),
     );
     put(
         buf,
         meta_x,
         meta_y + 1,
         &fit(&artist, width),
-        Style::new().fg(theme.muted()),
+        Style::new().fg(theme.mix(0.3 + 0.32 * shown)),
     );
     put(
         buf,
@@ -716,7 +717,6 @@ pub fn focus(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant)
         Style::new().fg(digits),
         Style::new().fg(colon),
     );
-    ui.slots.insert(Slot::Clock, Rect::new(clock_x, clock_y, width, 3));
 
     let state = if timer.is_running() {
         timer.phase().label().to_string()

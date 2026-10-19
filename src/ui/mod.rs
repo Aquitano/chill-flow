@@ -13,7 +13,6 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
 use ratatui_image::{Resize, StatefulImage};
-use tachyonfx::{CellFilter, Effect, Interpolation, Motion, fx};
 
 use crate::action::{Action, Panel, Prompt, Tab};
 use crate::app::{App, Event, Tone};
@@ -69,15 +68,6 @@ struct Cover {
     aspect: f32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Slot {
-    Screen,
-    List,
-    Meta,
-    Clock,
-    Dialog,
-}
-
 pub struct Ui {
     pub theme: Theme,
     motion: bool,
@@ -98,8 +88,6 @@ pub struct Ui {
     pub hover: Option<(u16, u16)>,
     pub drag: Option<Drag>,
     pub seek_preview: Option<f64>,
-    effects: Vec<Effect>,
-    slots: HashMap<Slot, Rect>,
     cover_rect: Option<Rect>,
     bars: Bars,
     tab_x: Tween,
@@ -110,10 +98,9 @@ pub struct Ui {
     glow: Tween,
     panel_glow: [Tween; 3],
     stats_grow: Tween,
-    fresh_dialog: bool,
+    title_shown: Tween,
     started: Instant,
     last_frame: Instant,
-    playing_since: Option<Instant>,
 }
 
 const FAST: Duration = Duration::from_millis(180);
@@ -122,7 +109,7 @@ const SMOOTH: Duration = Duration::from_millis(320);
 impl Ui {
     pub fn new(theme: Theme, picker: Picker, reduce_motion: bool) -> Ui {
         let now = Instant::now();
-        let mut ui = Ui {
+        Ui {
             theme,
             motion: !reduce_motion,
             picker,
@@ -142,8 +129,6 @@ impl Ui {
             hover: None,
             drag: None,
             seek_preview: None,
-            effects: Vec::new(),
-            slots: HashMap::new(),
             cover_rect: None,
             bars: Bars::default(),
             tab_x: Tween::new(0.0),
@@ -154,22 +139,10 @@ impl Ui {
             glow: Tween::new(0.0),
             panel_glow: [Tween::new(1.0), Tween::new(0.0), Tween::new(0.0)],
             stats_grow: Tween::new(0.0),
-            fresh_dialog: false,
+            title_shown: Tween::new(1.0),
             started: now,
             last_frame: now,
-            playing_since: None,
-        };
-        if ui.motion {
-            let background = ui.theme.background();
-            ui.effects.push(fx::sweep_in(
-                Motion::LeftToRight,
-                24,
-                0,
-                background,
-                (900, Interpolation::QuadOut),
-            ));
         }
-        ui
     }
 
     fn duration(&self, duration: Duration) -> Duration {
@@ -185,27 +158,13 @@ impl Ui {
             &self.glow,
             &self.overlay_shown,
             &self.stats_grow,
+            &self.title_shown,
         ];
-        !self.effects.is_empty()
-            || !self.toasts.is_empty()
+        !self.toasts.is_empty()
             || tweens.iter().any(|tween| tween.active(now))
             || self.panel_glow.iter().any(|tween| tween.active(now))
             || self.levels.values().any(|tween| tween.active(now))
             || (self.motion && !self.bars.is_still())
-    }
-
-    fn add_effect(&mut self, slot: Slot, effect: Effect) {
-        if !self.motion {
-            return;
-        }
-        let Some(area) = self.slots.get(&slot).copied() else {
-            return;
-        };
-        let mut effect = effect.with_area(area);
-        if let Some(cover) = self.cover_rect {
-            effect = effect.with_filter(CellFilter::Not(Box::new(CellFilter::Area(cover))));
-        }
-        self.effects.push(effect);
     }
 
     pub fn toast(&mut self, tone: Tone, message: String) {
@@ -250,20 +209,9 @@ impl Ui {
         if app.tab == tab {
             return;
         }
-        let forward = tab.index() > app.tab.index();
         app.tab = tab;
         app.filter.clear();
         self.filtering = false;
-        let background = self.theme.background();
-        let motion = if forward {
-            Motion::RightToLeft
-        } else {
-            Motion::LeftToRight
-        };
-        self.add_effect(
-            Slot::List,
-            fx::sweep_in(motion, 14, 0, background, (260, Interpolation::QuadOut)),
-        );
     }
 
     pub fn open(&mut self, overlay: Overlay) {
@@ -276,7 +224,6 @@ impl Ui {
         self.overlay = Some(overlay);
         if !was_open {
             self.overlay_shown.play(0.0, 1.0, now, self.duration(FAST));
-            self.fresh_dialog = true;
         }
     }
 
@@ -307,22 +254,10 @@ impl Ui {
         for event in std::mem::take(&mut app.events) {
             match event {
                 Event::Toast(tone, message) => self.toast(tone, message),
-                Event::TrackChanged => {
-                    let background = self.theme.background();
-                    self.add_effect(
-                        Slot::Meta,
-                        fx::sweep_in(Motion::LeftToRight, 18, 0, background, (520, Interpolation::QuadOut)),
-                    );
-                }
-                Event::PhaseChanged => {
-                    self.glow
-                        .play(1.0, 0.0, now, self.duration(Duration::from_millis(1600)));
-                    let background = self.theme.background();
-                    self.add_effect(
-                        Slot::Clock,
-                        fx::sweep_in(Motion::UpToDown, 3, 0, background, (480, Interpolation::QuadOut)),
-                    );
-                }
+                Event::TrackChanged => self.title_shown.play(0.0, 1.0, now, self.duration(SMOOTH)),
+                Event::PhaseChanged => self
+                    .glow
+                    .play(1.0, 0.0, now, self.duration(Duration::from_millis(1600))),
                 Event::Liked => self
                     .heart
                     .play(1.0, 0.0, now, self.duration(Duration::from_millis(700))),
@@ -343,12 +278,6 @@ impl Ui {
             let level = f32::from(app.levels.get(&sound.id).copied().unwrap_or(0)) / 100.0;
             let tween = self.levels.entry(sound.id.clone()).or_insert_with(|| Tween::new(level));
             tween.set(level, now, duration);
-        }
-        let playing = app.is_playing();
-        match (playing, self.playing_since) {
-            (true, None) => self.playing_since = Some(now),
-            (false, Some(_)) => self.playing_since = None,
-            _ => {}
         }
     }
 
@@ -372,7 +301,6 @@ impl Ui {
         self.cover_rect = None;
 
         let area = frame.area();
-        self.slots.insert(Slot::Screen, area);
         let [header, body, footer] =
             Layout::vertical([Constraint::Length(1), Constraint::Fill(1), Constraint::Length(1)]).areas(area);
         let buf = frame.buffer_mut();
@@ -433,10 +361,6 @@ impl Ui {
 
         overlay::toasts(buf, footer, self, now);
         overlay::draw(buf, area, app, self, now);
-        for effect in &mut self.effects {
-            effect.process(elapsed, buf, area);
-        }
-        self.effects.retain(|effect| effect.running());
 
         if self.overlay.is_none()
             && let (Some(rect), Some(cover)) = (self.cover_rect, self.cover.as_mut())
