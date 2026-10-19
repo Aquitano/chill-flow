@@ -2,40 +2,39 @@
 
 ## Users
 
-People doing focused knowledge work — students, developers, writers, anyone who reaches for lo-fi or ambient sound to settle into deep work. They arrive wanting to *start*, not to configure. Context is a laptop or desktop work session, often for a stretch of time, frequently returning day to day. They want their setup (sound, timer, tasks, background) to be there waiting when they come back.
+People doing focused knowledge work, mostly developers, who reach for lo-fi or ambient sound to settle into deep work and already live in a terminal. They want to *start*, not to configure. Context is a laptop or desktop work session, often for a stretch of time, frequently returning day to day. They want their setup (sound, ambience, timer) to be there waiting when they come back.
 
-The job to be done: enter and hold a flow state. Pick a soundscape, run a reliable focus or Pomodoro timer, keep a short list of tasks in view, and see honest progress over time — all without the tool itself becoming a distraction.
+The job to be done: enter and hold a flow state. Start a soundscape, run a reliable focus or Pomodoro timer, and see honest progress over time, all without the tool itself becoming a distraction or another window to manage.
 
 ## Product Purpose
 
-ChillFlow combines lo-fi beats and ambient sound with a focus timer and lightweight task management into one calm workspace. It exists to make starting deep work frictionless and to make focus sustainable across sessions.
+chill combines lo-fi music, ambient sound, and a focus timer in one terminal app. It exists to make starting deep work a single keypress and to make focus sustainable across sessions.
 
-The core loop the product must prove: sign in → start a focus session → audio plays reliably → track a small set of tasks → session completion is recorded accurately → return later to saved preferences and basic progress. Success is a user who opens ChillFlow by reflex when it's time to concentrate, and trusts that their sound, timer, and progress are exactly where they left them.
+The core loop: typing `chill` loads the last scene, one Space starts music, ambience, and the timer, focus blocks are recorded accurately, and next time everything is exactly where it was left. Success is a user who opens chill by reflex when it's time to concentrate.
 
-The authenticated `/app` workspace is the product. The marketing landing (`/`) exists to explain the product truthfully and funnel visitors into auth — it is a means to the workspace, not the destination.
+Music comes from the owner's R2 bucket (listed by `catalog.json`) and from YouTube links, which are saved to the library on first use. Everything else lives in a local SQLite file; there are no accounts and no server.
 
 ## Brand Personality
 
 Calm, focused, atmospheric.
 
-Voice is quiet and grounded — a good studio, not a hype machine. The interface sets a mood (dark, warm-tinted, soft-glowing, grainy) that supports concentration, then gets out of the way. Emotional goal: a settled, unhurried readiness to work. Never loud, never demanding attention for itself; the sound and the task are the point, the UI is the room they happen in.
+Voice is quiet and grounded, a good studio rather than a hype machine. The interface takes its colors from the terminal theme, adds soft motion, then gets out of the way. Emotional goal: a settled, unhurried readiness to work. The sound and the task are the point; the UI is the room they happen in.
 
 ## Anti-references
 
-- **Neon synthwave / gamer lo-fi.** No purple-pink gradients, glitch effects, or retro-anime motifs. That is the saturated cliche of the lo-fi genre and reads as costume, not calm.
-- **Busy SaaS dashboard.** No dense KPI cards, crowded sidebars, notification badges, or chart walls. Density is the enemy of focus.
-- **Generic startup landing.** No hero-metric templates, no uppercase tracked eyebrow kickers above every section, no grid of identical icon-heading-text feature cards.
-
-Related trap to steer clear of even though it wasn't the primary concern: gamified habit-tracker energy (streak confetti, badges, mascots, dopamine loops). Progress should feel honest and quiet, not like a game nagging for engagement.
+- **Neon synthwave / gamer lo-fi.** No purple-pink gradients, glitch effects, or retro-anime motifs.
+- **Busy dashboard density.** No walls of panels, counters, or charts. Density is the enemy of focus.
+- **Gamified habit tracking.** No streak confetti, badges, or dopamine loops. Progress should feel honest and quiet.
 
 ## Design Principles
 
-- **The work is the star, not the UI.** Every surface should recede in favor of the sound and the task. When a choice is between more interface and more calm, choose calm.
-- **Atmosphere is functional, not decoration.** Dark mood, grain, soft glow, and motion earn their place by helping users drop into focus. They must never cost legibility, contrast, or performance to do it.
-- **Only show what's real.** Never advertise a feature that doesn't work yet (no fake presets, no vanity analytics). A truthful, smaller surface beats an impressive, hollow one — this runs through the whole MVP.
-- **Desktop-first, unbroken everywhere.** The focus loop is tuned for a laptop work session; narrow viewports must stay usable and free of layout breakage even when they aren't the priority.
-- **Feedback is visible but quiet.** Timer state, playback, preference saves, and failures are always surfaced (inline or as gentle toasts) and never jarring, alarmist, or silent.
+- **The work is the star, not the UI.** When a choice is between more interface and more calm, choose calm.
+- **Atmosphere is functional, not decoration.** Motion and the visualizer earn their place by helping users drop into focus. They must never cost legibility or idle CPU.
+- **Only show what's real.** Never surface a feature that doesn't work. Stats count minutes a focus block actually ran.
+- **Wide terminal first, unbroken when narrow.** The layout is tuned for a full-screen terminal; smaller windows drop panels rather than break.
+- **Feedback is visible but quiet.** Playback, timer boundaries, and failures always surface as gentle toasts, never silently and never alarmingly.
+- **Keyboard and mouse are both first-class.** Every action has a key, and everything visible can be clicked.
 
 ## Accessibility & Inclusion
 
-Target WCAG 2.1 AA. Body text holds ≥4.5:1 contrast and large text ≥3:1 — a real discipline against the dark, warm-tinted palette, where muted grays on near-black are the easy failure. Honor `prefers-reduced-motion` on every animation (the app leans heavily on Framer Motion for entrances, background crossfades, and player transitions); reduced-motion users get a crossfade or instant state instead of movement. Icon-only controls (player, timer, task actions) carry accessible names. Keep the experience fully keyboard-operable.
+Colors derive from the terminal's own foreground, background, and ANSI palette, so contrast follows the theme the user chose. Muted text must stay readable against both dark and light themes. `reduce_motion = true` in `config.toml` turns every transition into an instant state change and hides the visualizer.
