@@ -18,7 +18,7 @@ const TAB_SLIDE: Duration = Duration::from_millis(220);
 
 fn panel(buf: &mut Buffer, area: Rect, title: &str, glow: f32, ui: &Ui) -> Rect {
     let theme = &ui.theme;
-    let mut title_style = Style::new().fg(theme.mix(0.62 + 0.38 * glow));
+    let mut title_style = Style::new().fg(theme.emphasis(glow));
     if glow > 0.5 {
         title_style = title_style.add_modifier(Modifier::BOLD);
     }
@@ -54,26 +54,6 @@ fn scroll(selected: usize, offset: &mut usize, height: usize) {
 
 pub fn header(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant, show_timer: bool) {
     let theme = ui.theme;
-    let glyph = match (app.is_playing(), ui.motion) {
-        (true, true) => ["◐", "◓", "◑", "◒"][(now.duration_since(ui.started).as_millis() / 300) as usize % 4],
-        (true, false) => "●",
-        (false, _) => "○",
-    };
-    let mut x = put(buf, area.x + 1, area.y, glyph, Style::new().fg(theme.accent));
-    x = put(
-        buf,
-        x + 1,
-        area.y,
-        "chill",
-        Style::new().fg(theme.text()).add_modifier(Modifier::BOLD),
-    );
-    x = put(buf, x + 3, area.y, &app.source_label(), Style::new().fg(theme.muted()));
-    if app.source != Source::Soundscape
-        && let Some(mix) = &app.mix_name
-    {
-        put(buf, x, area.y, &format!(" + {mix}"), Style::new().fg(theme.faint()));
-    }
-
     let minutes: Vec<u32> = app.focus_days.days.iter().map(|(_, minutes)| *minutes).collect();
     let today = widgets::long_minutes(app.focus_days.today());
     let spark = widgets::sparkline(&minutes);
@@ -95,12 +75,12 @@ pub fn header(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant
     }
     ui.hit(rect, Hit::Act(Action::OpenStats));
 
+    let mut right_edge = start;
     if show_timer {
         let timer = &app.timer;
         let remaining = timer.remaining(now).as_secs_f64().ceil() as u64;
         let label = format!("{} {:02}:{:02}", timer.phase().label(), remaining / 60, remaining % 60);
         let timer_x = start.saturating_sub(label.width() as u16 + 4);
-        let rect = Rect::new(timer_x, area.y, label.width() as u16, 1);
         let color = match (timer.is_running(), timer.phase()) {
             (false, _) => theme.muted(),
             (true, Phase::Focus) => theme.accent,
@@ -108,31 +88,69 @@ pub fn header(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant
             (true, Phase::LongBreak) => theme.calm,
         };
         put(buf, timer_x, area.y, &label, Style::new().fg(color));
-        ui.hit(rect, Hit::Act(Action::TimerToggle));
+        ui.hit(
+            Rect::new(timer_x, area.y, label.width() as u16, 1),
+            Hit::Act(Action::TimerToggle),
+        );
+        right_edge = timer_x;
+    }
+
+    let glyph = match (app.is_playing(), ui.motion) {
+        (true, true) => ["◐", "◓", "◑", "◒"][(now.duration_since(ui.started).as_millis() / 300) as usize % 4],
+        (true, false) => "●",
+        (false, _) => "○",
+    };
+    let mut x = put(buf, area.x + 1, area.y, glyph, Style::new().fg(theme.accent));
+    x = put(
+        buf,
+        x + 1,
+        area.y,
+        "chill",
+        Style::new().fg(theme.text()).add_modifier(Modifier::BOLD),
+    );
+    let room = |x: u16| usize::from(right_edge.saturating_sub(x + 2));
+    x = put(
+        buf,
+        x + 3,
+        area.y,
+        &fit(&app.source_label(), room(x + 3)),
+        Style::new().fg(theme.muted()),
+    );
+    if app.source != Source::Soundscape
+        && let Some(mix) = &app.mix_name
+    {
+        put(
+            buf,
+            x,
+            area.y,
+            &fit(&format!(" + {mix}"), room(x)),
+            Style::new().fg(theme.faint()),
+        );
     }
 }
 
 pub fn footer(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
     let theme = ui.theme;
-    let hints: [(&str, &str, Option<Action>); 7] = [
-        (
-            "space",
-            if app.is_playing() { "pause" } else { "play " },
-            Some(Action::TogglePlay),
-        ),
+    let play = if app.is_playing() { "pause" } else { "play " };
+    let mut hints: Vec<(&str, &str, Option<Action>)> = vec![
+        ("space", play, Some(Action::TogglePlay)),
         ("n", "next", Some(Action::Next)),
         ("t", "timer", Some(Action::TimerToggle)),
-        ("o", "open link", Some(Action::OpenPrompt(Prompt::OpenUrl))),
-        ("/", "filter", None),
-        ("^p", "commands", Some(Action::OpenPalette)),
-        ("?", "keys", Some(Action::OpenHelp)),
     ];
-    let mut x = area.x + 1;
-    for (key, label, action) in hints {
+    hints.extend(match ui.focus {
+        Panel::Library => [("enter", "play", None), ("a", "queue", None), ("/", "filter", None)],
+        Panel::Queue => [("enter", "jump", None), ("J/K", "move", None), ("d", "remove", None)],
+        Panel::Ambience => [
+            ("h/l", "level", None),
+            ("0", "mute", None),
+            ("[ ]", "mix", Some(Action::CycleMix(1))),
+        ],
+    });
+    hints.push(("o", "open link", Some(Action::OpenPrompt(Prompt::OpenUrl))));
+    let pinned = [("^p", "commands", Action::OpenPalette), ("?", "keys", Action::OpenHelp)];
+
+    let mut draw = |x: u16, (key, label, action): (&str, &str, Option<Action>), ui: &mut Ui| {
         let width = (key.width() + 1 + label.width()) as u16;
-        if x + width >= area.right() {
-            break;
-        }
         let rect = Rect::new(x, area.y, width, 1);
         let label_color = if action.is_some() && ui.hovered(rect) {
             theme.text()
@@ -144,7 +162,24 @@ pub fn footer(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
         if let Some(action) = action {
             ui.hit(rect, Hit::Act(action));
         }
-        x += width + 3;
+        width
+    };
+    let pinned_width: u16 = pinned
+        .iter()
+        .map(|(key, label, _)| (key.width() + 1 + label.width()) as u16 + 3)
+        .sum();
+    let mut right = area.right().saturating_sub(pinned_width);
+    let limit = right;
+    for (key, label, action) in pinned {
+        right += draw(right, (key, label, Some(action)), ui) + 3;
+    }
+    let mut x = area.x + 1;
+    for hint in hints {
+        let width = (hint.0.width() + 1 + hint.1.width()) as u16;
+        if x + width + 2 >= limit {
+            break;
+        }
+        x += draw(x, hint, ui) + 3;
     }
 }
 
@@ -157,7 +192,13 @@ pub fn library(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instan
         return;
     }
 
-    let mut x = inner.x + 1;
+    let labels: usize = Tab::ALL.iter().map(|tab| tab.label().width()).sum();
+    let gap = if labels + 2 * (Tab::ALL.len() - 1) < usize::from(inner.width) {
+        2
+    } else {
+        1
+    };
+    let mut x = inner.x + if gap == 2 { 1 } else { 0 };
     for tab in Tab::ALL {
         let width = tab.label().width() as u16;
         if x + width > inner.right() {
@@ -182,7 +223,7 @@ pub fn library(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instan
             ui.tab_x.set(f32::from(x), now, duration);
             ui.tab_width.set(f32::from(width), now, duration);
         }
-        x += width + 2;
+        x += width + gap;
     }
     let rule = Rect::new(inner.x, inner.y + 1, inner.width, 1);
     for column in rule.left()..rule.right() {
@@ -233,7 +274,6 @@ pub fn library(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instan
     ui.selected[tab] = ui.selected[tab].min(rows.len() - 1);
     let selected = ui.selected[tab];
     scroll(selected, &mut ui.offsets[tab], usize::from(list.height));
-    let current_key = app.current().map(|item| item.key.clone());
     let focused = ui.focus == Panel::Library;
 
     for (index, row) in rows
@@ -263,7 +303,7 @@ pub fn library(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instan
                 Style::new().fg(if focused { theme.accent } else { theme.faint() }),
             );
         }
-        let is_current = current_key.is_some() && row.like_key == current_key;
+        let is_current = row.current;
 
         let meta_width = row.meta.width() as u16;
         let meta_x = rect.right().saturating_sub(meta_width + 1);
@@ -386,16 +426,14 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
         meta_x,
         meta_y,
         &fit(&title, width),
-        Style::new()
-            .fg(theme.mix(0.3 + 0.7 * shown))
-            .add_modifier(Modifier::BOLD),
+        Style::new().fg(theme.emphasis(shown)).add_modifier(Modifier::BOLD),
     );
     put(
         buf,
         meta_x,
         meta_y + 1,
         &fit(&artist, width),
-        Style::new().fg(theme.mix(0.3 + 0.32 * shown)),
+        Style::new().fg(theme.muted()),
     );
     put(
         buf,
@@ -440,7 +478,11 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
         ui.hit(heart_rect, Hit::Act(Action::ToggleLikeCurrent));
         x += 2;
     }
-    let spin = widgets::spinner(ui.started, now);
+    let spin = if ui.motion {
+        widgets::spinner(ui.started, now)
+    } else {
+        "…"
+    };
     let status: Option<(String, Style)> = match (&item, soundscape) {
         (Some(_), false) if app.stream == Stream::Resolving => {
             Some((format!("{spin} finding the stream"), Style::new().fg(theme.muted())))
@@ -543,7 +585,7 @@ fn controls(buf: &mut Buffer, inner: Rect, y: u16, app: &App, ui: &mut Ui) {
     let theme = ui.theme;
     let repeat_label = match app.queue.repeat {
         Repeat::One => "repeat 1",
-        _ => "repeat",
+        _ => "repeat  ",
     };
     let play = if app.is_playing() { " ❚❚ " } else { "  ▶ " };
     let buttons: [(&str, Action, bool); 5] = [

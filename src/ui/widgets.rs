@@ -227,11 +227,7 @@ pub fn sparkline(values: &[u32]) -> String {
         .iter()
         .map(|value| {
             let level = (*value as f32 / max as f32 * 7.0).round() as usize;
-            if *value == 0 {
-                "▁"
-            } else {
-                EIGHTHS[(level + 1).min(8)]
-            }
+            if *value == 0 { "·" } else { EIGHTHS[(level + 1).min(8)] }
         })
         .collect()
 }

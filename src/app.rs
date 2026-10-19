@@ -57,6 +57,7 @@ pub struct Row {
     pub detail: String,
     pub meta: String,
     pub like_key: Option<String>,
+    pub current: bool,
     pub target: Target,
 }
 
@@ -257,6 +258,7 @@ impl App {
 
     pub fn rows(&self, tab: Tab) -> Vec<Row> {
         let duration = |seconds: Option<u32>| seconds.map(format_clock).unwrap_or_default();
+        let playing = self.current().map(|item| item.key.as_str());
         let rows: Vec<Row> = match tab {
             Tab::Tracks => self
                 .catalog
@@ -267,6 +269,7 @@ impl App {
                     title: track.title.clone(),
                     detail: track.artist.clone(),
                     meta: duration(Some(track.duration_sec)),
+                    current: playing.and_then(|key| key.strip_prefix("r2:")) == Some(&track.id),
                     like_key: Some(format!("r2:{}", track.id)),
                     target: Target::Track(index),
                 })
@@ -283,6 +286,7 @@ impl App {
                     } else {
                         duration(item.duration)
                     },
+                    current: playing == Some(&item.key),
                     like_key: Some(item.key.clone()),
                     target: Target::Liked(index),
                 })
@@ -299,6 +303,7 @@ impl App {
                         "video" => duration(saved.items.first().and_then(|item| item.duration)),
                         other => other.into(),
                     },
+                    current: matches!(&self.source, Source::Saved { id } if id == &saved.id),
                     like_key: (saved.items.len() == 1).then(|| saved.items[0].key.clone()),
                     target: Target::Saved(index),
                 })
@@ -320,6 +325,7 @@ impl App {
                     } else {
                         String::new()
                     },
+                    current: !self.levels.is_empty() && self.mix_name.as_ref() == Some(&mix.name),
                     like_key: None,
                     target: Target::Mix(index),
                 })
@@ -332,6 +338,7 @@ impl App {
                     title: scene.name.clone(),
                     detail: self.describe_scene(scene),
                     meta: scene.timer.label(),
+                    current: false,
                     like_key: None,
                     target: Target::Scene(index),
                 })
@@ -543,13 +550,9 @@ impl App {
             Action::SetVolume(volume) => self.set_volume(volume),
             Action::ToggleShuffle => {
                 self.queue.set_shuffle(!self.queue.shuffle);
-                let state = if self.queue.shuffle { "on" } else { "off" };
-                self.toast(Tone::Info, format!("Shuffle {state}"));
             }
             Action::CycleRepeat => {
                 self.queue.repeat = self.queue.repeat.cycled();
-                let label = format!("Repeat {:?}", self.queue.repeat).to_lowercase();
-                self.toast(Tone::Info, label);
             }
             Action::ToggleLikeCurrent => {
                 if let Some(item) = self.current().cloned() {
