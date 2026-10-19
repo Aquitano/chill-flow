@@ -43,9 +43,11 @@ impl Media {
         #[cfg(not(windows))]
         let hwnd = None;
 
+        // MPRIS names must be unique, and a second instance would otherwise fail to register.
+        let dbus_name = format!("chill.instance{}", std::process::id());
         let config = PlatformConfig {
             display_name: "chill",
-            dbus_name: "chill",
+            dbus_name: &dbus_name,
             hwnd,
         };
         let controls = MediaControls::new(config).ok().and_then(|mut controls| {

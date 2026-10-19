@@ -11,7 +11,7 @@ mod timer;
 mod ui;
 mod youtube;
 
-use std::io::stdout;
+use std::io::{Write, stdout};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -41,14 +41,25 @@ fn main() -> Result<()> {
     media::run_app(move || {
         let theme = ui::theme::Theme::detect();
         let engine = audio::Engine::start(paths.cache.clone());
+        let crash_log = paths.cache.join("crash.log");
         let mut app = App::new(config, paths.cache, store, engine);
 
         let mut terminal = ratatui::init();
         let _ = execute!(stdout(), EnableMouseCapture, EnableBracketedPaste);
+        let ui_thread = std::thread::current().id();
         let previous_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
-            let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
-            previous_hook(info);
+            if std::thread::current().id() == ui_thread {
+                let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
+                previous_hook(info);
+                return;
+            }
+            // A worker thread dying must not tear down the UI or print across it.
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&crash_log)
+                .and_then(|mut log| writeln!(log, "{info}"));
         }));
 
         // An unanswered capability query leaves ratatui-image's reader blocked on stdin, where it
