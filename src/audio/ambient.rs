@@ -2,7 +2,7 @@ use std::f32::consts::FRAC_PI_2;
 use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{Output, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
@@ -52,14 +52,8 @@ pub(super) fn spawn_load(request: LoadRequest, loaded: Sender<LoadedLoop>, event
 
 fn load(url: &str, cache_dir: &Path, rate: u32) -> Result<Box<[i16]>, String> {
     let path = cached_file(url, cache_dir)?;
-    let looped = decode(&path, rate).and_then(|mut samples| {
-        trim_quiet_ends(&mut samples, (QUIET_WINDOW_SECS * rate as f32) as usize);
-        close_loop(&mut samples, (SEAM_SECS * rate as f32) as usize);
-        if samples.len() < 2 {
-            return Err(format!("{} contains no audio", path.display()));
-        }
-        Ok(samples.into_boxed_slice())
-    });
+    let output = decode(&path, rate).map_err(ffmpeg::spawn_error)?;
+    let looped = into_loop(&path, &output, rate);
     if looped.is_err() {
         // A damaged download would fail the same way every time, so the next try fetches it again.
         let _ = fs::remove_file(&path);
@@ -106,15 +100,17 @@ fn cache_name(url: &str) -> Option<String> {
     Some(format!("{:x}", Sha256::digest(resource.as_bytes())))
 }
 
-fn decode(path: &Path, rate: u32) -> Result<Vec<i16>, String> {
-    let output = ffmpeg::command()
+fn decode(path: &Path, rate: u32) -> io::Result<Output> {
+    ffmpeg::command()
         .arg("-i")
         .arg(path)
         .args(["-vn", "-f", "s16le", "-ac", "2", "-ar", &rate.to_string(), "pipe:1"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .map_err(ffmpeg::spawn_error)?;
+}
+
+fn into_loop(path: &Path, output: &Output, rate: u32) -> Result<Box<[i16]>, String> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(
@@ -122,10 +118,16 @@ fn decode(path: &Path, rate: u32) -> Result<Vec<i16>, String> {
         );
     }
     let (frames, _) = output.stdout.as_chunks::<4>();
-    Ok(frames
+    let mut samples: Vec<i16> = frames
         .iter()
         .flat_map(|&[a, b, c, d]| [i16::from_le_bytes([a, b]), i16::from_le_bytes([c, d])])
-        .collect())
+        .collect();
+    trim_quiet_ends(&mut samples, (QUIET_WINDOW_SECS * rate as f32) as usize);
+    close_loop(&mut samples, (SEAM_SECS * rate as f32) as usize);
+    if samples.len() < 2 {
+        return Err(format!("{} contains no audio", path.display()));
+    }
+    Ok(samples.into_boxed_slice())
 }
 
 /// Cuts encoder padding and baked-in fades (windows 20 dB below the loop's mean power) off
