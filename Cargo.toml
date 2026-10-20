@@ -6,7 +6,7 @@ description = "Lo-fi, ambience, and a focus timer in your terminal"
 repository = "https://github.com/Aquitano/chill-flow"
 
 [workspace]
-members = ["crates/catalog-schema"]
+members = ["crates/catalog-schema", "tools/catalog"]
 
 [workspace.dependencies]
 anyhow = "1.0.104"
