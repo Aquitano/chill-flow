@@ -95,6 +95,7 @@ fn main() -> Result<ExitCode> {
         let theme = ui::theme::Theme::detect();
         let engine = audio::Engine::start(paths.cache.clone());
         let crash_log = paths.cache.join("crash.log");
+        let cache = paths.cache.clone();
         let mut app = App::new(config, paths, store, engine);
 
         let mut terminal = ratatui::init();
@@ -124,7 +125,7 @@ fn main() -> Result<ExitCode> {
         };
         let mut ui = Ui::new(theme, picker, app.config.reduce_motion);
         let jobs = app.jobs.clone();
-        let mut media = Media::new(move |command| {
+        let mut media = Media::new(&cache, move |command| {
             let _ = jobs.send(Job::Media(command));
         });
         if let Some(target) = cli.target {

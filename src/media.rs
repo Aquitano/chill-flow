@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::time::Duration;
 
 use souvlaki::{
@@ -65,12 +66,14 @@ pub struct Media {
     controls: Option<MediaControls>,
     #[cfg(windows)]
     window: windows_window::HiddenWindow,
+    /// Shown for an item without a cover, where a platform otherwise keeps the previous one.
+    no_cover: Option<String>,
     shown_metadata: MetadataCache,
     shown_playback: Option<(bool, u64)>,
 }
 
 impl Media {
-    pub fn new(on_command: impl Fn(MediaCommand) + Send + 'static) -> Media {
+    pub fn new(cache_dir: &Path, on_command: impl Fn(MediaCommand) + Send + 'static) -> Media {
         #[cfg(windows)]
         let window = windows_window::HiddenWindow::create();
         #[cfg(windows)]
@@ -99,6 +102,7 @@ impl Media {
             controls,
             #[cfg(windows)]
             window,
+            no_cover: blank_cover(cache_dir),
             shown_metadata: MetadataCache::default(),
             shown_playback: None,
         }
@@ -116,13 +120,20 @@ impl Media {
     fn update(&mut self, now: Option<NowPlaying>, playing: bool, position: f64) {
         let Some(controls) = self.controls.as_mut() else { return };
         if self.shown_metadata.update(now.as_ref()) {
-            let metadata = now.as_ref().map_or_else(MediaMetadata::default, |now| MediaMetadata {
-                title: Some(now.title),
-                artist: Some(now.artist),
-                album: Some(now.album),
-                cover_url: now.cover,
-                duration: now.duration.map(|seconds| Duration::from_secs(u64::from(seconds))),
-            });
+            let no_cover = self.no_cover.as_deref();
+            let metadata = now.as_ref().map_or(
+                MediaMetadata {
+                    cover_url: no_cover,
+                    ..MediaMetadata::default()
+                },
+                |now| MediaMetadata {
+                    title: Some(now.title),
+                    artist: Some(now.artist),
+                    album: Some(now.album),
+                    cover_url: now.cover.or(no_cover),
+                    duration: now.duration.map(|seconds| Duration::from_secs(u64::from(seconds))),
+                },
+            );
             let _ = controls.set_metadata(metadata);
             self.shown_playback = None;
         }
@@ -144,6 +155,21 @@ impl Media {
         #[cfg(windows)]
         self.window.pump();
     }
+}
+
+/// SMTC only replaces the thumbnail when given one, so an item without a cover gets a blank image.
+#[cfg(windows)]
+fn blank_cover(cache_dir: &Path) -> Option<String> {
+    let path = cache_dir.join("no-cover.png");
+    if !path.is_file() {
+        image::RgbaImage::new(1, 1).save(&path).ok()?;
+    }
+    Some(format!("file://{}", path.display()))
+}
+
+#[cfg(not(windows))]
+fn blank_cover(_cache_dir: &Path) -> Option<String> {
+    None
 }
 
 fn translate(event: MediaControlEvent) -> Option<MediaCommand> {
