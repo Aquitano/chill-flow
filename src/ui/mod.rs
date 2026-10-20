@@ -330,8 +330,7 @@ impl Ui {
         let wide = body.width >= 118 && body.height >= 22;
         let medium = !wide && body.width >= 84;
         let split = medium && body.width >= 104;
-        let timer_drawn = wide || split || (medium && self.focus == Panel::Library);
-        panels::header(buf, header, app, self, now, !timer_drawn);
+        let mut clock_shown = false;
         if wide {
             let library_width = (body.width * 30 / 100).clamp(34, 50);
             let [library, center, side] = Layout::horizontal([
@@ -348,7 +347,7 @@ impl Ui {
             panels::library(buf, library, app, self, now);
             panels::player(buf, player, app, self, now, elapsed);
             panels::queue(buf, queue, app, self);
-            panels::focus(buf, focus, app, self, now);
+            clock_shown = panels::focus(buf, focus, app, self, now);
             panels::ambience(buf, ambience, app, self, now);
         } else if medium {
             let [library, center] = Layout::horizontal([Constraint::Length(36), Constraint::Fill(1)])
@@ -361,14 +360,14 @@ impl Ui {
                 let [focus, side] = Layout::horizontal([Constraint::Length(40), Constraint::Fill(1)])
                     .spacing(1)
                     .areas(bottom);
-                panels::focus(buf, focus, app, self, now);
+                clock_shown = panels::focus(buf, focus, app, self, now);
                 match self.focus {
                     Panel::Queue => panels::queue(buf, side, app, self),
                     _ => panels::ambience(buf, side, app, self, now),
                 }
             } else {
                 match self.focus {
-                    Panel::Library => panels::focus(buf, bottom, app, self, now),
+                    Panel::Library => clock_shown = panels::focus(buf, bottom, app, self, now),
                     Panel::Queue => panels::queue(buf, bottom, app, self),
                     Panel::Ambience => panels::ambience(buf, bottom, app, self, now),
                 }
@@ -384,6 +383,7 @@ impl Ui {
                 Panel::Ambience => panels::ambience(buf, bottom, app, self, now),
             }
         }
+        panels::header(buf, header, app, self, now, !clock_shown);
 
         overlay::toasts(buf, footer, self, now);
 

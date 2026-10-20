@@ -72,9 +72,13 @@ pub enum Target {
     Scene(usize),
 }
 
+/// One unpaused stretch of a focus phase. Each stretch gets its own row, so focus resumed after
+/// midnight counts toward the new day.
 struct FocusBlock {
     id: i64,
     saved_at: Instant,
+    /// How much of the phase earlier stretches already recorded.
+    before: Duration,
 }
 
 pub struct App {
@@ -190,8 +194,9 @@ impl App {
         app.set_balance(session.balance);
         app.apply_levels(&session.levels);
         app.mix_name = app.matching_mix_name();
-        app.fill_queue(&session.source, session.item_key.as_deref());
-        if app.queue.current().map(|item| item.key.as_str()) != session.item_key.as_deref() {
+        let key = session.item.as_ref().map(|item| item.key.clone());
+        app.restore_queue(&session.source, session.item);
+        if app.queue.current().map(|item| &item.key) != key.as_ref() {
             app.resume_at = None;
         }
         app.fetch_catalog();
@@ -460,27 +465,46 @@ impl App {
         }
     }
 
-    /// Likes keep the whole item, so catalog tracks are rebuilt from the current catalog in case
-    /// their files moved.
+    /// Stored items are kept whole, so catalog tracks are rebuilt from the current catalog in case
+    /// their files moved. `None` means the catalog no longer has the track.
+    fn refreshed(&self, item: Item) -> Option<Item> {
+        let Some(id) = item.key.strip_prefix("r2:") else {
+            return Some(item);
+        };
+        let track = self.catalog.tracks.iter().find(|track| track.id == id)?;
+        Some(Item::from_track(&self.catalog, track))
+    }
+
     fn load_likes(&mut self) {
         let likes = self.store.likes().unwrap_or_default();
         self.likes = likes
             .into_iter()
-            .map(|item| {
-                let track = (item.key.strip_prefix("r2:"))
-                    .and_then(|id| self.catalog.tracks.iter().find(|track| track.id == id));
-                match track {
-                    Some(track) => Item::from_track(&self.catalog, track),
-                    None => item,
-                }
-            })
+            .map(|item| self.refreshed(item.clone()).unwrap_or(item))
             .collect();
     }
 
     fn fill_queue(&mut self, source: &Source, start_key: Option<&str>) {
+        let items = self.items_for(source);
+        self.set_queue(source, items, start_key);
+    }
+
+    /// Keeps `current` first even when `source` doesn't hold it, like a YouTube video queued onto
+    /// the catalog tracks.
+    fn restore_queue(&mut self, source: &Source, current: Option<Item>) {
+        let mut items = self.items_for(source);
+        let current = current.and_then(|item| self.refreshed(item));
+        let key = current.as_ref().map(|item| item.key.clone());
+        if let Some(item) = current
+            && !items.iter().any(|other| other.key == item.key)
+        {
+            items.insert(0, item);
+        }
+        self.set_queue(source, items, key.as_deref());
+    }
+
+    fn set_queue(&mut self, source: &Source, items: Vec<Item>, start_key: Option<&str>) {
         self.source = source.clone();
         self.refresh_ambience();
-        let items = self.items_for(source);
         self.queue.replace(items, start_key);
         self.events.push(Event::TrackChanged);
         self.load_cover();
@@ -599,6 +623,7 @@ impl App {
         } else {
             self.timer.pause(now);
             self.save_focus_block(now);
+            self.focus_block = None;
         }
     }
 
@@ -798,7 +823,12 @@ impl App {
     }
 
     fn set_level(&mut self, id: &str, level: u8) {
-        let Some(sound) = self.catalog.sound(id) else { return };
+        let Some(sound) = self.catalog.sound(id) else {
+            // A fresh catalog dropped this sound while it played.
+            self.engine.stop_ambient(id);
+            self.levels.remove(id);
+            return;
+        };
         let level = level.min(100);
         let url = self.catalog.url(&sound.file);
         let gain = sound.gain_percent as f32 / 100.0;
@@ -1026,6 +1056,7 @@ impl App {
 
     pub fn open_url(&mut self, url: &str) {
         self.toast(Tone::Info, LOOKING_UP);
+        self.choices += 1;
         let (jobs, url, choices) = (self.jobs.clone(), url.to_string(), self.choices);
         std::thread::spawn(move || {
             let result = youtube::inspect(&url);
@@ -1055,10 +1086,16 @@ impl App {
         if self.timer.phase() != Phase::Focus || !self.timer.is_running() || self.focus_block.is_some() {
             return;
         }
-        let started = Timestamp::now() - jiff::SignedDuration::try_from(self.timer.elapsed(now)).unwrap_or_default();
         let planned = self.timer.phase_length().as_secs();
-        match self.store.begin_focus_block(started, planned) {
-            Ok(id) => self.focus_block = Some(FocusBlock { id, saved_at: now }),
+        match self.store.begin_focus_block(Timestamp::now(), planned) {
+            Ok(id) => {
+                let before = self.timer.elapsed(now);
+                self.focus_block = Some(FocusBlock {
+                    id,
+                    saved_at: now,
+                    before,
+                });
+            }
             Err(error) => self.toast(Tone::Error, format!("Could not record focus time: {error}")),
         }
     }
@@ -1069,7 +1106,7 @@ impl App {
         }
         let Some(block) = self.focus_block.as_mut() else { return };
         block.saved_at = now;
-        let (id, focused) = (block.id, self.timer.elapsed(now).as_secs());
+        let (id, focused) = (block.id, self.timer.elapsed(now).saturating_sub(block.before).as_secs());
         if let Err(error) = self.store.update_focus_block(id, focused, false) {
             self.toast(Tone::Error, format!("Could not record focus time: {error}"));
         }
@@ -1084,10 +1121,11 @@ impl App {
 
     fn on_phase_ended(&mut self, ended: PhaseEnded, natural: bool) {
         if ended.ended == Phase::Focus && natural {
-            if let Some(block) = self.focus_block.take()
-                && let Err(error) = self.store.update_focus_block(block.id, ended.length.as_secs(), true)
-            {
-                self.toast(Tone::Error, format!("Could not record focus time: {error}"));
+            if let Some(block) = self.focus_block.take() {
+                let focused = ended.length.saturating_sub(block.before).as_secs();
+                if let Err(error) = self.store.update_focus_block(block.id, focused, true) {
+                    self.toast(Tone::Error, format!("Could not record focus time: {error}"));
+                }
             }
             self.refresh_stats();
         }
@@ -1174,7 +1212,7 @@ impl App {
     pub fn session(&self) -> Session {
         Session {
             source: self.source.clone(),
-            item_key: self.queue.current().map(|item| item.key.clone()),
+            item: self.queue.current().cloned(),
             position: if self.current().is_some_and(Item::is_live) {
                 0.0
             } else {
@@ -1319,13 +1357,15 @@ impl App {
                 self.catalog = catalog;
                 self.refresh_mixes();
                 self.load_likes();
+                self.refresh_ambience();
                 // Refilling reshuffles and drops anything queued, so only do it when the tracks changed.
                 if self.source == Source::Tracks
                     && self.stream == Stream::Idle
                     && self.items_for(&Source::Tracks) != tracks
                 {
-                    let key = self.queue.current().map(|item| item.key.clone());
-                    self.fill_queue(&Source::Tracks, key.as_deref());
+                    let current = self.queue.current().cloned();
+                    let key = current.as_ref().map(|item| item.key.clone());
+                    self.restore_queue(&Source::Tracks, current);
                     if self.queue.current().map(|item| &item.key) != key.as_ref() {
                         self.resume_at = None;
                     }

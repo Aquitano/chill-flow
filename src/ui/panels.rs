@@ -751,13 +751,14 @@ pub fn queue(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
     }
 }
 
-pub fn focus(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant) {
+/// Returns whether the clock fit, since the header shows the timer when it didn't.
+pub fn focus(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant) -> bool {
     let theme = ui.theme;
     let timer = &app.timer;
     let glow = ui.glow.value(now).max(if timer.is_running() { 0.25 } else { 0.0 });
     let inner = panel(buf, area, "Focus", glow, ui);
     if inner.height < 8 || inner.width < 34 {
-        return;
+        return false;
     }
     let phase_color = match timer.phase() {
         Phase::Focus => theme.accent,
@@ -845,6 +846,7 @@ pub fn focus(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant)
         ui.hit(rect, Hit::Act(Action::SetTimerMode(mode)));
         x += rect.width + 3;
     }
+    true
 }
 
 pub fn ambience(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant) {

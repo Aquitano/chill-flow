@@ -124,7 +124,7 @@ fn even() -> f32 {
 #[serde(default)]
 pub struct Session {
     pub source: Source,
-    pub item_key: Option<String>,
+    pub item: Option<Item>,
     pub position: f64,
     pub volume: f32,
     pub balance: f32,
@@ -138,7 +138,7 @@ impl Default for Session {
     fn default() -> Self {
         Session {
             source: Source::Tracks,
-            item_key: None,
+            item: None,
             position: 0.0,
             volume: 0.7,
             balance: EVEN,

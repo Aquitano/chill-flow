@@ -143,14 +143,14 @@ impl Engine {
 
     pub fn set_ambient(&mut self, id: &str, url: &str, level: f32, gain: f32) {
         let target = perceptual(level) * gain.max(0.0);
-        if let Some(slot) = self.ambient.get(id) {
-            if slot.url == url && slot.level.set(target) {
-                return;
-            }
-            slot.level.set(0.0);
+        if let Some(slot) = self.ambient.get(id)
+            && slot.url == url
+            && slot.level.set(target)
+        {
+            return;
         }
+        self.stop_ambient(id);
         if target <= 0.0 {
-            self.ambient.remove(id);
             return;
         }
         let level = Arc::new(LaneLevel::new(target));
@@ -167,6 +167,12 @@ impl Engine {
             level,
         };
         self.ambient.insert(id.to_owned(), slot);
+    }
+
+    pub fn stop_ambient(&mut self, id: &str) {
+        if let Some(slot) = self.ambient.remove(id) {
+            slot.level.set(0.0);
+        }
     }
 
     pub fn chime(&mut self) {

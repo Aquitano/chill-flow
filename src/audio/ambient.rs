@@ -58,9 +58,9 @@ fn load(url: &str, cache_dir: &Path, rate: u32) -> Result<Box<[i16]>, String> {
 }
 
 fn cached_file(url: &str, cache_dir: &Path) -> Result<PathBuf, String> {
-    let name = file_name(url).ok_or_else(|| format!("no file name in {url}"))?;
+    let name = cache_name(url).ok_or_else(|| format!("no file name in {url}"))?;
     let dir = cache_dir.join("ambient");
-    let path = dir.join(name);
+    let path = dir.join(&name);
     if path.is_file() {
         return Ok(path);
     }
@@ -77,15 +77,16 @@ fn cached_file(url: &str, cache_dir: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn file_name(url: &str) -> Option<&str> {
+/// Named after the whole URL, so two catalogs that both have a `rain.mp3` don't share a download.
+fn cache_name(url: &str) -> Option<String> {
     let path = url.split(['?', '#']).next()?;
-    let name = path.rsplit('/').next()?;
-    let safe = !name.is_empty()
-        && !name.starts_with('.')
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'));
-    safe.then_some(name)
+    let path = path.split_once("://").map_or(path, |(_, rest)| rest);
+    let last = path.rsplit('/').next()?;
+    if last.is_empty() || last.starts_with('.') {
+        return None;
+    }
+    let safe = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_');
+    Some(path.chars().map(|c| if safe(c) { c } else { '_' }).collect())
 }
 
 fn decode(path: &Path, rate: u32) -> Result<Vec<i16>, String> {
@@ -189,12 +190,16 @@ mod tests {
     }
 
     #[test]
-    fn cache_names_come_from_the_last_url_segment() {
+    fn cache_names_cover_the_whole_url() {
         assert_eq!(
-            file_name("https://x.dev/a/ambient-rain-soft.mp3?v=2"),
-            Some("ambient-rain-soft.mp3")
+            cache_name("https://x.dev/a/ambient-rain-soft.mp3?v=2").as_deref(),
+            Some("x.dev_a_ambient-rain-soft.mp3")
         );
-        assert_eq!(file_name("https://x.dev/a/.."), None);
-        assert_eq!(file_name("https://x.dev/"), None);
+        assert_ne!(
+            cache_name("https://x.dev/rain/light.mp3"),
+            cache_name("https://x.dev/wind/light.mp3")
+        );
+        assert_eq!(cache_name("https://x.dev/a/.."), None);
+        assert_eq!(cache_name("https://x.dev/"), None);
     }
 }
