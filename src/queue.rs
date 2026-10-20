@@ -1,4 +1,4 @@
-use crate::model::{Item, Repeat};
+use crate::model::{Item, Playable, Repeat};
 
 #[derive(Debug, Clone)]
 struct Entry {
@@ -45,6 +45,17 @@ impl Queue {
 
     pub fn current(&self) -> Option<&Item> {
         self.entries.get(self.cursor).map(|entry| &entry.item)
+    }
+
+    pub fn set_current_live(&mut self, live: bool) {
+        if let Some(entry) = self.entries.get_mut(self.cursor)
+            && let Playable::YouTube { live: current, .. } = &mut entry.item.play
+        {
+            *current = live;
+            if live {
+                entry.item.duration = None;
+            }
+        }
     }
 
     pub fn upcoming(&self) -> impl Iterator<Item = &Item> {
@@ -204,5 +215,28 @@ mod tests {
         assert_eq!(queue.previous().unwrap().key, "b");
         assert_eq!(queue.previous().unwrap().key, "a");
         assert_eq!(queue.previous().unwrap().key, "a");
+    }
+
+    #[test]
+    fn resolved_live_status_replaces_the_saved_playback_metadata() {
+        let mut queued = items(&["file", "upcoming"]);
+        queued[1].duration = Some(60);
+        queued[1].play = Playable::YouTube {
+            url: "https://youtu.be/upcoming".into(),
+            live: false,
+        };
+        let mut queue = Queue::default();
+        queue.replace(queued, None);
+        queue.next();
+
+        queue.set_current_live(true);
+        assert!(queue.current().unwrap().is_live());
+        assert_eq!(queue.current().unwrap().duration, None);
+
+        queue.set_current_live(false);
+        assert!(!queue.current().unwrap().is_live());
+        queue.previous();
+        queue.set_current_live(true);
+        assert!(!queue.current().unwrap().is_live());
     }
 }

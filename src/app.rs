@@ -1493,6 +1493,7 @@ impl App {
                 self.resolution = None;
                 match result {
                     Ok(mut input) => {
+                        self.queue.set_current_live(input.live);
                         if let Some(at) = self.resume_at.take()
                             && !input.live
                         {
