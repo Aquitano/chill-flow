@@ -12,7 +12,7 @@ use crate::audio::{Engine, EngineEvent, StreamInput};
 use crate::catalog::{Catalog, Levels, Mix};
 use crate::config::{self, Config, Paths};
 use crate::media::{MediaCommand, NowPlaying};
-use crate::model::{self, Item, Playable, Saved, Scene, Session, Source};
+use crate::model::{self, Item, Playable, Playback, Saved, Scene, Session, Source};
 use crate::queue::Queue;
 use crate::store::{FocusDays, Store};
 use crate::timer::{Phase, PhaseEnded, Timer, TimerMode};
@@ -203,7 +203,7 @@ impl App {
             catalog,
             engine,
             queue: Queue::new(session.shuffle, session.repeat),
-            source: session.source.clone(),
+            source: session.playback.source.clone(),
             levels: Levels::new(),
             mix_name: None,
             volume: session.volume.clamp(0.0, 1.0),
@@ -240,11 +240,7 @@ impl App {
         app.set_balance(session.balance);
         app.apply_levels(&session.levels);
         app.mix_name = app.matching_mix_name();
-        let key = session.item.as_ref().map(|item| item.key.clone());
-        app.restore_queue(&session.source, session.item);
-        if app.queue.current().map(|item| &item.key) != key.as_ref() {
-            app.resume_at = None;
-        }
+        app.restore_playback(&session.playback);
         app.fetch_catalog();
         app
     }
@@ -483,7 +479,7 @@ impl App {
     }
 
     fn describe_scene(&self, scene: &Scene) -> String {
-        let source = self.source_name(&scene.source);
+        let source = self.source_name(&scene.playback.source);
         let sounds = self.sound_labels(&scene.levels);
         if sounds.is_empty() {
             source
@@ -500,7 +496,12 @@ impl App {
                 .iter()
                 .map(|track| Item::from_track(&self.catalog, track))
                 .collect(),
-            Source::Liked => self.likes.clone(),
+            Source::Liked => self
+                .likes
+                .iter()
+                .cloned()
+                .filter_map(|item| item.refreshed(&self.catalog))
+                .collect(),
             Source::Saved { id } => self
                 .saved
                 .iter()
@@ -511,21 +512,11 @@ impl App {
         }
     }
 
-    /// Stored items are kept whole, so catalog tracks are rebuilt from the current catalog in case
-    /// their files moved. `None` means the catalog no longer has the track.
-    fn refreshed(&self, item: Item) -> Option<Item> {
-        let Some(id) = item.key.strip_prefix("r2:") else {
-            return Some(item);
-        };
-        let track = self.catalog.tracks.iter().find(|track| track.id == id)?;
-        Some(Item::from_track(&self.catalog, track))
-    }
-
     fn load_likes(&mut self) {
         let likes = self.store.likes().unwrap_or_default();
         self.likes = likes
             .into_iter()
-            .map(|item| self.refreshed(item.clone()).unwrap_or(item))
+            .map(|item| item.clone().refreshed(&self.catalog).unwrap_or(item))
             .collect();
     }
 
@@ -534,18 +525,62 @@ impl App {
         self.set_queue(source, items, start_key);
     }
 
-    /// Keeps `current` first even when `source` doesn't hold it, like a YouTube video queued onto
-    /// the catalog tracks.
-    fn restore_queue(&mut self, source: &Source, current: Option<Item>) {
-        let mut items = self.items_for(source);
-        let current = current.and_then(|item| self.refreshed(item));
+    fn restore_playback(&mut self, playback: &Playback) {
+        let mut items = self.items_for(&playback.source);
+        let current = playback.item.clone().or_else(|| {
+            let key = playback.key()?;
+            if let Some(id) = key.strip_prefix("r2:") {
+                return self
+                    .catalog
+                    .tracks
+                    .iter()
+                    .find(|track| track.id == id)
+                    .map(|track| Item::from_track(&self.catalog, track));
+            }
+            items
+                .iter()
+                .chain(&self.likes)
+                .chain(self.saved.iter().flat_map(|saved| &saved.items))
+                .find(|item| item.key == key)
+                .cloned()
+        });
+        let current = current
+            .filter(|_| playback.source != Source::Soundscape)
+            .and_then(|item| item.refreshed(&self.catalog));
         let key = current.as_ref().map(|item| item.key.clone());
         if let Some(item) = current
             && !items.iter().any(|other| other.key == item.key)
         {
             items.insert(0, item);
         }
-        self.set_queue(source, items, key.as_deref());
+        self.set_queue(&playback.source, items, key.as_deref());
+        if self.current().map(|item| item.key.as_str()) != playback.key() {
+            self.resume_at = None;
+        }
+    }
+
+    fn reconcile_queue(&mut self, previous_source: &[Item]) {
+        let previous = self.current().cloned();
+        let position = self.position();
+        let next_source = self.items_for(&self.source);
+        let catalog = &self.catalog;
+        let changed = self
+            .queue
+            .reconcile(previous_source, next_source, |item| item.refreshed(catalog));
+        let current = self.current().cloned();
+        if changed {
+            self.resume_at = None;
+        }
+        let input_changed = previous.as_ref().map(|item| &item.play) != current.as_ref().map(|item| &item.play);
+        if self.stream != Stream::Idle && (changed || input_changed) {
+            match current {
+                Some(item) => self.start(item, if changed { 0.0 } else { position }),
+                None => self.music_ended(),
+            }
+        } else if current != previous {
+            self.events.push(Event::TrackChanged);
+            self.load_cover();
+        }
     }
 
     fn set_queue(&mut self, source: &Source, items: Vec<Item>, start_key: Option<&str>) {
@@ -557,8 +592,12 @@ impl App {
     }
 
     fn play_source(&mut self, source: Source, start_key: Option<&str>) {
-        self.choices += 1;
         self.fill_queue(&source, start_key);
+        self.play_queue();
+    }
+
+    fn play_queue(&mut self) {
+        self.choices += 1;
         self.resume_at = None;
         self.failures_in_a_row = 0;
         match self.queue.current().cloned() {
@@ -941,17 +980,23 @@ impl App {
         self.apply_levels(&scene.levels);
         self.mix_name = self.matching_mix_name();
         self.timer_follows_play = true;
-        if scene.source == Source::Soundscape {
+        if scene.playback.source == Source::Soundscape {
             self.enter_soundscape();
-        } else if self.items_for(&scene.source).is_empty() {
-            self.enter_soundscape();
-            self.toast(
-                Tone::Error,
-                format!("The music in \"{}\" is gone, playing its ambience only", scene.name),
-            );
-            return;
         } else {
-            self.play_source(scene.source, scene.item_key.as_deref());
+            let source_missing = matches!(&scene.playback.source, Source::Saved { id }
+                if !self.saved.iter().any(|saved| &saved.id == id));
+            if !source_missing {
+                self.restore_playback(&scene.playback);
+            }
+            if source_missing || self.current().is_none() {
+                self.enter_soundscape();
+                self.toast(
+                    Tone::Error,
+                    format!("The music in \"{}\" is gone, playing its ambience only", scene.name),
+                );
+                return;
+            }
+            self.play_queue();
         }
         self.toast(Tone::Done, format!("Scene \"{}\"", scene.name));
     }
@@ -999,8 +1044,9 @@ impl App {
                 self.play_source(Source::Tracks, key.as_deref());
             }
             Target::Liked(i) => {
-                let key = self.likes.get(i).map(|item| item.key.clone());
-                self.play_source(Source::Liked, key.as_deref());
+                if let Some(item) = self.playable_like(i) {
+                    self.play_source(Source::Liked, Some(&item.key));
+                }
             }
             Target::Saved(i) => {
                 if let Some(saved) = self.saved.get(i) {
@@ -1014,6 +1060,16 @@ impl App {
         }
     }
 
+    /// A like the catalog dropped stays listed so it can be removed, but has nothing to play.
+    fn playable_like(&mut self, index: usize) -> Option<Item> {
+        let like = self.likes.get(index)?.clone();
+        let playable = like.clone().refreshed(&self.catalog);
+        if playable.is_none() {
+            self.toast(Tone::Error, format!("\"{}\" is no longer in the catalog", like.title));
+        }
+        playable
+    }
+
     fn enqueue(&mut self, index: usize) {
         let Some(row) = self.row(index) else {
             return;
@@ -1022,7 +1078,8 @@ impl App {
             Target::Saved(i) => self.saved.get(i).map(|saved| saved.items.clone()).unwrap_or_default(),
             Target::Mix(i) => return self.apply_mix(i),
             Target::Scene(_) => return,
-            _ => self.row_item(index).into_iter().collect(),
+            Target::Liked(i) => self.playable_like(i).into_iter().collect(),
+            Target::Track(_) => self.row_item(index).into_iter().collect(),
         };
         if self.source == Source::Soundscape {
             return self.activate(index);
@@ -1087,8 +1144,7 @@ impl App {
             Prompt::SaveScene => {
                 let scene = Scene {
                     name: text.to_string(),
-                    source: self.source.clone(),
-                    item_key: self.current().map(|item| item.key.clone()),
+                    playback: self.playback(),
                     levels: self.levels.clone(),
                     timer: self.timer.mode(),
                     balance: self.balance,
@@ -1168,6 +1224,8 @@ impl App {
         let Some(previous) = self.saved.iter().find(|saved| saved.id == id) else {
             return;
         };
+        let previous_items =
+            matches!(&self.source, Source::Saved { id: active } if active == id).then(|| previous.items.clone());
         let saved = match result {
             Ok(saved) if saved.id == id => saved,
             Ok(_) => return self.toast(Tone::Error, "Could not refresh the playlist: its identity changed"),
@@ -1182,6 +1240,9 @@ impl App {
             return self.toast(Tone::Error, format!("Could not save the refreshed playlist: {error}"));
         }
         self.reload_library();
+        if let Some(previous) = previous_items {
+            self.reconcile_queue(&previous);
+        }
         self.toast(
             Tone::Done,
             format!("Refreshed \"{}\" · {} tracks", saved.title, saved.items.len()),
@@ -1190,6 +1251,9 @@ impl App {
 
     fn inspected(&mut self, url: &str, choices: u64, result: Result<Saved>) {
         let saved = match result {
+            Ok(saved) if saved.items.is_empty() => {
+                return self.toast(Tone::Error, "That playlist has no playable videos");
+            }
             Ok(saved) => saved,
             Err(error) => return self.toast(Tone::Error, format!("Could not open that link. {error}")),
         };
@@ -1335,8 +1399,7 @@ impl App {
 
     pub fn session(&self) -> Session {
         Session {
-            source: self.source.clone(),
-            item: self.queue.current().cloned(),
+            playback: self.playback(),
             position: if self.current().is_some_and(Item::is_live) {
                 0.0
             } else {
@@ -1348,6 +1411,14 @@ impl App {
             timer: self.timer.mode(),
             shuffle: self.queue.shuffle,
             repeat: self.queue.repeat,
+        }
+    }
+
+    fn playback(&self) -> Playback {
+        Playback {
+            source: self.source.clone(),
+            item: self.current().cloned(),
+            legacy_item_key: None,
         }
     }
 
@@ -1539,23 +1610,12 @@ impl App {
     fn handle_job(&mut self, job: Job) {
         match job {
             Job::Catalog(Ok(catalog)) => {
-                let tracks = self.items_for(&Source::Tracks);
+                let previous = self.items_for(&self.source);
                 self.catalog = catalog;
                 self.refresh_mixes();
                 self.load_likes();
                 self.refresh_ambience();
-                // Refilling reshuffles and drops anything queued, so only do it when the tracks changed.
-                if self.source == Source::Tracks
-                    && self.stream == Stream::Idle
-                    && self.items_for(&Source::Tracks) != tracks
-                {
-                    let current = self.queue.current().cloned();
-                    let key = current.as_ref().map(|item| item.key.clone());
-                    self.restore_queue(&Source::Tracks, current);
-                    if self.queue.current().map(|item| &item.key) != key.as_ref() {
-                        self.resume_at = None;
-                    }
-                }
+                self.reconcile_queue(&previous);
             }
             Job::Catalog(Err(_)) => {}
             Job::Inspected { id, result } => {
@@ -1725,6 +1785,166 @@ mod tests {
         app.refreshed_playlist(&saved.id, Ok(saved.clone()));
         assert!(app.saved.is_empty());
         assert!(app.store.saved().unwrap().is_empty());
+    }
+
+    #[test]
+    fn scenes_and_sessions_restore_a_queued_item_outside_their_source() {
+        let mut app = app();
+        let item = playlist().items.remove(0);
+        app.store.set_liked(&item, true).unwrap();
+        app.load_likes();
+        let offset = app.queue.upcoming().count();
+        app.queue.enqueue(item.clone());
+        app.dispatch(Action::JumpQueue(offset));
+        app.dispatch(Action::Submit(Prompt::SaveScene, "Queued study".into()));
+        let session = app.session();
+        assert_eq!(app.scenes[0].playback, session.playback);
+
+        app.queue.replace(Vec::new(), None);
+        app.load_scene(0);
+        assert_eq!(app.current(), Some(&item));
+
+        app.resume_at = Some(37.0);
+        app.restore_playback(&session.playback);
+        assert_eq!(app.current(), Some(&item));
+        assert_eq!(app.position(), 37.0);
+
+        app.scenes[0].playback.item = None;
+        app.scenes[0].playback.legacy_item_key = Some(item.key.clone());
+        app.load_scene(0);
+        assert_eq!(app.current(), Some(&item));
+    }
+
+    #[test]
+    fn catalog_replacement_retires_the_old_current_without_changing_pause_or_timer() {
+        for paused in [false, true] {
+            let mut app = app();
+            let mut updated = app.catalog.clone();
+            let mut track = updated.tracks.remove(0);
+            track.id = "replacement".into();
+            track.file = "replacement.mp3".into();
+            track.cover = None;
+            updated.tracks = vec![track];
+            app.stream = Stream::Resolving;
+            app.resume_at = Some(42.0);
+            app.engine.set_paused(paused);
+            let timer_running = app.timer.is_running();
+            let generation = app.generation;
+
+            app.handle_job(Job::Catalog(Ok(updated)));
+
+            assert_eq!(app.current().unwrap().key, "r2:replacement");
+            assert!(app.generation > generation);
+            assert!(app.position() < 1.0);
+            assert_eq!(app.engine.is_paused(), paused);
+            assert_eq!(app.timer.is_running(), timer_running);
+        }
+    }
+
+    #[test]
+    fn catalog_refresh_updates_a_paused_liked_item_and_its_active_decoder_url() {
+        let mut app = app();
+        let item = app.current().unwrap().clone();
+        app.store.set_liked(&item, true).unwrap();
+        app.load_likes();
+        app.fill_queue(&Source::Liked, Some(&item.key));
+        app.resume_at = Some(42.0);
+        let mut updated = app.catalog.clone();
+        updated.tracks[0].file = "moved.mp3".into();
+
+        app.handle_job(Job::Catalog(Ok(updated.clone())));
+
+        assert_eq!(app.queue.current(), app.likes.first());
+        assert_eq!(app.position(), 42.0);
+        assert!(app.engine.is_paused());
+
+        app.stream = Stream::Playing;
+        app.pending_seek = Some((42.0, Instant::now()));
+        let generation = app.generation;
+        updated.tracks[0].file = "moved-again.mp3".into();
+        app.handle_job(Job::Catalog(Ok(updated)));
+        assert!(app.generation > generation);
+        assert!(app.position() >= 42.0 && app.position() < 43.0);
+        assert!(app.engine.is_paused());
+    }
+
+    #[test]
+    fn restoring_likes_skips_a_removed_catalog_item_and_clears_its_position() {
+        let mut app = app();
+        let mut survivor = app.catalog.tracks[0].clone();
+        survivor.id = "survivor".into();
+        survivor.file = "survivor.mp3".into();
+        app.catalog.tracks.push(survivor);
+        app.likes = app.items_for(&Source::Tracks).into_iter().take(2).collect();
+        let playback = Playback {
+            source: Source::Liked,
+            item: Some(app.likes[0].clone()),
+            legacy_item_key: None,
+        };
+        let next = app.likes[1].key.clone();
+        app.catalog.tracks.remove(0);
+        app.resume_at = Some(42.0);
+
+        app.restore_playback(&playback);
+
+        assert_eq!(app.current().unwrap().key, next);
+        assert_eq!(app.position(), 0.0);
+        assert_eq!(app.likes.len(), 2);
+    }
+
+    #[test]
+    fn refreshing_the_active_playlist_keeps_queue_edits_and_playback_choices() {
+        let mut app = app();
+        let mut saved = playlist();
+        let mut second = saved.items[0].clone();
+        second.key = "yt:second".into();
+        let mut third = saved.items[0].clone();
+        third.key = "yt:third".into();
+        saved.items.extend([second, third.clone()]);
+        app.store.save(&saved).unwrap();
+        app.reload_library();
+        app.fill_queue(&Source::Saved { id: saved.id.clone() }, None);
+        app.queue.move_upcoming(1, -1);
+        let extra = Item::from_track(&app.catalog, &app.catalog.tracks[0]);
+        app.queue.enqueue(extra.clone());
+        let before = (app.choices, app.timer.is_running(), app.engine.is_paused());
+        let mut added = saved.items[0].clone();
+        added.key = "yt:added".into();
+        saved.items.remove(1);
+        saved.items.push(added);
+
+        app.refreshed_playlist(&saved.id, Ok(saved.clone()));
+
+        let keys: Vec<_> = app.queue.upcoming().map(|item| item.key.as_str()).collect();
+        assert_eq!(keys, [third.key.as_str(), extra.key.as_str(), "yt:added"]);
+        assert_eq!((app.choices, app.timer.is_running(), app.engine.is_paused()), before);
+
+        saved.items.clear();
+        app.refreshed_playlist(&saved.id, Ok(saved.clone()));
+        assert!(app.saved[0].items.is_empty());
+        assert_eq!(app.current().unwrap().key, extra.key);
+        assert_eq!((app.choices, app.timer.is_running(), app.engine.is_paused()), before);
+    }
+
+    #[test]
+    fn an_unavailable_like_neither_plays_nor_queues() {
+        let mut app = app();
+        let mut survivor = app.catalog.tracks[0].clone();
+        survivor.id = "survivor".into();
+        survivor.file = "survivor.mp3".into();
+        app.catalog.tracks.push(survivor);
+        app.likes = app.items_for(&Source::Tracks).into_iter().take(2).collect();
+        app.catalog.tracks.remove(0);
+        app.tab = Tab::Liked;
+        let before = (app.source.clone(), app.current().cloned(), app.queue.upcoming().count());
+
+        app.activate(0);
+        app.enqueue(0);
+
+        assert_eq!(
+            (app.source.clone(), app.current().cloned(), app.queue.upcoming().count()),
+            before
+        );
     }
 
     #[test]

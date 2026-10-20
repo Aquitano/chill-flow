@@ -196,9 +196,6 @@ fn saved_from(url: &str, info: Info) -> Result<Saved> {
                 )
             })
             .collect();
-        if items.is_empty() {
-            bail!("that playlist has no playable videos");
-        }
         return Ok(Saved {
             id: format!("ytpl:{}", info.id),
             url: url.to_string(),
@@ -357,5 +354,16 @@ mod tests {
             start_key("https://www.youtube.com/watch?v=abc#t=30").as_deref(),
             Some("yt:abc")
         );
+    }
+
+    #[test]
+    fn an_empty_playlist_can_replace_its_saved_contents() {
+        let saved = saved_from(
+            "https://youtube.com/playlist?list=PL1",
+            serde_json::from_str(r#"{"_type":"playlist","id":"PL1","entries":[]}"#).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(saved.id, "ytpl:PL1");
+        assert!(saved.items.is_empty());
     }
 }
