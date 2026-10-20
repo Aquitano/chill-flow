@@ -368,7 +368,7 @@ pub fn library(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instan
     }
 }
 
-pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Instant, elapsed: Duration) {
+pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Instant) {
     let theme = ui.theme;
     let inner = area.inner(Margin {
         horizontal: 2,
@@ -518,8 +518,7 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
     let viz = Rect::new(inner.x, viz_top, inner.width, progress_y.saturating_sub(viz_top + 1));
     if ui.motion && viz.height >= 2 {
         let count = usize::from((viz.width / 3).clamp(8, 64));
-        app.engine.spectrum(ui.bars.raw_mut(count));
-        ui.bars.update(elapsed.as_secs_f32().min(0.1));
+        ui.bars.resize(count);
         widgets::spectrum(buf, viz, &ui.bars.levels, &ui.bars.peaks, &theme);
     }
 

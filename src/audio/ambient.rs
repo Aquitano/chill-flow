@@ -7,6 +7,8 @@ use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::thread;
 
+use sha2::{Digest, Sha256};
+
 use super::EngineEvent;
 use super::ffmpeg;
 use super::mixer::LaneLevel;
@@ -77,16 +79,14 @@ fn cached_file(url: &str, cache_dir: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-/// Named after the whole URL, so two catalogs that both have a `rain.mp3` don't share a download.
 fn cache_name(url: &str) -> Option<String> {
-    let path = url.split(['?', '#']).next()?;
-    let path = path.split_once("://").map_or(path, |(_, rest)| rest);
+    let resource = url.split('#').next()?;
+    let path = resource.split('?').next()?;
     let last = path.rsplit('/').next()?;
     if last.is_empty() || last.starts_with('.') {
         return None;
     }
-    let safe = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_');
-    Some(path.chars().map(|c| if safe(c) { c } else { '_' }).collect())
+    Some(format!("{:x}", Sha256::digest(resource.as_bytes())))
 }
 
 fn decode(path: &Path, rate: u32) -> Result<Vec<i16>, String> {
@@ -190,14 +190,22 @@ mod tests {
     }
 
     #[test]
-    fn cache_names_cover_the_whole_url() {
-        assert_eq!(
-            cache_name("https://x.dev/a/ambient-rain-soft.mp3?v=2").as_deref(),
-            Some("x.dev_a_ambient-rain-soft.mp3")
-        );
+    fn cache_names_distinguish_resource_paths_and_query_versions() {
         assert_ne!(
             cache_name("https://x.dev/rain/light.mp3"),
-            cache_name("https://x.dev/wind/light.mp3")
+            cache_name("https://x.dev/rain_light.mp3")
+        );
+        assert_ne!(
+            cache_name("https://x.dev/rain.mp3?v=1"),
+            cache_name("https://x.dev/rain.mp3?v=2")
+        );
+        assert_ne!(
+            cache_name("https://x.dev/rain.mp3"),
+            cache_name("https://y.dev/rain.mp3")
+        );
+        assert_eq!(
+            cache_name("https://x.dev/rain.mp3?v=1#one"),
+            cache_name("https://x.dev/rain.mp3?v=1#two")
         );
         assert_eq!(cache_name("https://x.dev/a/.."), None);
         assert_eq!(cache_name("https://x.dev/"), None);

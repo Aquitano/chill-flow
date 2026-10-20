@@ -75,13 +75,16 @@ pub struct Bars {
 }
 
 impl Bars {
-    pub fn raw_mut(&mut self, count: usize) -> &mut [f32] {
+    pub fn resize(&mut self, count: usize) {
         if self.raw.len() != count {
             self.raw = vec![0.0; count];
             self.levels = vec![0.0; count];
             self.peaks = vec![0.0; count];
             self.peak_hold = vec![0.0; count];
         }
+    }
+
+    pub fn raw_mut(&mut self) -> &mut [f32] {
         &mut self.raw
     }
 

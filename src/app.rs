@@ -131,6 +131,8 @@ pub struct App {
     resume_at: Option<f64>,
     pending_seek: Option<(f64, Instant)>,
     pending_resolve: Option<(String, f64, Instant)>,
+    inspection: Option<(u64, youtube::Lookup)>,
+    resolution: Option<youtube::Lookup>,
     cover_requested: Option<String>,
     pub jobs: Sender<Job>,
     inbox: Receiver<Job>,
@@ -197,6 +199,8 @@ impl App {
             resume_at: (session.position > 1.0).then_some(session.position),
             pending_seek: None,
             pending_resolve: None,
+            inspection: None,
+            resolution: None,
             cover_requested: None,
             jobs,
             inbox,
@@ -546,6 +550,7 @@ impl App {
     fn start(&mut self, item: Item, start_secs: f64) {
         self.generation += 1;
         self.stream_from = start_secs;
+        self.resolution = None;
         self.pending_seek = None;
         self.pending_resolve = None;
         self.resume_at = (start_secs > 0.0).then_some(start_secs);
@@ -572,6 +577,7 @@ impl App {
 
     fn stop_stream(&mut self) {
         self.generation += 1;
+        self.resolution = None;
         self.pending_seek = None;
         self.pending_resolve = None;
         self.engine.stop_stream();
@@ -651,7 +657,11 @@ impl App {
 
     fn skip(&mut self, forward: bool) {
         self.failures_in_a_row = 0;
-        if !forward && self.position() > 3.0 && self.stream == Stream::Playing {
+        if !forward
+            && self.position() > 3.0
+            && self.stream == Stream::Playing
+            && self.current().is_some_and(|item| !item.is_live())
+        {
             self.pending_seek = None;
             self.engine.seek(0.0);
             self.stream_from = 0.0;
@@ -1085,11 +1095,17 @@ impl App {
     pub fn open_url(&mut self, url: &str) {
         self.toast(Tone::Info, LOOKING_UP);
         self.choices += 1;
-        let (jobs, url, choices) = (self.jobs.clone(), url.to_string(), self.choices);
-        std::thread::spawn(move || {
-            let result = youtube::inspect(&url);
-            let _ = jobs.send(Job::Inspected { url, choices, result });
+        self.inspection = None;
+        let (jobs, choices) = (self.jobs.clone(), self.choices);
+        let requested_url = url.to_string();
+        let lookup = youtube::inspect(url, move |result| {
+            let _ = jobs.send(Job::Inspected {
+                url: requested_url,
+                choices,
+                result,
+            });
         });
+        self.inspection = Some((choices, lookup));
     }
 
     fn inspected(&mut self, url: &str, choices: u64, result: Result<Saved>) {
@@ -1256,6 +1272,9 @@ impl App {
     }
 
     pub fn shutdown(&mut self) {
+        self.inspection = None;
+        self.resolution = None;
+        self.pending_resolve = None;
         self.save_focus_block(Instant::now());
         let _ = self.store.save_session(&self.session());
     }
@@ -1275,10 +1294,9 @@ impl App {
             && let Some((url, start_secs, _)) = self.pending_resolve.take()
         {
             let (jobs, generation) = (self.jobs.clone(), self.generation);
-            std::thread::spawn(move || {
-                let result = youtube::resolve(&url, start_secs);
+            self.resolution = Some(youtube::resolve(&url, start_secs, move |result| {
                 let _ = jobs.send(Job::Resolved { generation, result });
-            });
+            }));
         }
         self.retry_reconnect(now);
         // Every seek restarts ffmpeg, so a held key or a scrolled wheel settles first.
@@ -1461,6 +1479,10 @@ impl App {
             }
             Job::Catalog(Err(_)) => {}
             Job::Inspected { url, choices, result } => {
+                if !self.inspection.as_ref().is_some_and(|(id, _)| *id == choices) {
+                    return;
+                }
+                self.inspection = None;
                 self.events.push(Event::DismissToast(LOOKING_UP));
                 self.inspected(&url, choices, result);
             }
@@ -1468,8 +1490,10 @@ impl App {
                 if generation != self.generation {
                     return;
                 }
+                self.resolution = None;
                 match result {
                     Ok(mut input) => {
+                        self.queue.set_current_live(input.live);
                         if let Some(at) = self.resume_at.take()
                             && !input.live
                         {

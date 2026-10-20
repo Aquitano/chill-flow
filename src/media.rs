@@ -5,12 +5,47 @@ use souvlaki::{
 };
 
 /// What the OS media overlay shows: a track, or the ambience when no music plays.
+#[derive(Debug, PartialEq)]
 pub struct NowPlaying<'a> {
     pub title: &'a str,
     pub artist: &'a str,
     pub album: &'a str,
     pub cover: Option<&'a str>,
     pub duration: Option<u32>,
+}
+
+struct MetadataSnapshot {
+    title: String,
+    artist: String,
+    album: String,
+    cover: Option<String>,
+    duration: Option<u32>,
+}
+
+#[derive(Default)]
+struct MetadataCache(Option<MetadataSnapshot>);
+
+impl MetadataCache {
+    fn update(&mut self, now: Option<&NowPlaying<'_>>) -> bool {
+        let shown = self.0.as_ref().map(|shown| NowPlaying {
+            title: &shown.title,
+            artist: &shown.artist,
+            album: &shown.album,
+            cover: shown.cover.as_deref(),
+            duration: shown.duration,
+        });
+        if shown.as_ref() == now {
+            return false;
+        }
+        self.0 = now.map(|now| MetadataSnapshot {
+            title: now.title.to_owned(),
+            artist: now.artist.to_owned(),
+            album: now.album.to_owned(),
+            cover: now.cover.map(str::to_owned),
+            duration: now.duration,
+        });
+        true
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -30,7 +65,7 @@ pub struct Media {
     controls: Option<MediaControls>,
     #[cfg(windows)]
     window: windows_window::HiddenWindow,
-    shown_key: Option<String>,
+    shown_metadata: MetadataCache,
     shown_playback: Option<(bool, u64)>,
 }
 
@@ -64,15 +99,14 @@ impl Media {
             controls,
             #[cfg(windows)]
             window,
-            shown_key: None,
+            shown_metadata: MetadataCache::default(),
             shown_playback: None,
         }
     }
 
     pub fn show(&mut self, now: Option<NowPlaying>, playing: bool, position: f64) {
         let Some(controls) = self.controls.as_mut() else { return };
-        let key = now.as_ref().map(|now| now.title);
-        if key != self.shown_key.as_deref() {
+        if self.shown_metadata.update(now.as_ref()) {
             let metadata = now.as_ref().map_or_else(MediaMetadata::default, |now| MediaMetadata {
                 title: Some(now.title),
                 artist: Some(now.artist),
@@ -81,7 +115,6 @@ impl Media {
                 duration: now.duration.map(|seconds| Duration::from_secs(u64::from(seconds))),
             });
             let _ = controls.set_metadata(metadata);
-            self.shown_key = key.map(str::to_owned);
             self.shown_playback = None;
         }
         let whole_seconds = position.max(0.0) as u64;
@@ -215,5 +248,35 @@ mod windows_window {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metadata_cache_refreshes_every_changed_field_even_with_the_same_title() {
+        let mut cache = MetadataCache::default();
+        let mut now = NowPlaying {
+            title: "Rain",
+            artist: "First artist",
+            album: "Catalog",
+            cover: None,
+            duration: Some(10),
+        };
+        assert!(cache.update(Some(&now)));
+        assert!(!cache.update(Some(&now)));
+        now.artist = "Second artist";
+        assert!(cache.update(Some(&now)));
+        now.album = "YouTube";
+        assert!(cache.update(Some(&now)));
+        now.cover = Some("https://example.com/cover.png");
+        assert!(cache.update(Some(&now)));
+        now.duration = Some(20);
+        assert!(cache.update(Some(&now)));
+        assert!(!cache.update(Some(&now)));
+        assert!(cache.update(None));
+        assert!(!cache.update(None));
     }
 }
