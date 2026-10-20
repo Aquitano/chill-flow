@@ -203,7 +203,9 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App, ui: &mut Ui, media: &mut M
                 }
             }
             Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => return Ok(()),
+            Err(RecvTimeoutError::Disconnected) => {
+                anyhow::bail!("stopped reading input, see crash.log in the cache folder")
+            }
         }
     }
 }
