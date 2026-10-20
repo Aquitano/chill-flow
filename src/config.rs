@@ -19,7 +19,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            catalog_url: "https://chill-data.aquitano.me/catalog.json".into(),
+            catalog_url: catalog_schema::DEFAULT_URL.into(),
             reduce_motion: false,
             chime: true,
             notifications: true,

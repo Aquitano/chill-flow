@@ -488,6 +488,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "catalog-schema"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "cc"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -514,6 +522,7 @@ name = "chill"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "catalog-schema",
  "clap",
  "cpal",
  "crossterm",

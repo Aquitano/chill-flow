@@ -5,9 +5,20 @@ edition = "2024"
 description = "Lo-fi, ambience, and a focus timer in your terminal"
 repository = "https://github.com/Aquitano/chill-flow"
 
-[dependencies]
+[workspace]
+members = ["crates/catalog-schema"]
+
+[workspace.dependencies]
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+ureq = "3.4.2"
+
+[dependencies]
+anyhow.workspace = true
+catalog-schema = { path = "crates/catalog-schema" }
+clap.workspace = true
 cpal = "0.18.2"
 crossterm = "0.29.0"
 etcetera = "0.11.0"
@@ -21,15 +32,15 @@ ratatui-image = { version = "11.1.0", default-features = false, features = ["cro
 realfft = "3.5.0"
 rtrb = "0.4.0"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
-serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.154"
+serde.workspace = true
+serde_json.workspace = true
 sha2 = "0.10.9"
 souvlaki = { version = "0.8.3", default-features = false, features = ["use_zbus"] }
 terminal-colorsaurus = "1.0.3"
 toml = "1.1.8"
 toml_edit = "0.25.17"
 unicode-width = "0.2.2"
-ureq = "3.4.2"
+ureq.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.5"
