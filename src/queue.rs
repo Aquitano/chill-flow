@@ -63,10 +63,19 @@ impl Queue {
         let replacements: HashMap<&str, &Item> = next_source.iter().map(|item| (item.key.as_str(), item)).collect();
         let previous_cursor = self.cursor;
         // Copies count by occurrence. When the source lost some copies of an item, as many leave the
-        // queue, upcoming ones first and the current one last.
+        // queue, upcoming ones first and the current one last, but never below what the source
+        // still has, since the queue may already be missing the ones removed by hand.
+        let mut in_queue: HashMap<&str, usize> = HashMap::new();
+        for entry in &self.entries {
+            *in_queue.entry(&entry.item.key).or_default() += 1;
+        }
         let mut surplus: HashMap<&str, usize> = had
             .iter()
-            .filter_map(|(key, &count)| Some((*key, count.saturating_sub(*has.get(key)?))))
+            .filter_map(|(key, &count)| {
+                let kept = *has.get(key)?;
+                let extra = in_queue.get(key).copied().unwrap_or(0).saturating_sub(kept);
+                Some((*key, count.saturating_sub(kept).min(extra)))
+            })
             .collect();
         let len = self.entries.len();
         let mut dropped = HashSet::new();
@@ -341,6 +350,19 @@ mod tests {
 
         assert_eq!(queue.current().unwrap().key, "b");
         assert!(keys(&queue).is_empty());
+    }
+
+    #[test]
+    fn reconciliation_does_not_drop_a_copy_already_removed_by_hand() {
+        let previous = items(&["a", "a", "b"]);
+        let mut queue = Queue::default();
+        queue.replace(previous.clone(), None);
+        queue.remove_upcoming(0);
+
+        queue.reconcile(&previous, items(&["a", "b"]), Some);
+
+        assert_eq!(queue.current().unwrap().key, "a");
+        assert_eq!(keys(&queue), ["b"]);
     }
 
     #[test]
