@@ -8,7 +8,6 @@ pub mod widgets;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use image::DynamicImage;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui_image::picker::Picker;
@@ -67,11 +66,7 @@ pub enum Drag {
 
 struct Cover {
     url: String,
-    image: DynamicImage,
     protocol: StatefulProtocol,
-    /// The same art darkened like the backdrop, shown while a dialog is open; an image can't
-    /// be dimmed by recoloring cells the way text is.
-    dimmed: Option<StatefulProtocol>,
     aspect: f32,
 }
 
@@ -266,7 +261,7 @@ impl Ui {
 
     pub fn close(&mut self) {
         self.overlay = None;
-        self.overlay_shown.set(0.0, Instant::now(), self.duration(FAST));
+        self.overlay_shown.jump(0.0);
     }
 
     pub fn hit_at(&self, x: u16, y: u16) -> Option<(Rect, Hit)> {
@@ -310,14 +305,8 @@ impl Ui {
                 continue;
             }
             let aspect = image.width() as f32 / image.height().max(1) as f32;
-            let protocol = self.picker.new_resize_protocol(image.clone());
-            self.cover = Some(Cover {
-                url,
-                image,
-                protocol,
-                dimmed: None,
-                aspect,
-            });
+            let protocol = self.picker.new_resize_protocol(image);
+            self.cover = Some(Cover { url, protocol, aspect });
         }
         self.volume.set(app.volume, now, self.duration(FAST));
         let duration = self.duration(SMOOTH);
@@ -417,19 +406,11 @@ impl Ui {
 
         overlay::toasts(buf, footer, self, now);
 
-        let behind_dialog = self.overlay_shown.value(now) > 0.5;
         if let (Some(rect), Some(cover)) = (self.cover_rect, self.cover.as_mut()) {
-            let protocol = match (behind_dialog, self.theme.background_rgb()) {
-                (true, Some(background)) => cover.dimmed.get_or_insert_with(|| {
-                    self.picker
-                        .new_resize_protocol(darken(&cover.image, background, BACKDROP_DIM))
-                }),
-                _ => &mut cover.protocol,
-            };
             frame.render_stateful_widget(
                 StatefulImage::default().resize(Resize::Scale(Some(FilterType::Triangle))),
                 rect,
-                protocol,
+                &mut cover.protocol,
             );
         }
         overlay::draw(frame.buffer_mut(), area, app, self, now);
@@ -439,16 +420,6 @@ impl Ui {
         let cover = self.cover.as_ref()?;
         (Some(cover.url.as_str()) == url).then_some(cover.aspect)
     }
-}
-
-fn darken(image: &DynamicImage, toward: [u8; 3], amount: f32) -> DynamicImage {
-    let mut pixels = image.to_rgb8();
-    for pixel in pixels.pixels_mut() {
-        for (channel, target) in pixel.0.iter_mut().zip(toward) {
-            *channel = (f32::from(*channel) + (f32::from(target) - f32::from(*channel)) * amount).round() as u8;
-        }
-    }
-    DynamicImage::ImageRgb8(pixels)
 }
 
 #[cfg(test)]
@@ -625,6 +596,26 @@ mod tests {
                 .iter()
                 .any(|(_, hit)| { *hit == Hit::Act(Action::RefreshSaved("ytpl:study".into())) })
         );
+    }
+
+    #[test]
+    fn a_dialog_dims_the_page_in_its_first_frame() {
+        let mut app = offline_app();
+        let theme = Theme::new(Some(([205, 214, 244], [30, 30, 46])));
+        let mut ui = Ui::new(theme, Picker::halfblocks(), false);
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        let header = |terminal: &Terminal<TestBackend>| terminal.backend().buffer()[(3, 0)].fg;
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        let bright = header(&terminal);
+
+        ui.open(Overlay::Help);
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        let dimmed = header(&terminal);
+        ui.close();
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+
+        assert_ne!(dimmed, bright);
+        assert_eq!(header(&terminal), bright);
     }
 
     #[test]
