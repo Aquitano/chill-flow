@@ -137,6 +137,7 @@ fn add_track(args: TrackArgs, dry_run: bool) -> Result<()> {
     };
     let entry = serde_json::to_string_pretty(&track)?;
     catalog.tracks.push(track);
+    validate(&catalog)?;
     ship(bucket.as_ref(), &uploads, &catalog, &entry)
 }
 
@@ -169,6 +170,7 @@ fn add_sound(args: SoundArgs, dry_run: bool) -> Result<()> {
     };
     let entry = serde_json::to_string_pretty(&sound)?;
     catalog.ambient.push(sound);
+    validate(&catalog)?;
     ship(bucket.as_ref(), &uploads, &catalog, &entry)
 }
 
@@ -213,6 +215,17 @@ fn lock() -> Result<std::fs::File> {
     let file = std::fs::File::open(CATALOG_PATH).context("opening catalog.json")?;
     file.lock().context("locking catalog.json")?;
     Ok(file)
+}
+
+/// Runs before the first upload, so a bad entry leaves nothing on the bucket.
+fn validate(catalog: &Catalog) -> Result<()> {
+    let problems = check::problems(catalog);
+    ensure!(
+        problems.is_empty(),
+        "nothing was uploaded, because catalog.json would be invalid:\n- {}",
+        problems.join("\n- ")
+    );
+    Ok(())
 }
 
 fn load() -> Result<Catalog> {
@@ -310,6 +323,31 @@ mod tests {
             catalog_schema::DEFAULT_URL,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn an_invalid_entry_is_refused_before_anything_uploads() {
+        let folder = tempfile::tempdir().unwrap();
+        let audio = folder.path().join("song.wav");
+        let generated = std::process::Command::new("ffmpeg")
+            .args(["-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=d=2"])
+            .arg(&audio)
+            .status()
+            .unwrap();
+        assert!(generated.success());
+        let args = TrackArgs {
+            audio,
+            title: "Night Drive".into(),
+            artist: " ".into(),
+            id: None,
+            cover: None,
+            tags: Vec::new(),
+            force: false,
+        };
+
+        let error = add_track(args, true).unwrap_err();
+
+        assert!(error.to_string().contains("nothing was uploaded"), "{error}");
     }
 
     #[test]
