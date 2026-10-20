@@ -131,7 +131,7 @@ impl Media {
             return;
         }
         self.shown_playback = Some((playing, whole_seconds));
-        let progress = Some(MediaPosition(Duration::from_secs_f64(position.max(0.0))));
+        let progress = Duration::try_from_secs_f64(position.max(0.0)).ok().map(MediaPosition);
         let playback = match (now, playing) {
             (None, _) => MediaPlayback::Stopped,
             (Some(_), true) => MediaPlayback::Playing { progress },
