@@ -46,6 +46,8 @@ Paste a YouTube link anywhere in the app to add it to the library and play it. E
 
 The library has five tabs. Tracks come from the catalog. Liked holds what you liked. YouTube holds every link you opened. Sounds holds the ambience mixes, which play on their own without music. Scenes holds saved setups of source, ambience, balance, and timer.
 
+To update a saved playlist, select it in YouTube and press `R`, click **R refresh**, or search for **Refresh playlist** in the command palette.
+
 The slider between music and ambience at the top of the Ambience panel turns one down against the other, for a loud stream or quiet rain, without touching the volume. A soundscape has no music, so the balance leaves it alone.
 
 Focus stats count every minute a focus block ran, including blocks you stopped early. Breaks never count. The header shows today's total and a seven-day sparkline; press `i` for the chart.

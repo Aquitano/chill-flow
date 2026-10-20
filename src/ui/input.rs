@@ -207,6 +207,12 @@ fn library_key(app: &mut App, ui: &mut Ui, key: KeyEvent) {
         KeyCode::Right | KeyCode::Char('l') => Action::ShowTab(Tab::ALL[(tab + 1) % 5]),
         KeyCode::Enter => Action::Activate(selected),
         KeyCode::Char('a') => Action::Enqueue(selected),
+        KeyCode::Char('R') => {
+            let Some(saved) = app.playlist_for_row(selected) else {
+                return;
+            };
+            Action::RefreshSaved(saved.id.clone())
+        }
         KeyCode::Char('d') | KeyCode::Delete if len > 0 => Action::RemoveRow(selected),
         KeyCode::Esc => {
             app.filter.clear();
@@ -494,9 +500,17 @@ fn click(app: &mut App, ui: &mut Ui, rect: Rect, hit: Hit, x: u16) {
 }
 
 fn scrolled(app: &mut App, ui: &mut Ui, x: u16, y: u16, step: isize) {
-    if let Some(Overlay::Palette { query, selected }) = &mut ui.overlay {
-        let last = overlay::matching(app, query).len().saturating_sub(1);
-        *selected = selected.saturating_add_signed(step).min(last);
+    if let Some(overlay) = &mut ui.overlay {
+        match overlay {
+            Overlay::Palette { query, selected } => {
+                let last = overlay::matching(app, query).len().saturating_sub(1);
+                *selected = selected.saturating_add_signed(step).min(last);
+            }
+            Overlay::Settings { selected } => {
+                *selected = selected.saturating_add_signed(step).min(Setting::ALL.len() - 1);
+            }
+            _ => {}
+        }
         return;
     }
     let hit = ui.hit_at(x, y).map(|(_, hit)| hit);

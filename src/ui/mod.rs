@@ -434,6 +434,7 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
+    use crate::action::Setting;
     use crate::audio::Engine;
     use crate::config::{Config, Paths};
     use crate::store::Store;
@@ -515,6 +516,89 @@ mod tests {
                 Event::Paste((0..rng.usize(..6)).map(|_| pieces[rng.usize(..pieces.len())]).collect())
             }
         }
+    }
+
+    #[test]
+    fn settings_wheel_clamps_selection_and_reveals_hidden_rows() {
+        let mut app = offline_app();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
+        let volume = app.volume;
+        ui.open(Overlay::Settings { selected: 0 });
+        ui.hits.push((Rect::new(0, 0, 10, 1), Hit::Slider(Slider::Volume)));
+        for kind in [MouseEventKind::ScrollDown, MouseEventKind::ScrollUp] {
+            for _ in 0..Setting::ALL.len() + 2 {
+                input::handle(
+                    &mut app,
+                    &mut ui,
+                    Event::Mouse(MouseEvent {
+                        kind,
+                        column: 0,
+                        row: 0,
+                        modifiers: KeyModifiers::NONE,
+                    }),
+                );
+            }
+            let expected = if kind == MouseEventKind::ScrollDown {
+                Setting::ALL.len() - 1
+            } else {
+                0
+            };
+            assert!(matches!(&ui.overlay, Some(Overlay::Settings { selected }) if *selected == expected));
+            let mut terminal = Terminal::new(TestBackend::new(80, 12)).unwrap();
+            terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+            assert!(ui.hits.iter().any(|(_, hit)| *hit == Hit::Setting(expected)));
+        }
+        assert_eq!(app.volume, volume);
+    }
+
+    #[test]
+    fn playlist_refresh_commands_and_footer_use_saved_identity() {
+        use crate::model::{Item, Playable, Saved};
+
+        let mut app = offline_app();
+        let item = Item {
+            key: "yt:video".into(),
+            title: "Video".into(),
+            artist: String::new(),
+            duration: Some(10),
+            cover: None,
+            play: Playable::YouTube {
+                url: "https://youtu.be/video".into(),
+                live: false,
+            },
+        };
+        app.saved = [
+            ("yt:video", "Video"),
+            ("ytpl:study", "Study playlist"),
+            ("ytpl:other", "Other playlist"),
+        ]
+        .into_iter()
+        .map(|(id, title)| Saved {
+            id: id.into(),
+            url: "https://youtube.com/playlist?list=example".into(),
+            title: title.into(),
+            channel: String::new(),
+            items: vec![item.clone()],
+        })
+        .collect();
+        let refreshes: Vec<_> = overlay::commands(&app)
+            .into_iter()
+            .filter_map(|command| match command.action {
+                Action::RefreshSaved(id) => Some(id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(refreshes, ["ytpl:study", "ytpl:other"]);
+        app.tab = Tab::YouTube;
+        app.filter = "Study".into();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        assert!(
+            ui.hits
+                .iter()
+                .any(|(_, hit)| { *hit == Hit::Act(Action::RefreshSaved("ytpl:study".into())) })
+        );
     }
 
     #[test]

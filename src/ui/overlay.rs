@@ -75,6 +75,13 @@ pub fn commands(app: &App) -> Vec<Command> {
             action: Action::LoadScene(index),
         });
     }
+    for saved in app.saved.iter().filter(|saved| saved.id.starts_with("ytpl:")) {
+        list.push(Command {
+            label: format!("Refresh playlist: {}", saved.title),
+            key: "",
+            action: Action::RefreshSaved(saved.id.clone()),
+        });
+    }
     list.push(command("Focus stats", "i", Action::OpenStats));
     list.push(command("Settings", "c", Action::OpenSettings));
     list.push(command("Keyboard shortcuts", "?", Action::OpenHelp));
@@ -326,7 +333,7 @@ fn confirm(buf: &mut Buffer, screen: Rect, ui: &mut Ui, message: &str) {
     );
 }
 
-const KEYS: [(&str, &str); 28] = [
+const KEYS: [(&str, &str); 29] = [
     ("space", "play or pause everything"),
     ("n / p", "next / previous"),
     (", / .", "back / forward 10 s"),
@@ -344,6 +351,7 @@ const KEYS: [(&str, &str); 28] = [
     ("← → / h l", "tabs, or a sound's level"),
     ("enter", "play the selection"),
     ("a", "queue the selection"),
+    ("R", "refresh the selected YouTube playlist"),
     ("right click", "add a row to the queue"),
     ("d", "remove the selection"),
     ("J / K", "move a queued item"),

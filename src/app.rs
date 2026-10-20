@@ -22,8 +22,7 @@ use crate::youtube;
 pub enum Job {
     Catalog(Result<Catalog>),
     Inspected {
-        url: String,
-        choices: u64,
+        id: u64,
         result: Result<Saved>,
     },
     Resolved {
@@ -97,6 +96,26 @@ struct Reconnect {
 /// Seconds between attempts to reach a dropped stream, about two minutes in all.
 const RECONNECT_DELAYS: [u64; 8] = [0, 2, 4, 8, 15, 30, 30, 30];
 
+enum InspectionPurpose {
+    Open { url: String, choices: u64 },
+    Refresh { id: String },
+}
+
+impl InspectionPurpose {
+    fn progress(&self) -> &'static str {
+        match self {
+            Self::Open { .. } => LOOKING_UP,
+            Self::Refresh { .. } => "Refreshing that playlist…",
+        }
+    }
+}
+
+struct Inspection {
+    id: u64,
+    purpose: InspectionPurpose,
+    _lookup: youtube::Lookup,
+}
+
 pub struct App {
     pub config: Config,
     cache_dir: PathBuf,
@@ -131,7 +150,8 @@ pub struct App {
     resume_at: Option<f64>,
     pending_seek: Option<(f64, Instant)>,
     pending_resolve: Option<(String, f64, Instant)>,
-    inspection: Option<(u64, youtube::Lookup)>,
+    next_inspection: u64,
+    inspection: Option<Inspection>,
     resolution: Option<youtube::Lookup>,
     cover_requested: Option<String>,
     pub jobs: Sender<Job>,
@@ -199,6 +219,7 @@ impl App {
             resume_at: (session.position > 1.0).then_some(session.position),
             pending_seek: None,
             pending_resolve: None,
+            next_inspection: 0,
             inspection: None,
             resolution: None,
             cover_requested: None,
@@ -711,6 +732,7 @@ impl App {
             }
             Action::Activate(index) => self.activate(index),
             Action::Enqueue(index) => self.enqueue(index),
+            Action::RefreshSaved(id) => self.refresh_saved(&id),
             Action::Remove(removal) => self.remove(removal),
             Action::JumpQueue(offset) => {
                 if let Some(item) = self.queue.jump(offset).cloned() {
@@ -1093,19 +1115,77 @@ impl App {
     }
 
     pub fn open_url(&mut self, url: &str) {
-        self.toast(Tone::Info, LOOKING_UP);
         self.choices += 1;
-        self.inspection = None;
-        let (jobs, choices) = (self.jobs.clone(), self.choices);
-        let requested_url = url.to_string();
+        self.start_inspection(
+            url,
+            InspectionPurpose::Open {
+                url: url.to_string(),
+                choices: self.choices,
+            },
+        );
+    }
+
+    fn start_inspection(&mut self, url: &str, purpose: InspectionPurpose) {
+        if let Some(previous) = self.inspection.take() {
+            self.events.push(Event::DismissToast(previous.purpose.progress()));
+        }
+        self.toast(Tone::Info, purpose.progress());
+        self.next_inspection += 1;
+        let (jobs, id) = (self.jobs.clone(), self.next_inspection);
         let lookup = youtube::inspect(url, move |result| {
-            let _ = jobs.send(Job::Inspected {
-                url: requested_url,
-                choices,
-                result,
-            });
+            let _ = jobs.send(Job::Inspected { id, result });
         });
-        self.inspection = Some((choices, lookup));
+        self.inspection = Some(Inspection {
+            id,
+            purpose,
+            _lookup: lookup,
+        });
+    }
+
+    pub fn playlist_for_row(&self, index: usize) -> Option<&Saved> {
+        if self.tab != Tab::YouTube {
+            return None;
+        }
+        let Target::Saved(index) = self.row(index)?.target else {
+            return None;
+        };
+        self.saved.get(index).filter(|saved| saved.id.starts_with("ytpl:"))
+    }
+
+    fn refresh_saved(&mut self, id: &str) {
+        let Some(saved) = self
+            .saved
+            .iter()
+            .find(|saved| saved.id == id && saved.id.starts_with("ytpl:"))
+        else {
+            return;
+        };
+        let url = saved.url.clone();
+        self.start_inspection(&url, InspectionPurpose::Refresh { id: id.to_string() });
+    }
+
+    fn refreshed_playlist(&mut self, id: &str, result: Result<Saved>) {
+        let Some(previous) = self.saved.iter().find(|saved| saved.id == id) else {
+            return;
+        };
+        let saved = match result {
+            Ok(saved) if saved.id == id => saved,
+            Ok(_) => return self.toast(Tone::Error, "Could not refresh the playlist: its identity changed"),
+            Err(error) => {
+                return self.toast(
+                    Tone::Error,
+                    format!("Could not refresh \"{}\": {error}", previous.title),
+                );
+            }
+        };
+        if let Err(error) = self.store.save(&saved) {
+            return self.toast(Tone::Error, format!("Could not save the refreshed playlist: {error}"));
+        }
+        self.reload_library();
+        self.toast(
+            Tone::Done,
+            format!("Refreshed \"{}\" · {} tracks", saved.title, saved.items.len()),
+        );
     }
 
     fn inspected(&mut self, url: &str, choices: u64, result: Result<Saved>) {
@@ -1478,13 +1558,18 @@ impl App {
                 }
             }
             Job::Catalog(Err(_)) => {}
-            Job::Inspected { url, choices, result } => {
-                if !self.inspection.as_ref().is_some_and(|(id, _)| *id == choices) {
+            Job::Inspected { id, result } => {
+                if !self.inspection.as_ref().is_some_and(|inspection| inspection.id == id) {
                     return;
                 }
-                self.inspection = None;
-                self.events.push(Event::DismissToast(LOOKING_UP));
-                self.inspected(&url, choices, result);
+                let Some(inspection) = self.inspection.take() else {
+                    return;
+                };
+                self.events.push(Event::DismissToast(inspection.purpose.progress()));
+                match inspection.purpose {
+                    InspectionPurpose::Open { url, choices } => self.inspected(&url, choices, result),
+                    InspectionPurpose::Refresh { id } => self.refreshed_playlist(&id, result),
+                }
             }
             Job::Resolved { generation, result } => {
                 if generation != self.generation {
@@ -1587,6 +1672,59 @@ mod tests {
             Store::open(Path::new(":memory:")).unwrap(),
             Engine::start(cache),
         )
+    }
+
+    fn playlist() -> Saved {
+        Saved {
+            id: "ytpl:review".into(),
+            url: "https://www.youtube.com/playlist?list=review".into(),
+            title: "Study".into(),
+            channel: "chill".into(),
+            items: vec![Item {
+                key: "yt:first".into(),
+                title: "First".into(),
+                artist: "chill".into(),
+                duration: Some(60),
+                cover: None,
+                play: Playable::YouTube {
+                    url: "https://www.youtube.com/watch?v=first".into(),
+                    live: false,
+                },
+            }],
+        }
+    }
+
+    #[test]
+    fn refreshing_a_playlist_updates_the_library_without_requesting_playback() {
+        let mut app = app();
+        let mut saved = playlist();
+        app.store.save(&saved).unwrap();
+        app.reload_library();
+        let before = (app.session(), app.stream.clone(), app.choices);
+        saved.title = "Updated study".into();
+        saved.items[0].title = "Updated first".into();
+
+        app.refreshed_playlist(&saved.id, Ok(saved.clone()));
+
+        assert_eq!(app.saved, [saved.clone()]);
+        assert_eq!(app.store.saved().unwrap(), [saved]);
+        assert_eq!((app.session(), app.stream.clone(), app.choices), before);
+    }
+
+    #[test]
+    fn failed_refreshes_keep_the_saved_playlist_and_cannot_restore_a_deleted_one() {
+        let mut app = app();
+        let saved = playlist();
+        app.store.save(&saved).unwrap();
+        app.reload_library();
+
+        app.refreshed_playlist(&saved.id, Err(anyhow::anyhow!("offline")));
+        assert_eq!(app.store.saved().unwrap().as_slice(), std::slice::from_ref(&saved));
+
+        app.remove(Removal::Saved(saved.id.clone()));
+        app.refreshed_playlist(&saved.id, Ok(saved.clone()));
+        assert!(app.saved.is_empty());
+        assert!(app.store.saved().unwrap().is_empty());
     }
 
     #[test]

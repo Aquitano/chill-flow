@@ -164,6 +164,7 @@ pub enum Action {
     ShowTab(Tab),
     Activate(usize),
     Enqueue(usize),
+    RefreshSaved(String),
     RemoveRow(usize),
     Remove(Removal),
     JumpQueue(usize),
