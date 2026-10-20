@@ -3,6 +3,7 @@ mod chime;
 mod decoder;
 mod ffmpeg;
 mod mixer;
+mod noise;
 mod output;
 mod spectrum;
 
@@ -17,6 +18,7 @@ use rtrb::{Consumer, Producer};
 use ambient::{LoadRequest, LoadedLoop};
 use decoder::Decoder;
 use mixer::{AmbientLane, AtomicF32, Command, Controls, Garbage, LaneLevel, Mixer};
+pub use noise::Noise;
 use output::Output;
 use spectrum::Analysis;
 
@@ -66,8 +68,15 @@ struct Playing {
     decoder: Decoder,
 }
 
+/// Where an ambient loop's audio comes from.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LoopSource {
+    File(String),
+    Noise(Noise),
+}
+
 struct AmbientSlot {
-    url: String,
+    source: LoopSource,
     level: Arc<LaneLevel>,
 }
 
@@ -141,10 +150,10 @@ impl Engine {
         self.controls.music_gain.store(perceptual(level));
     }
 
-    pub fn set_ambient(&mut self, id: &str, url: &str, level: f32, gain: f32) {
+    pub fn set_ambient(&mut self, id: &str, source: LoopSource, level: f32, gain: f32) {
         let target = perceptual(level) * gain.max(0.0);
         if let Some(slot) = self.ambient.get(id)
-            && slot.url == url
+            && slot.source == source
             && slot.level.set(target)
         {
             return;
@@ -156,16 +165,13 @@ impl Engine {
         let level = Arc::new(LaneLevel::new(target));
         let request = LoadRequest {
             id: id.to_owned(),
-            url: url.to_owned(),
+            source: source.clone(),
             cache_dir: self.cache_dir.clone(),
             rate: self.rate,
             level: Arc::clone(&level),
         };
         ambient::spawn_load(request, self.loaded.clone(), self.events.clone());
-        let slot = AmbientSlot {
-            url: url.to_owned(),
-            level,
-        };
+        let slot = AmbientSlot { source, level };
         self.ambient.insert(id.to_owned(), slot);
     }
 

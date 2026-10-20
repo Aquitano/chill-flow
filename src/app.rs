@@ -8,8 +8,8 @@ use jiff::Timestamp;
 use jiff::tz::TimeZone;
 
 use crate::action::{Action, Prompt, Removal, Setting, Tab};
-use crate::audio::{Engine, EngineEvent, StreamInput};
-use crate::catalog::{self, Catalog, Levels, Mix};
+use crate::audio::{Engine, EngineEvent, LoopSource, Noise, StreamInput};
+use crate::catalog::{self, AmbientSound, Catalog, Levels, Mix};
 use crate::config::{self, Config, Paths};
 use crate::media::{MediaCommand, NowPlaying};
 use crate::model::{self, Item, Playable, Playback, Saved, Scene, Session, Source};
@@ -189,7 +189,7 @@ impl App {
         } = paths;
         let (jobs, inbox) = mpsc::channel();
         let session = store.session();
-        let catalog = catalog::offline(&cache_dir, &config.catalog_url);
+        let catalog = with_noise(catalog::offline(&cache_dir, &config.catalog_url));
         let zone = TimeZone::system();
         let mut app = App {
             timer: Timer::new(session.timer, config.pomodoro),
@@ -942,10 +942,13 @@ impl App {
             return;
         };
         let level = level.min(100);
-        let url = self.catalog.url(&sound.file);
+        let source = match Noise::ALL.into_iter().find(|noise| noise.id() == id) {
+            Some(noise) => LoopSource::Noise(noise),
+            None => LoopSource::File(self.catalog.url(&sound.file)),
+        };
         let gain = sound.gain_percent as f32 / 100.0;
         self.engine
-            .set_ambient(id, &url, f32::from(level) / 100.0 * self.ambience_share(), gain);
+            .set_ambient(id, source, f32::from(level) / 100.0 * self.ambience_share(), gain);
         if level == 0 {
             self.levels.remove(id);
         } else {
@@ -1642,7 +1645,7 @@ impl App {
         match job {
             Job::Catalog(Ok(catalog)) => {
                 let previous = self.items_for(&self.source);
-                self.catalog = catalog;
+                self.catalog = with_noise(catalog);
                 self.refresh_mixes();
                 self.load_likes();
                 self.refresh_ambience();
@@ -1717,6 +1720,23 @@ pub fn format_clock(seconds: u32) -> String {
     } else {
         format!("{minutes}:{seconds:02}")
     }
+}
+
+/// The catalog's sounds, then the noise the engine makes itself, which every catalog gets without
+/// listing it, so a catalog that version 0.1.0 also reads never names a sound it can't load.
+fn with_noise(mut catalog: Catalog) -> Catalog {
+    for noise in Noise::ALL {
+        if catalog.sound(noise.id()).is_none() {
+            catalog.ambient.push(AmbientSound {
+                id: noise.id().to_owned(),
+                label: noise.label().to_owned(),
+                file: String::new(),
+                gain_percent: 100,
+                credit: None,
+            });
+        }
+    }
+    catalog
 }
 
 fn fetch_cover(url: &str) -> Option<DynamicImage> {
