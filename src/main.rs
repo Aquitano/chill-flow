@@ -13,6 +13,7 @@ mod tools;
 mod ui;
 mod youtube;
 
+use std::fs::{File, TryLockError};
 use std::io::{self, Write, stdout};
 use std::process::ExitCode;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
@@ -59,6 +60,17 @@ fn main() -> Result<ExitCode> {
         });
     }
     let config = config::load(&paths.config_file)?;
+    // A second chill would count the same focus time twice and overwrite the first one's session.
+    // The OS lets go of the lock however chill exits.
+    let instance = File::create(paths.database.with_extension("lock")).context("could not lock the library")?;
+    match instance.try_lock() {
+        Ok(()) => {}
+        Err(TryLockError::WouldBlock) => {
+            eprintln!("chill is already running in another terminal.");
+            return Ok(ExitCode::FAILURE);
+        }
+        Err(TryLockError::Error(error)) => return Err(error).context("could not lock the library"),
+    }
     let store = store::Store::open(&paths.database).with_context(|| {
         format!(
             "could not open the library at {}",
