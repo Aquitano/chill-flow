@@ -92,6 +92,7 @@ fn main() -> Result<()> {
 }
 
 fn add_track(args: TrackArgs, dry_run: bool) -> Result<()> {
+    let _lock = lock()?;
     let mut catalog = load()?;
     let id = entry_id(args.id, &args.title)?;
     ensure!(
@@ -140,6 +141,7 @@ fn add_track(args: TrackArgs, dry_run: bool) -> Result<()> {
 }
 
 fn add_sound(args: SoundArgs, dry_run: bool) -> Result<()> {
+    let _lock = lock()?;
     let mut catalog = load()?;
     let id = entry_id(args.id, &args.label)?;
     ensure!(
@@ -188,6 +190,7 @@ fn check() -> Result<()> {
 }
 
 fn publish(dry_run: bool) -> Result<()> {
+    let _lock = lock()?;
     check()?;
     let upload = Upload {
         key: "catalog.json".into(),
@@ -202,6 +205,14 @@ fn publish(dry_run: bool) -> Result<()> {
     Bucket::from_env()?.put(&upload)?;
     println!("uploaded {}", upload.describe());
     Ok(())
+}
+
+/// Held for a whole command, so two runs at once can't drop each other's entry or both upload the
+/// same new file.
+fn lock() -> Result<std::fs::File> {
+    let file = std::fs::File::open(CATALOG_PATH).context("opening catalog.json")?;
+    file.lock().context("locking catalog.json")?;
+    Ok(file)
 }
 
 fn load() -> Result<Catalog> {
