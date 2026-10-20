@@ -52,13 +52,49 @@ impl Queue {
         mut refresh: impl FnMut(Item) -> Option<Item>,
     ) -> bool {
         let previous_key = self.current().map(|item| item.key.clone());
-        let previous_keys: HashSet<&str> = previous_source.iter().map(|item| item.key.as_str()).collect();
+        let mut had: HashMap<&str, usize> = HashMap::new();
+        for item in previous_source {
+            *had.entry(&item.key).or_default() += 1;
+        }
+        let mut has: HashMap<&str, usize> = HashMap::new();
+        for item in &next_source {
+            *has.entry(&item.key).or_default() += 1;
+        }
         let replacements: HashMap<&str, &Item> = next_source.iter().map(|item| (item.key.as_str(), item)).collect();
         let previous_cursor = self.cursor;
+        // Copies count by occurrence. When the source lost some copies of an item, as many leave the
+        // queue, upcoming ones first and the current one last, but never below what the source
+        // still has, since the queue may already be missing the ones removed by hand.
+        let mut in_queue: HashMap<&str, usize> = HashMap::new();
+        for entry in &self.entries {
+            *in_queue.entry(&entry.item.key).or_default() += 1;
+        }
+        let mut surplus: HashMap<&str, usize> = had
+            .iter()
+            .filter_map(|(key, &count)| {
+                let kept = *has.get(key)?;
+                let extra = in_queue.get(key).copied().unwrap_or(0).saturating_sub(kept);
+                Some((*key, count.saturating_sub(kept).min(extra)))
+            })
+            .collect();
+        let len = self.entries.len();
+        let mut dropped = HashSet::new();
+        for index in (previous_cursor + 1..len)
+            .chain(0..previous_cursor.min(len))
+            .chain((previous_cursor < len).then_some(previous_cursor))
+        {
+            if let Some(left) = surplus.get_mut(self.entries[index].item.key.as_str())
+                && *left > 0
+            {
+                *left -= 1;
+                dropped.insert(index);
+            }
+        }
         let mut cursor = None;
         let mut entries = Vec::with_capacity(self.entries.len());
         for (index, mut entry) in std::mem::take(&mut self.entries).into_iter().enumerate() {
-            if previous_keys.contains(entry.item.key.as_str()) && !replacements.contains_key(entry.item.key.as_str()) {
+            let key = entry.item.key.as_str();
+            if dropped.contains(&index) || (had.contains_key(key) && !has.contains_key(key)) {
                 continue;
             }
             let item = replacements
@@ -76,12 +112,7 @@ impl Queue {
         }
         self.entries = entries;
         let next_cursor = self.entries.len();
-        // Copies count by occurrence, so a source that gains a second copy of an item queues it, while
-        // copies the source already had, or that are queued anyway, aren't added again.
-        let mut had: HashMap<&str, usize> = HashMap::new();
-        for item in previous_source {
-            *had.entry(&item.key).or_default() += 1;
-        }
+        // A copy the source gained is queued, unless the queue already holds one for it.
         let mut queued: HashMap<String, usize> = HashMap::new();
         for entry in &self.entries {
             *queued.entry(entry.item.key.clone()).or_default() += 1;
@@ -306,6 +337,32 @@ mod tests {
         queue.reconcile(&previous, items(&["a", "b", "b", "c", "c"]), Some);
 
         assert_eq!(keys(&queue), ["b", "b", "c", "c"]);
+    }
+
+    #[test]
+    fn reconciliation_drops_the_copies_a_source_lost_upcoming_first() {
+        let previous = items(&["a", "b", "b", "b"]);
+        let mut queue = Queue::default();
+        queue.replace(previous.clone(), None);
+        queue.next();
+
+        queue.reconcile(&previous, items(&["a", "b"]), Some);
+
+        assert_eq!(queue.current().unwrap().key, "b");
+        assert!(keys(&queue).is_empty());
+    }
+
+    #[test]
+    fn reconciliation_does_not_drop_a_copy_already_removed_by_hand() {
+        let previous = items(&["a", "a", "b"]);
+        let mut queue = Queue::default();
+        queue.replace(previous.clone(), None);
+        queue.remove_upcoming(0);
+
+        queue.reconcile(&previous, items(&["a", "b"]), Some);
+
+        assert_eq!(queue.current().unwrap().key, "a");
+        assert_eq!(keys(&queue), ["b"]);
     }
 
     #[test]

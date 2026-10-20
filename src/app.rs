@@ -91,6 +91,8 @@ struct Reconnect {
     due: Option<Instant>,
     /// The playback the attempts belong to. Anything the user starts moves past it.
     generation: u64,
+    /// The last attempt connected and ended at once, which a file that ends there does every time.
+    ended_empty: bool,
 }
 
 /// Seconds between attempts to reach a dropped stream, about two minutes in all.
@@ -570,6 +572,7 @@ impl App {
         let current = self.current().cloned();
         if changed {
             self.resume_at = None;
+            self.reconnecting = None;
         }
         let input_changed = previous.as_ref().map(|item| &item.play) != current.as_ref().map(|item| &item.play);
         if self.stream != Stream::Idle && (changed || input_changed) {
@@ -704,7 +707,10 @@ impl App {
     }
 
     fn set_timer_running(&mut self, running: bool) {
-        let now = Instant::now();
+        self.set_timer_running_at(running, Instant::now());
+    }
+
+    fn set_timer_running_at(&mut self, running: bool, now: Instant) {
         if running {
             self.timer.start(now);
             self.track_focus(now);
@@ -717,15 +723,19 @@ impl App {
 
     fn skip(&mut self, forward: bool) {
         self.failures_in_a_row = 0;
-        if !forward
-            && self.position() > 3.0
-            && self.stream == Stream::Playing
-            && self.current().is_some_and(|item| !item.is_live())
-        {
-            self.pending_seek = None;
-            self.engine.seek(0.0);
-            self.stream_from = 0.0;
-            return;
+        if !forward && self.position() > 3.0 && self.current().is_some_and(|item| !item.is_live()) {
+            if self.stream == Stream::Playing {
+                self.pending_seek = None;
+                self.engine.seek(0.0);
+                self.stream_from = 0.0;
+                return;
+            }
+            if self
+                .reconnecting
+                .is_some_and(|reconnect| reconnect.due.is_some() && reconnect.generation == self.generation)
+            {
+                return self.seek_to(0.0);
+            }
         }
         self.choices += 1;
         let next = if forward {
@@ -870,7 +880,10 @@ impl App {
         }
         // A seek takes a waiting reconnect along, and once playing again, starts a later drop afresh.
         match &mut self.reconnecting {
-            Some(reconnect) if reconnect.due.is_some() => reconnect.at = seconds,
+            Some(reconnect) if reconnect.due.is_some() => {
+                reconnect.at = seconds;
+                reconnect.ended_empty = false;
+            }
             _ => self.reconnecting = None,
         }
     }
@@ -1433,10 +1446,11 @@ impl App {
     /// Everything that happens without input: finished jobs, audio events, the timer.
     pub fn tick(&mut self, now: Instant) {
         // The loop ticks several times a second, so a long gap means the machine slept. Windows
-        // keeps `Instant` running through sleep while macOS doesn't, so the timer drops the gap.
-        let gap = now.saturating_duration_since(self.ticked_at);
-        if gap >= Duration::from_secs(10) {
-            self.timer.defer(gap);
+        // keeps `Instant` running through sleep while macOS doesn't, so the timer pauses over the
+        // gap itself, which also starts a new focus row on the day it woke up.
+        if now.saturating_duration_since(self.ticked_at) >= Duration::from_secs(10) && self.timer.is_running() {
+            self.set_timer_running_at(false, self.ticked_at);
+            self.set_timer_running_at(true, now);
         }
         self.ticked_at = now;
         // Each resolve is a yt-dlp process, so skipping through a playlist settles first.
@@ -1484,23 +1498,18 @@ impl App {
     }
 
     fn handle_engine(&mut self, event: EngineEvent) {
-        let reconnected = match &event {
-            EngineEvent::Ended => self.ended_early() && self.reconnect(false),
-            EngineEvent::Failed(_) => self.reconnect(true),
-            _ => false,
-        };
-        if reconnected {
-            return;
-        }
         match event {
-            EngineEvent::Ended => {
-                self.failures_in_a_row = 0;
-                match self.queue.advance().cloned() {
-                    Some(item) => self.start(item, 0.0),
-                    None => self.music_ended(),
+            EngineEvent::Ended if self.ended_early() => {
+                if !self.reconnect(false) && !self.stop_reconnecting() {
+                    self.track_ended();
                 }
             }
-            EngineEvent::Failed(message) => self.failed(message),
+            EngineEvent::Ended => self.track_ended(),
+            EngineEvent::Failed(message) => {
+                if !self.reconnect(true) {
+                    self.failed(message);
+                }
+            }
             EngineEvent::AmbientFailed { id, message } => {
                 let label = self.catalog.sound(&id).map_or(id.clone(), |sound| sound.label.clone());
                 self.toast(Tone::Error, format!("{label}: {message}"));
@@ -1527,9 +1536,14 @@ impl App {
         let ongoing = self
             .reconnecting
             .filter(|reconnect| reconnect.generation == self.generation);
+        let ended_empty = !failed && played < 1.0;
         let (at, attempts) = match ongoing {
-            // An attempt that connected and then ended at once is a file that ends there.
-            Some(_) if !failed && played < 1.0 => return false,
+            // Once could be a connection that came back and dropped again; twice is a file that
+            // ends there.
+            Some(reconnect) if ended_empty && reconnect.ended_empty => {
+                self.reconnecting = None;
+                return false;
+            }
             Some(reconnect) if played < 5.0 => (reconnect.at, reconnect.attempts),
             // Only a stream that played counts as dropped, not one that failed to start from a
             // resume point.
@@ -1551,6 +1565,7 @@ impl App {
             attempts: attempts + 1,
             due: Some(Instant::now() + Duration::from_secs(*delay)),
             generation: self.generation,
+            ended_empty,
         });
         true
     }
@@ -1577,22 +1592,35 @@ impl App {
         }
     }
 
-    /// A stream that couldn't play. One still unreachable after every reconnect attempt waits where
-    /// it stopped, so an outage doesn't fail the rest of the queue too.
+    fn track_ended(&mut self) {
+        self.failures_in_a_row = 0;
+        match self.queue.advance().cloned() {
+            Some(item) => self.start(item, 0.0),
+            None => self.music_ended(),
+        }
+    }
+
     fn failed(&mut self, message: String) {
         self.stream = Stream::Idle;
         self.toast(Tone::Error, message);
-        match self
+        if !self.stop_reconnecting() {
+            self.after_failure();
+        }
+    }
+
+    /// A stream still unreachable after every reconnect attempt waits where it stopped, so an
+    /// outage doesn't fail the rest of the queue too.
+    fn stop_reconnecting(&mut self) -> bool {
+        let Some(reconnect) = self
             .reconnecting
             .take()
             .filter(|reconnect| reconnect.generation == self.generation)
-        {
-            Some(reconnect) => {
-                self.music_ended();
-                self.resume_at = Some(reconnect.at);
-            }
-            None => self.after_failure(),
-        }
+        else {
+            return false;
+        };
+        self.music_ended();
+        self.resume_at = Some(reconnect.at);
+        true
     }
 
     fn after_failure(&mut self) {
@@ -1644,6 +1672,7 @@ impl App {
                         {
                             input.start_secs = at;
                         }
+                        self.stream_from = if input.live { 0.0 } else { input.start_secs };
                         self.engine.play_stream(input);
                         self.stream = Stream::Playing;
                     }
@@ -1948,6 +1977,17 @@ mod tests {
     }
 
     #[test]
+    fn sleep_starts_a_new_focus_row_when_the_machine_wakes() {
+        let mut app = app();
+        app.set_timer_running(true);
+        let before = app.focus_block.as_ref().unwrap().id;
+
+        app.tick(app.ticked_at + Duration::from_secs(3600));
+
+        assert_ne!(app.focus_block.as_ref().unwrap().id, before);
+    }
+
+    #[test]
     fn time_asleep_does_not_count_toward_the_timer() {
         let mut app = app();
         let start = Instant::now();
@@ -1979,6 +2019,68 @@ mod tests {
     }
 
     #[test]
+    fn a_reconnect_that_ends_at_once_gets_one_more_try_before_moving_on() {
+        let mut app = app();
+        let mut next = app.catalog.tracks[0].clone();
+        next.id = "next".into();
+        app.catalog.tracks.push(next);
+        app.fill_queue(&Source::Tracks, None);
+        let first = app.current().unwrap().clone();
+        app.stream = Stream::Playing;
+        app.pending_seek = Some((120.0, Instant::now()));
+        app.handle_engine(EngineEvent::Ended);
+        let later = Instant::now() + Duration::from_secs(60);
+
+        app.retry_reconnect(later);
+        app.handle_engine(EngineEvent::Ended);
+        assert_eq!(app.current(), Some(&first));
+
+        app.retry_reconnect(later);
+        app.handle_engine(EngineEvent::Ended);
+        assert_eq!(app.current().unwrap().key, "r2:next");
+    }
+
+    #[test]
+    fn a_seek_while_waiting_gives_the_new_position_its_own_tries() {
+        let mut app = app();
+        let mut next = app.catalog.tracks[0].clone();
+        next.id = "next".into();
+        app.catalog.tracks.push(next);
+        app.fill_queue(&Source::Tracks, None);
+        let first = app.current().unwrap().clone();
+        app.stream = Stream::Playing;
+        app.pending_seek = Some((120.0, Instant::now()));
+        app.handle_engine(EngineEvent::Ended);
+        let later = Instant::now() + Duration::from_secs(60);
+        app.retry_reconnect(later);
+        app.handle_engine(EngineEvent::Ended);
+
+        app.dispatch(Action::SeekTo(30.0));
+        app.retry_reconnect(later);
+        app.handle_engine(EngineEvent::Ended);
+
+        assert_eq!(app.current(), Some(&first));
+    }
+
+    #[test]
+    fn previous_while_waiting_to_reconnect_restarts_the_track() {
+        let mut app = app();
+        let mut next = app.catalog.tracks[0].clone();
+        next.id = "next".into();
+        app.catalog.tracks.push(next);
+        app.fill_queue(&Source::Tracks, None);
+        let second = app.queue.next().cloned().unwrap();
+        app.stream = Stream::Playing;
+        app.pending_seek = Some((120.0, Instant::now()));
+        app.handle_engine(EngineEvent::Ended);
+
+        app.dispatch(Action::Previous);
+        app.retry_reconnect(Instant::now() + Duration::from_secs(60));
+
+        assert_eq!((app.current(), app.stream_from), (Some(&second), 0.0));
+    }
+
+    #[test]
     fn a_seek_while_waiting_to_reconnect_moves_the_retry() {
         let mut app = app();
         app.stream = Stream::Playing;
@@ -1989,6 +2091,66 @@ mod tests {
         app.retry_reconnect(Instant::now() + Duration::from_secs(60));
 
         assert_eq!(app.stream_from, 200.0);
+    }
+
+    #[test]
+    fn retries_that_keep_ending_early_stop_where_the_stream_dropped() {
+        let mut app = app();
+        let mut next = app.catalog.tracks[0].clone();
+        next.id = "next".into();
+        app.catalog.tracks.push(next);
+        app.fill_queue(&Source::Tracks, None);
+        let first = app.current().unwrap().clone();
+        app.stream = Stream::Playing;
+        app.pending_seek = Some((120.0, Instant::now()));
+        app.handle_engine(EngineEvent::Ended);
+
+        let later = Instant::now() + Duration::from_secs(60);
+        for _ in RECONNECT_DELAYS {
+            app.retry_reconnect(later);
+            app.pending_seek = Some((122.0, Instant::now()));
+            app.handle_engine(EngineEvent::Ended);
+        }
+
+        assert_eq!((app.current(), app.position()), (Some(&first), 120.0));
+    }
+
+    #[test]
+    fn a_catalog_refresh_that_replaces_the_waiting_track_drops_its_retry() {
+        let mut app = app();
+        let mut next = app.catalog.tracks[0].clone();
+        next.id = "next".into();
+        app.catalog.tracks.push(next);
+        app.fill_queue(&Source::Tracks, None);
+        app.stream = Stream::Playing;
+        app.pending_seek = Some((120.0, Instant::now()));
+        app.handle_engine(EngineEvent::Ended);
+
+        let mut updated = app.catalog.clone();
+        updated.tracks.remove(0);
+        app.handle_job(Job::Catalog(Ok(updated)));
+
+        assert!(app.reconnecting.is_none());
+    }
+
+    #[test]
+    fn a_seek_while_a_link_resolves_counts_playback_from_where_it_started() {
+        let mut app = app();
+        let item = playlist().items.remove(0);
+        app.start(item, 300.0);
+        app.seek_to(50.0);
+
+        app.handle_job(Job::Resolved {
+            generation: app.generation,
+            result: Ok(StreamInput {
+                url: "http://127.0.0.1:9/first".into(),
+                headers: Vec::new(),
+                start_secs: 300.0,
+                live: false,
+            }),
+        });
+
+        assert_eq!(app.stream_from, 50.0);
     }
 
     #[test]

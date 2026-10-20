@@ -188,9 +188,8 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App, ui: &mut Ui, media: &mut M
             return Ok(());
         }
         let busy = ui.is_animating(Instant::now())
-            || (app.is_playing() && !app.config.reduce_motion)
-            || app.stream == Stream::Resolving
-            || app.engine.is_buffering();
+            || (!app.config.reduce_motion
+                && (app.is_playing() || app.stream == Stream::Resolving || app.engine.is_buffering()));
         let timeout = Duration::from_millis(if busy { 33 } else { 250 });
         match input.recv_timeout(timeout) {
             Ok(burst) => {

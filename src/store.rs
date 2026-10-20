@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use jiff::civil::Date;
 use jiff::tz::TimeZone;
 use jiff::{Timestamp, ToSpan};
@@ -58,9 +58,12 @@ impl Store {
     pub fn open(path: &Path) -> Result<Store> {
         let db = Connection::open(path)?;
         db.busy_timeout(std::time::Duration::from_secs(2))?;
+        let version: i64 = db.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if version > SCHEMA_VERSION {
+            bail!("a newer version of chill wrote this library, so update chill to open it");
+        }
         db.pragma_update(None, "journal_mode", "WAL")?;
         db.execute_batch(SCHEMA)?;
-        let version: i64 = db.pragma_query_value(None, "user_version", |row| row.get(0))?;
         if version == 0 {
             db.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -233,6 +236,25 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_library_from_a_newer_chill_is_left_alone() {
+        let path = std::env::temp_dir().join(format!("chill-newer-{}.db", std::process::id()));
+        Connection::open(&path)
+            .unwrap()
+            .pragma_update(None, "user_version", SCHEMA_VERSION + 1)
+            .unwrap();
+
+        let opened = Store::open(&path);
+        let tables: i64 = Connection::open(&path)
+            .unwrap()
+            .query_row("SELECT count(*) FROM sqlite_master", [], |row| row.get(0))
+            .unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        assert!(opened.is_err());
+        assert_eq!(tables, 0);
+    }
 
     #[test]
     fn refreshing_saved_metadata_preserves_the_library_order() {

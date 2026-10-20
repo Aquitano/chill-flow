@@ -105,6 +105,15 @@ impl Media {
     }
 
     pub fn show(&mut self, now: Option<NowPlaying>, playing: bool, position: f64) {
+        // souvlaki's macOS calls autorelease the objects they build, and this thread has no pool of
+        // its own, so without one they pile up for the whole session.
+        #[cfg(target_os = "macos")]
+        objc2::rc::autoreleasepool(|_| self.update(now, playing, position));
+        #[cfg(not(target_os = "macos"))]
+        self.update(now, playing, position);
+    }
+
+    fn update(&mut self, now: Option<NowPlaying>, playing: bool, position: f64) {
         let Some(controls) = self.controls.as_mut() else { return };
         if self.shown_metadata.update(now.as_ref()) {
             let metadata = now.as_ref().map_or_else(MediaMetadata::default, |now| MediaMetadata {
@@ -122,7 +131,7 @@ impl Media {
             return;
         }
         self.shown_playback = Some((playing, whole_seconds));
-        let progress = Some(MediaPosition(Duration::from_secs_f64(position.max(0.0))));
+        let progress = Duration::try_from_secs_f64(position.max(0.0)).ok().map(MediaPosition);
         let playback = match (now, playing) {
             (None, _) => MediaPlayback::Stopped,
             (Some(_), true) => MediaPlayback::Playing { progress },
