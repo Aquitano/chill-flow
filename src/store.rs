@@ -86,7 +86,7 @@ impl Store {
     pub fn save(&self, saved: &Saved) -> Result<()> {
         self.db.execute(
             "INSERT INTO saved (id, body, added_at) VALUES (?1, ?2, ?3)
-             ON CONFLICT (id) DO UPDATE SET body = excluded.body, added_at = excluded.added_at",
+             ON CONFLICT (id) DO UPDATE SET body = excluded.body",
             params![saved.id, json(saved)?, now()],
         )?;
         Ok(())
@@ -233,6 +233,33 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn refreshing_saved_metadata_preserves_the_library_order() {
+        let store = Store::open(Path::new(":memory:")).unwrap();
+        let saved = |id: &str, title: &str| Saved {
+            id: id.into(),
+            url: format!("https://youtube.com/playlist?list={id}"),
+            title: title.into(),
+            channel: String::new(),
+            items: Vec::new(),
+        };
+        store.save(&saved("first", "First")).unwrap();
+        store.save(&saved("second", "Second")).unwrap();
+        store
+            .db
+            .execute("UPDATE saved SET added_at = CASE id WHEN 'first' THEN 1 ELSE 2 END", [])
+            .unwrap();
+
+        store.save(&saved("first", "Refreshed first")).unwrap();
+
+        let refreshed = store.saved().unwrap();
+        assert_eq!(
+            refreshed.iter().map(|saved| saved.id.as_str()).collect::<Vec<_>>(),
+            ["second", "first"]
+        );
+        assert_eq!(refreshed[1].title, "Refreshed first");
+    }
 
     #[test]
     fn focus_minutes_land_on_their_local_day() {
