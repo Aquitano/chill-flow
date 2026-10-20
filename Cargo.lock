@@ -531,6 +531,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "signal-hook",
  "souvlaki",
  "terminal-colorsaurus",
  "toml",

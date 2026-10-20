@@ -6,19 +6,23 @@ mod config;
 mod media;
 mod model;
 mod queue;
+mod signals;
 mod store;
 mod timer;
 mod tools;
 mod ui;
 mod youtube;
 
-use std::io::{Write, stdout};
+use std::io::{self, Write, stdout};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use crossterm::event::{self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture};
-use crossterm::execute;
+use crossterm::event::{
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event,
+};
+use crossterm::{cursor, execute};
 use ratatui::DefaultTerminal;
 use ratatui_image::picker::Picker;
 
@@ -53,6 +57,7 @@ fn main() -> Result<()> {
     let config = config::load(&paths.config_file)?;
     let store = store::Store::open(&paths.database)?;
     media::run_app(move || {
+        signals::listen();
         let theme = ui::theme::Theme::detect();
         let engine = audio::Engine::start(paths.cache.clone());
         let crash_log = paths.cache.join("crash.log");
@@ -94,8 +99,12 @@ fn main() -> Result<()> {
 
         let result = run(&mut terminal, &mut app, &mut ui, &mut media);
         app.shutdown();
-        let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste);
-        ratatui::restore();
+        // After the window closes there is no terminal left to restore. ratatui would report that
+        // on stderr, which is gone too, and the panic that follows aborts, so errors are ignored
+        // here and the terminal is never dropped.
+        let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste, cursor::Show);
+        let _ = ratatui::try_restore();
+        std::mem::forget(terminal);
         result
     })
 }
@@ -134,12 +143,13 @@ fn doctor(paths: &config::Paths) {
 }
 
 fn run(terminal: &mut DefaultTerminal, app: &mut App, ui: &mut Ui, media: &mut Media) -> Result<()> {
+    let input = read_input();
     loop {
         app.tick(Instant::now());
         media.show(app.now_playing(), app.is_playing(), app.position());
         media.pump();
         terminal.draw(|frame| ui.draw(frame, app))?;
-        if app.quit {
+        if app.quit || signals::quit_requested() {
             return Ok(());
         }
         let busy = ui.is_animating(Instant::now())
@@ -147,14 +157,42 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App, ui: &mut Ui, media: &mut M
             || app.stream == Stream::Resolving
             || app.engine.is_buffering();
         let timeout = Duration::from_millis(if busy { 33 } else { 250 });
-        if event::poll(timeout)? {
+        match input.recv_timeout(timeout) {
+            Ok(burst) => {
+                let mut events = burst?;
+                for burst in input.try_iter() {
+                    events.extend(burst?);
+                }
+                for event in ui::input::coalesce(events) {
+                    ui::input::handle(app, ui, event);
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => return Ok(()),
+        }
+    }
+}
+
+/// Input arrives in bursts, a paste as many key events at once, read on a thread of its own: once
+/// the terminal hangs up, crossterm's reader spins on the closed tty and never returns, and the
+/// main loop still has to notice and save.
+fn read_input() -> Receiver<io::Result<Vec<Event>>> {
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let read_burst = || -> io::Result<Vec<Event>> {
             let mut burst = vec![event::read()?];
             while event::poll(Duration::ZERO)? {
                 burst.push(event::read()?);
             }
-            for event in ui::input::coalesce(burst) {
-                ui::input::handle(app, ui, event);
+            Ok(burst)
+        };
+        loop {
+            let burst = read_burst();
+            let failed = burst.is_err();
+            if sender.send(burst).is_err() || failed {
+                return;
             }
         }
-    }
+    });
+    receiver
 }
