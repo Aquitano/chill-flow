@@ -424,34 +424,16 @@ impl Ui {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
     use super::*;
     use crate::action::Setting;
-    use crate::audio::Engine;
-    use crate::config::{Config, Paths};
-    use crate::store::Store;
+    use crate::app::TestApp;
 
-    /// Nothing listens on port 9, so streams, downloads, and the catalog fetch fail fast
-    /// instead of reaching the network.
-    fn offline_app() -> App {
-        let cache = std::env::temp_dir().join(format!("chill-fuzz-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&cache);
-        let config = Config {
-            catalog_url: "http://127.0.0.1:9/catalog.json".into(),
-            ..Config::default()
-        };
-        let paths = Paths {
-            config_file: cache.join("config.toml"),
-            database: cache.join("unused.db"),
-            cache: cache.clone(),
-        };
-        let store = Store::open(Path::new(":memory:")).unwrap();
-        App::new(config, paths, store, Engine::start(cache))
+    fn offline_app() -> TestApp {
+        TestApp::new()
     }
 
     fn random_event(rng: &mut fastrand::Rng, width: u16, height: u16) -> Event {
