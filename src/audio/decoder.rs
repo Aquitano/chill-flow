@@ -28,6 +28,8 @@ impl Decoder {
     ) -> Result<(Self, MusicLane), String> {
         let mut command = ffmpeg::command();
         if input.url.starts_with("http://") || input.url.starts_with("https://") {
+            // Without a read timeout, a connection that goes silent (a closed lid, a Wi-Fi
+            // switch) blocks ffmpeg forever instead of ending the stream so the app reconnects.
             command.args([
                 "-reconnect",
                 "1",
@@ -35,6 +37,8 @@ impl Decoder {
                 "1",
                 "-reconnect_delay_max",
                 "5",
+                "-rw_timeout",
+                "10000000",
             ]);
         }
         if !input.headers.is_empty() {
