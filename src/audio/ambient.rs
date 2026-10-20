@@ -4,8 +4,10 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::thread;
+use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
@@ -69,13 +71,22 @@ fn cached_file(url: &str, cache_dir: &Path) -> Result<PathBuf, String> {
     let io_error = |error: io::Error| format!("could not cache {name}: {error}");
     fs::create_dir_all(&dir).map_err(io_error)?;
     let response = ureq::get(url)
+        .config()
+        .timeout_global(Some(Duration::from_secs(60)))
+        .build()
         .call()
         .map_err(|error| format!("could not download {name}: {error}"))?;
-    let partial = dir.join(format!("{name}.part"));
-    let mut file = File::create(&partial).map_err(io_error)?;
-    io::copy(&mut response.into_body().into_reader(), &mut file).map_err(io_error)?;
-    drop(file);
-    fs::rename(&partial, &path).map_err(io_error)?;
+    // Each download writes a partial file of its own, so two loads of one sound can't interleave.
+    static DOWNLOADS: AtomicU64 = AtomicU64::new(0);
+    let download = DOWNLOADS.fetch_add(1, Ordering::Relaxed);
+    let partial = dir.join(format!("{name}.{}-{download}.part", std::process::id()));
+    let written = File::create(&partial)
+        .and_then(|mut file| io::copy(&mut response.into_body().into_reader(), &mut file))
+        .and_then(|_| fs::rename(&partial, &path));
+    if let Err(error) = written {
+        let _ = fs::remove_file(&partial);
+        return Err(io_error(error));
+    }
     Ok(path)
 }
 
