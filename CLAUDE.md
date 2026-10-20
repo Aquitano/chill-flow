@@ -3,11 +3,10 @@
 **Principles**
 - Atmosphere is functional, not decoration — never at the cost of legibility or performance.
 - Only show what's real (no fake presets, no vanity analytics).
-- Desktop-first, unbroken everywhere.
+- Wide terminal first, unbroken when narrow.
 
-**Do not** reach for: neon synthwave / gamer lo-fi, busy SaaS-dashboard density, or
-generic startup-landing scaffolding (hero-metric templates, uppercase eyebrow kickers,
-identical feature-card grids).
+**Do not** reach for: neon synthwave / gamer lo-fi, busy dashboard density, or gamified
+streaks and badges.
 
-**Accessibility:** WCAG AA (≥4.5:1 body contrast against the dark palette) and honor
-`prefers-reduced-motion` on every animation.
+**Accessibility:** colors come from the terminal theme, so muted text must stay readable on
+dark and light themes. Honor `reduce_motion` from `config.toml` on every animation.

@@ -1,0 +1,1630 @@
+use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::time::{Duration, Instant};
+
+use anyhow::Result;
+use image::DynamicImage;
+use jiff::Timestamp;
+use jiff::tz::TimeZone;
+
+use crate::action::{Action, Prompt, Removal, Setting, Tab};
+use crate::audio::{Engine, EngineEvent, StreamInput};
+use crate::catalog::{Catalog, Levels, Mix};
+use crate::config::{self, Config, Paths};
+use crate::media::{MediaCommand, NowPlaying};
+use crate::model::{self, Item, Playable, Saved, Scene, Session, Source};
+use crate::queue::Queue;
+use crate::store::{FocusDays, Store};
+use crate::timer::{Phase, PhaseEnded, Timer, TimerMode};
+use crate::tools::Tool;
+use crate::youtube;
+
+pub enum Job {
+    Catalog(Result<Catalog>),
+    Inspected {
+        url: String,
+        choices: u64,
+        result: Result<Saved>,
+    },
+    Resolved {
+        generation: u64,
+        result: Result<StreamInput>,
+    },
+    Cover {
+        url: String,
+        image: Option<DynamicImage>,
+    },
+    Media(MediaCommand),
+    Tools(Vec<(Tool, Option<String>)>),
+    /// A worker thread panicked; the panic itself went to crash.log.
+    Crashed,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Stream {
+    Idle,
+    Resolving,
+    Playing,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tone {
+    Info,
+    Done,
+    Error,
+}
+
+/// One row of the library list, whatever the tab.
+#[derive(Debug, Clone)]
+pub struct Row {
+    pub title: String,
+    pub detail: String,
+    pub meta: String,
+    pub like_key: Option<String>,
+    pub current: bool,
+    pub target: Target,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Target {
+    Track(usize),
+    Liked(usize),
+    Saved(usize),
+    Mix(usize),
+    Scene(usize),
+}
+
+/// One unpaused stretch of a focus phase. Each stretch gets its own row, so focus resumed after
+/// midnight counts toward the new day.
+struct FocusBlock {
+    id: i64,
+    saved_at: Instant,
+    /// How much of the phase earlier stretches already recorded.
+    before: Duration,
+}
+
+/// A stream that dropped partway through, retried from where it stopped until it plays again.
+#[derive(Debug, Clone, Copy)]
+struct Reconnect {
+    at: f64,
+    attempts: usize,
+    /// When the next attempt starts, or `None` while one is running.
+    due: Option<Instant>,
+    /// The playback the attempts belong to. Anything the user starts moves past it.
+    generation: u64,
+}
+
+/// Seconds between attempts to reach a dropped stream, about two minutes in all.
+const RECONNECT_DELAYS: [u64; 8] = [0, 2, 4, 8, 15, 30, 30, 30];
+
+pub struct App {
+    pub config: Config,
+    cache_dir: PathBuf,
+    config_file: PathBuf,
+    store: Store,
+    pub catalog: Catalog,
+    pub engine: Engine,
+    pub queue: Queue,
+    pub source: Source,
+    pub saved: Vec<Saved>,
+    pub likes: Vec<Item>,
+    pub mixes: Vec<Mix>,
+    pub scenes: Vec<Scene>,
+    pub levels: Levels,
+    pub mix_name: Option<String>,
+    pub volume: f32,
+    /// 0 favors the music, 1 the ambience, and 0.5 leaves both at their own levels.
+    pub balance: f32,
+    pub timer: Timer,
+    pub focus_days: FocusDays,
+    focus_block: Option<FocusBlock>,
+    timer_follows_play: bool,
+    pub stream: Stream,
+    generation: u64,
+    /// Counts playback changes the user asked for, unlike `generation`, which also moves when a
+    /// track ends on its own.
+    choices: u64,
+    failures_in_a_row: u32,
+    reconnecting: Option<Reconnect>,
+    /// Where the current stream started, so `position` minus this is how much of it has played.
+    stream_from: f64,
+    resume_at: Option<f64>,
+    pending_seek: Option<(f64, Instant)>,
+    pending_resolve: Option<(String, f64, Instant)>,
+    cover_requested: Option<String>,
+    pub jobs: Sender<Job>,
+    inbox: Receiver<Job>,
+    pub events: Vec<Event>,
+    pub covers: Vec<(String, DynamicImage)>,
+    pub filter: String,
+    pub tab: Tab,
+    zone: TimeZone,
+    session_saved_at: Instant,
+    ticked_at: Instant,
+    pub quit: bool,
+}
+
+const LOOKING_UP: &str = "Looking up that link…";
+
+/// Things the UI should react to (toasts, glows, transitions), drained once per frame.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Event {
+    Toast(Tone, String),
+    DismissToast(&'static str),
+    TrackChanged,
+    PhaseChanged,
+    Liked,
+}
+
+impl App {
+    pub fn new(config: Config, paths: Paths, store: Store, engine: Engine) -> App {
+        let Paths {
+            config_file,
+            cache: cache_dir,
+            ..
+        } = paths;
+        let (jobs, inbox) = mpsc::channel();
+        let session = store.session();
+        let catalog = Catalog::offline(&cache_dir, &config.catalog_url);
+        let zone = TimeZone::system();
+        let mut app = App {
+            timer: Timer::new(session.timer, config.pomodoro),
+            focus_days: store.focus_days(7, &zone).unwrap_or(FocusDays { days: Vec::new() }),
+            saved: store.saved().unwrap_or_default(),
+            likes: Vec::new(),
+            scenes: store.scenes().unwrap_or_default(),
+            mixes: Vec::new(),
+            config,
+            cache_dir,
+            config_file,
+            store,
+            catalog,
+            engine,
+            queue: Queue::new(session.shuffle, session.repeat),
+            source: session.source.clone(),
+            levels: Levels::new(),
+            mix_name: None,
+            volume: session.volume.clamp(0.0, 1.0),
+            balance: model::EVEN,
+            focus_block: None,
+            timer_follows_play: true,
+            stream: Stream::Idle,
+            generation: 0,
+            choices: 0,
+            failures_in_a_row: 0,
+            reconnecting: None,
+            stream_from: 0.0,
+            resume_at: (session.position > 1.0).then_some(session.position),
+            pending_seek: None,
+            pending_resolve: None,
+            cover_requested: None,
+            jobs,
+            inbox,
+            events: Vec::new(),
+            covers: Vec::new(),
+            filter: String::new(),
+            tab: Tab::Tracks,
+            zone,
+            session_saved_at: Instant::now(),
+            ticked_at: Instant::now(),
+            quit: false,
+        };
+        app.refresh_mixes();
+        app.load_likes();
+        app.engine.set_volume(app.volume);
+        app.set_balance(session.balance);
+        app.apply_levels(&session.levels);
+        app.mix_name = app.matching_mix_name();
+        let key = session.item.as_ref().map(|item| item.key.clone());
+        app.restore_queue(&session.source, session.item);
+        if app.queue.current().map(|item| &item.key) != key.as_ref() {
+            app.resume_at = None;
+        }
+        app.fetch_catalog();
+        app
+    }
+
+    /// `chill <url>` or `chill <scene>`: start that instead of the paused resume.
+    pub fn launch(&mut self, target: &str) {
+        if youtube::looks_like_url(target) {
+            self.open_url(target.trim());
+        } else if let Some(index) = self
+            .scenes
+            .iter()
+            .position(|scene| scene.name.eq_ignore_ascii_case(target))
+        {
+            self.load_scene(index);
+        } else {
+            self.toast(Tone::Error, format!("No scene called \"{target}\""));
+        }
+    }
+
+    /// A missing ffmpeg would otherwise only show up as an error on the first play.
+    pub fn check_tools(&self) {
+        let jobs = self.jobs.clone();
+        std::thread::spawn(move || {
+            let found = Tool::ALL.into_iter().map(|tool| (tool, tool.version())).collect();
+            let _ = jobs.send(Job::Tools(found));
+        });
+    }
+
+    fn tools_checked(&mut self, found: Vec<(Tool, Option<String>)>) {
+        let today = Timestamp::now().to_zoned(self.zone.clone()).date();
+        let has_yt_dlp = found
+            .iter()
+            .any(|(tool, version)| *tool == Tool::YtDlp && version.is_some());
+        for (tool, version) in found {
+            match (tool, version) {
+                (Tool::Ffmpeg, None) => self.toast(
+                    Tone::Error,
+                    "ffmpeg is missing, so nothing can play. Run chill doctor to see how to install it.",
+                ),
+                (Tool::YtDlp, None) => self.toast(
+                    Tone::Info,
+                    "yt-dlp is missing, so YouTube links won't open. Run chill doctor for details.",
+                ),
+                (Tool::Deno, None) if has_yt_dlp => self.toast(
+                    Tone::Info,
+                    "deno is missing, so some YouTube links may fail. Run chill doctor for details.",
+                ),
+                (tool, Some(version)) => {
+                    if let Some(days) = tool.stale_days(&version, today) {
+                        self.toast(
+                            Tone::Info,
+                            format!(
+                                "yt-dlp is {days} days old and may fail on YouTube links. Update it with {}.",
+                                tool.upgrade()
+                            ),
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn fetch_catalog(&self) {
+        let jobs = self.jobs.clone();
+        let (cache, url) = (self.cache_dir.clone(), self.config.catalog_url.clone());
+        std::thread::spawn(move || {
+            let _ = jobs.send(Job::Catalog(Catalog::fetch(&cache, &url)));
+        });
+    }
+
+    pub fn toast(&mut self, tone: Tone, message: impl Into<String>) {
+        self.events.push(Event::Toast(tone, message.into()));
+    }
+
+    pub fn is_playing(&self) -> bool {
+        !self.engine.is_paused()
+    }
+
+    pub fn current(&self) -> Option<&Item> {
+        match self.source {
+            Source::Soundscape => None,
+            _ => self.queue.current(),
+        }
+    }
+
+    pub fn now_playing(&self) -> Option<NowPlaying<'_>> {
+        match (self.current(), &self.source) {
+            (Some(item), _) => Some(NowPlaying {
+                title: &item.title,
+                artist: &item.artist,
+                album: item.origin(),
+                cover: item.cover.as_deref(),
+                duration: item.duration,
+            }),
+            (None, Source::Soundscape) if !self.levels.is_empty() => Some(NowPlaying {
+                title: self.mix_name.as_deref().unwrap_or("Ambience"),
+                artist: "chill",
+                album: "Soundscape",
+                cover: None,
+                duration: None,
+            }),
+            (None, _) => None,
+        }
+    }
+
+    pub fn position(&self) -> f64 {
+        match (&self.stream, self.pending_seek) {
+            (Stream::Playing, Some((at, _))) => at,
+            (Stream::Playing, None) => self.engine.position(),
+            _ => self.resume_at.unwrap_or(0.0),
+        }
+    }
+
+    pub fn is_liked(&self, key: &str) -> bool {
+        self.likes.iter().any(|item| item.key == key)
+    }
+
+    pub fn source_label(&self) -> String {
+        match (&self.source, &self.mix_name) {
+            (Source::Soundscape, Some(mix)) => mix.clone(),
+            (source, _) => self.source_name(source),
+        }
+    }
+
+    fn source_name(&self, source: &Source) -> String {
+        match source {
+            Source::Tracks => "Tracks".into(),
+            Source::Liked => "Liked".into(),
+            Source::Saved { id } => self
+                .saved
+                .iter()
+                .find(|saved| &saved.id == id)
+                .map_or_else(|| "YouTube".into(), |saved| saved.title.clone()),
+            Source::Soundscape => "Ambience only".into(),
+        }
+    }
+
+    pub fn sound_labels(&self, levels: &Levels) -> Vec<&str> {
+        levels
+            .keys()
+            .filter_map(|id| self.catalog.sound(id).map(|sound| sound.label.as_str()))
+            .collect()
+    }
+
+    pub fn rows(&self, tab: Tab) -> Vec<Row> {
+        let duration = |seconds: Option<u32>| seconds.map(format_clock).unwrap_or_default();
+        let playing = self.current().map(|item| item.key.as_str());
+        let rows: Vec<Row> = match tab {
+            Tab::Tracks => self
+                .catalog
+                .tracks
+                .iter()
+                .enumerate()
+                .map(|(index, track)| Row {
+                    title: track.title.clone(),
+                    detail: track.artist.clone(),
+                    meta: duration(Some(track.duration_sec)),
+                    current: playing.and_then(|key| key.strip_prefix("r2:")) == Some(&track.id),
+                    like_key: Some(format!("r2:{}", track.id)),
+                    target: Target::Track(index),
+                })
+                .collect(),
+            Tab::Liked => self
+                .likes
+                .iter()
+                .enumerate()
+                .map(|(index, item)| Row {
+                    title: item.title.clone(),
+                    detail: item.artist.clone(),
+                    meta: if item.is_live() {
+                        "live".into()
+                    } else {
+                        duration(item.duration)
+                    },
+                    current: playing == Some(&item.key),
+                    like_key: Some(item.key.clone()),
+                    target: Target::Liked(index),
+                })
+                .collect(),
+            Tab::YouTube => self
+                .saved
+                .iter()
+                .enumerate()
+                .map(|(index, saved)| Row {
+                    title: saved.title.clone(),
+                    detail: saved.channel.clone(),
+                    meta: match saved.kind_label() {
+                        "playlist" => format!("{} videos", saved.items.len()),
+                        "video" => duration(saved.items.first().and_then(|item| item.duration)),
+                        other => other.into(),
+                    },
+                    current: matches!(&self.source, Source::Saved { id } if id == &saved.id),
+                    like_key: (saved.items.len() == 1).then(|| saved.items[0].key.clone()),
+                    target: Target::Saved(index),
+                })
+                .collect(),
+            Tab::Sounds => self
+                .mixes
+                .iter()
+                .enumerate()
+                .map(|(index, mix)| Row {
+                    title: mix.name.clone(),
+                    detail: self.sound_labels(&mix.levels).join(" · "),
+                    meta: if mix.id.starts_with("saved:") {
+                        "yours".into()
+                    } else {
+                        String::new()
+                    },
+                    current: !self.levels.is_empty() && self.mix_name.as_ref() == Some(&mix.name),
+                    like_key: None,
+                    target: Target::Mix(index),
+                })
+                .collect(),
+            Tab::Scenes => self
+                .scenes
+                .iter()
+                .enumerate()
+                .map(|(index, scene)| Row {
+                    title: scene.name.clone(),
+                    detail: self.describe_scene(scene),
+                    meta: scene.timer.label(),
+                    current: false,
+                    like_key: None,
+                    target: Target::Scene(index),
+                })
+                .collect(),
+        };
+        let needle = self.filter.to_lowercase();
+        if needle.is_empty() {
+            return rows;
+        }
+        rows.into_iter()
+            .filter(|row| format!("{} {}", row.title, row.detail).to_lowercase().contains(&needle))
+            .collect()
+    }
+
+    fn describe_scene(&self, scene: &Scene) -> String {
+        let source = self.source_name(&scene.source);
+        let sounds = self.sound_labels(&scene.levels);
+        if sounds.is_empty() {
+            source
+        } else {
+            format!("{source} + {}", sounds.join(", "))
+        }
+    }
+
+    fn items_for(&self, source: &Source) -> Vec<Item> {
+        match source {
+            Source::Tracks => self
+                .catalog
+                .tracks
+                .iter()
+                .map(|track| Item::from_track(&self.catalog, track))
+                .collect(),
+            Source::Liked => self.likes.clone(),
+            Source::Saved { id } => self
+                .saved
+                .iter()
+                .find(|saved| &saved.id == id)
+                .map(|saved| saved.items.clone())
+                .unwrap_or_default(),
+            Source::Soundscape => Vec::new(),
+        }
+    }
+
+    /// Stored items are kept whole, so catalog tracks are rebuilt from the current catalog in case
+    /// their files moved. `None` means the catalog no longer has the track.
+    fn refreshed(&self, item: Item) -> Option<Item> {
+        let Some(id) = item.key.strip_prefix("r2:") else {
+            return Some(item);
+        };
+        let track = self.catalog.tracks.iter().find(|track| track.id == id)?;
+        Some(Item::from_track(&self.catalog, track))
+    }
+
+    fn load_likes(&mut self) {
+        let likes = self.store.likes().unwrap_or_default();
+        self.likes = likes
+            .into_iter()
+            .map(|item| self.refreshed(item.clone()).unwrap_or(item))
+            .collect();
+    }
+
+    fn fill_queue(&mut self, source: &Source, start_key: Option<&str>) {
+        let items = self.items_for(source);
+        self.set_queue(source, items, start_key);
+    }
+
+    /// Keeps `current` first even when `source` doesn't hold it, like a YouTube video queued onto
+    /// the catalog tracks.
+    fn restore_queue(&mut self, source: &Source, current: Option<Item>) {
+        let mut items = self.items_for(source);
+        let current = current.and_then(|item| self.refreshed(item));
+        let key = current.as_ref().map(|item| item.key.clone());
+        if let Some(item) = current
+            && !items.iter().any(|other| other.key == item.key)
+        {
+            items.insert(0, item);
+        }
+        self.set_queue(source, items, key.as_deref());
+    }
+
+    fn set_queue(&mut self, source: &Source, items: Vec<Item>, start_key: Option<&str>) {
+        self.source = source.clone();
+        self.refresh_ambience();
+        self.queue.replace(items, start_key);
+        self.events.push(Event::TrackChanged);
+        self.load_cover();
+    }
+
+    fn play_source(&mut self, source: Source, start_key: Option<&str>) {
+        self.choices += 1;
+        self.fill_queue(&source, start_key);
+        self.resume_at = None;
+        self.failures_in_a_row = 0;
+        match self.queue.current().cloned() {
+            Some(item) => self.start(item, 0.0),
+            None => self.stop_stream(),
+        }
+        self.resume();
+    }
+
+    fn start(&mut self, item: Item, start_secs: f64) {
+        self.generation += 1;
+        self.stream_from = start_secs;
+        self.pending_seek = None;
+        self.pending_resolve = None;
+        self.resume_at = (start_secs > 0.0).then_some(start_secs);
+        self.events.push(Event::TrackChanged);
+        self.load_cover();
+        match item.play {
+            Playable::File { url } => {
+                self.engine.play_stream(StreamInput {
+                    url,
+                    headers: Vec::new(),
+                    start_secs,
+                    live: false,
+                });
+                self.stream = Stream::Playing;
+                self.resume_at = None;
+            }
+            Playable::YouTube { url, .. } => {
+                self.engine.stop_stream();
+                self.stream = Stream::Resolving;
+                self.pending_resolve = Some((url, start_secs, Instant::now()));
+            }
+        }
+    }
+
+    fn stop_stream(&mut self) {
+        self.generation += 1;
+        self.pending_seek = None;
+        self.pending_resolve = None;
+        self.engine.stop_stream();
+        self.stream = Stream::Idle;
+    }
+
+    /// The queue ran out or gave up. Without ambience nothing is audible any more, so show it
+    /// as paused; the timer keeps running either way.
+    fn music_ended(&mut self) {
+        self.stop_stream();
+        if self.levels.is_empty() {
+            self.engine.set_paused(true);
+        }
+    }
+
+    fn enter_soundscape(&mut self) {
+        self.choices += 1;
+        self.stop_stream();
+        self.queue.replace(Vec::new(), None);
+        self.source = Source::Soundscape;
+        self.refresh_ambience();
+        self.events.push(Event::TrackChanged);
+        self.resume();
+    }
+
+    fn load_cover(&mut self) {
+        let Some(url) = self.current().and_then(|item| item.cover.clone()) else {
+            return;
+        };
+        if self.cover_requested.as_ref() == Some(&url) {
+            return;
+        }
+        self.cover_requested = Some(url.clone());
+        let jobs = self.jobs.clone();
+        std::thread::spawn(move || {
+            let image = fetch_cover(&url);
+            let _ = jobs.send(Job::Cover { url, image });
+        });
+    }
+
+    /// Play starts the timer too, unless the user paused it on its own mid-phase.
+    fn resume(&mut self) {
+        self.engine.set_paused(false);
+        if self.timer_follows_play || self.timer.elapsed(Instant::now()).is_zero() {
+            self.set_timer_running(true);
+        }
+    }
+
+    fn toggle_play(&mut self) {
+        if self.is_playing() {
+            self.timer_follows_play = self.timer.is_running();
+            self.engine.set_paused(true);
+            self.set_timer_running(false);
+            return;
+        }
+        if self.stream == Stream::Idle
+            && let Some(item) = self.current().cloned()
+        {
+            let at = self.resume_at.unwrap_or(0.0);
+            self.failures_in_a_row = 0;
+            self.start(item, at);
+        }
+        self.resume();
+    }
+
+    fn set_timer_running(&mut self, running: bool) {
+        let now = Instant::now();
+        if running {
+            self.timer.start(now);
+            self.track_focus(now);
+        } else {
+            self.timer.pause(now);
+            self.save_focus_block(now);
+            self.focus_block = None;
+        }
+    }
+
+    fn skip(&mut self, forward: bool) {
+        self.failures_in_a_row = 0;
+        if !forward && self.position() > 3.0 && self.stream == Stream::Playing {
+            self.pending_seek = None;
+            self.engine.seek(0.0);
+            self.stream_from = 0.0;
+            return;
+        }
+        self.choices += 1;
+        let next = if forward {
+            self.queue.next()
+        } else {
+            self.queue.previous()
+        };
+        match next.cloned() {
+            Some(item) => self.start(item, 0.0),
+            None => {
+                self.music_ended();
+                self.toast(Tone::Info, "End of the queue");
+            }
+        }
+    }
+
+    pub fn dispatch(&mut self, action: Action) {
+        match action {
+            Action::TogglePlay => self.toggle_play(),
+            Action::Next => self.skip(true),
+            Action::Previous => self.skip(false),
+            Action::SeekBy(delta) => self.seek_to(self.position() + delta),
+            Action::SeekTo(seconds) => self.seek_to(seconds),
+            Action::VolumeBy(delta) => self.set_volume(self.volume + delta),
+            Action::SetVolume(volume) => self.set_volume(volume),
+            Action::SetBalance(balance) => self.set_balance(balance),
+            Action::BalanceBy(delta) => self.set_balance(((self.balance + delta) * 10.0).round() / 10.0),
+            Action::ToggleShuffle => {
+                self.queue.set_shuffle(!self.queue.shuffle);
+            }
+            Action::CycleRepeat => {
+                self.queue.repeat = self.queue.repeat.cycled();
+            }
+            Action::ToggleLikeCurrent => {
+                if let Some(item) = self.current().cloned() {
+                    self.toggle_like(item);
+                }
+            }
+            Action::ToggleLikeRow(index) => {
+                if let Some(item) = self.row_item(index) {
+                    self.toggle_like(item);
+                }
+            }
+            Action::Activate(index) => self.activate(index),
+            Action::Enqueue(index) => self.enqueue(index),
+            Action::Remove(removal) => self.remove(removal),
+            Action::JumpQueue(offset) => {
+                if let Some(item) = self.queue.jump(offset).cloned() {
+                    self.choices += 1;
+                    self.failures_in_a_row = 0;
+                    self.start(item, 0.0);
+                    self.resume();
+                }
+            }
+            Action::RemoveQueued(offset) => self.queue.remove_upcoming(offset),
+            Action::MoveQueued(offset, delta) => {
+                self.queue.move_upcoming(offset, delta);
+            }
+            Action::TimerToggle => {
+                let running = !self.timer.is_running();
+                self.timer_follows_play = running;
+                self.set_timer_running(running);
+            }
+            Action::TimerReset => {
+                self.save_focus_block(Instant::now());
+                self.focus_block = None;
+                self.timer.reset();
+                self.timer_follows_play = true;
+            }
+            Action::TimerSkip => {
+                let now = Instant::now();
+                self.save_focus_block(now);
+                self.focus_block = None;
+                let ended = self.timer.skip(now);
+                self.on_phase_ended(ended, false);
+            }
+            Action::SetTimerMode(mode) => self.set_timer_mode(mode),
+            Action::CycleTimerMode => {
+                let presets = TimerMode::PRESETS;
+                let index = presets
+                    .iter()
+                    .position(|mode| *mode == self.timer.mode())
+                    .map_or(0, |i| i + 1);
+                self.set_timer_mode(presets[index % presets.len()]);
+            }
+            Action::SetLevel(id, level) => {
+                self.set_level(&id, level);
+                self.mix_name = self.matching_mix_name();
+            }
+            Action::LevelBy(id, delta) => {
+                let level = self.levels.get(&id).copied().unwrap_or(0);
+                self.set_level(&id, (i16::from(level) + delta).clamp(0, 100) as u8);
+                self.mix_name = self.matching_mix_name();
+            }
+            Action::ApplyMix(index) => self.apply_mix(index),
+            Action::PlaySoundscape(index) => {
+                self.apply_mix(index);
+                self.enter_soundscape();
+            }
+            Action::CycleMix(step) => {
+                if self.mixes.is_empty() {
+                    return;
+                }
+                let current = self
+                    .mixes
+                    .iter()
+                    .position(|mix| Some(&mix.name) == self.mix_name.as_ref());
+                let count = self.mixes.len() as isize;
+                let next = current.map_or(0, |index| (index as isize + step).rem_euclid(count) as usize);
+                self.apply_mix(next);
+            }
+            Action::AmbienceOff => {
+                self.apply_levels(&Levels::new());
+                self.mix_name = None;
+            }
+            Action::LoadScene(index) => self.load_scene(index),
+            Action::Submit(prompt, text) => self.submit(prompt, text.trim()),
+            Action::AdjustSetting(setting, delta) => self.adjust_setting(setting, delta),
+            Action::Quit => self.quit = true,
+            Action::ShowTab(_)
+            | Action::RemoveRow(_)
+            | Action::Focus(_)
+            | Action::OpenPrompt(_)
+            | Action::OpenPalette
+            | Action::OpenHelp
+            | Action::OpenStats
+            | Action::OpenSettings => {}
+        }
+    }
+
+    fn seek_to(&mut self, seconds: f64) {
+        let Some(item) = self.current() else { return };
+        if item.is_live() {
+            return;
+        }
+        let end = item.duration.map_or(f64::MAX, |duration| f64::from(duration) - 1.0);
+        let seconds = seconds.clamp(0.0, end.max(0.0));
+        match self.stream {
+            Stream::Playing => self.pending_seek = Some((seconds, Instant::now())),
+            _ => self.resume_at = Some(seconds),
+        }
+        // A seek takes a waiting reconnect along, and once playing again, starts a later drop afresh.
+        match &mut self.reconnecting {
+            Some(reconnect) if reconnect.due.is_some() => reconnect.at = seconds,
+            _ => self.reconnecting = None,
+        }
+    }
+
+    fn set_volume(&mut self, volume: f32) {
+        self.volume = volume.clamp(0.0, 1.0);
+        self.engine.set_volume(self.volume);
+    }
+
+    fn set_balance(&mut self, balance: f32) {
+        // The middle snaps so a dragged slider can find it.
+        let balance = balance.clamp(0.0, 1.0);
+        self.balance = if (balance - model::EVEN).abs() < 0.03 {
+            model::EVEN
+        } else {
+            balance
+        };
+        self.engine.set_music_level((2.0 * (1.0 - self.balance)).min(1.0));
+        self.refresh_ambience();
+    }
+
+    /// Soundscapes have no music to balance against, so they keep the ambience at its levels.
+    /// The floor is inaudible but keeps the sounds loaded, since a silent lane is dropped and
+    /// would have to be decoded again.
+    fn ambience_share(&self) -> f32 {
+        if self.source == Source::Soundscape {
+            1.0
+        } else {
+            (2.0 * self.balance).clamp(0.1, 1.0)
+        }
+    }
+
+    fn refresh_ambience(&mut self) {
+        for (id, level) in self.levels.clone() {
+            self.set_level(&id, level);
+        }
+    }
+
+    fn set_timer_mode(&mut self, mode: TimerMode) {
+        let now = Instant::now();
+        let was_running = self.timer.is_running();
+        self.save_focus_block(now);
+        self.focus_block = None;
+        self.timer.set_mode(mode, self.config.pomodoro);
+        if was_running {
+            self.timer.start(now);
+            self.track_focus(now);
+        }
+    }
+
+    fn set_level(&mut self, id: &str, level: u8) {
+        let Some(sound) = self.catalog.sound(id) else {
+            // A fresh catalog dropped this sound while it played.
+            self.engine.stop_ambient(id);
+            self.levels.remove(id);
+            return;
+        };
+        let level = level.min(100);
+        let url = self.catalog.url(&sound.file);
+        let gain = sound.gain_percent as f32 / 100.0;
+        self.engine
+            .set_ambient(id, &url, f32::from(level) / 100.0 * self.ambience_share(), gain);
+        if level == 0 {
+            self.levels.remove(id);
+        } else {
+            self.levels.insert(id.to_string(), level);
+        }
+    }
+
+    fn apply_levels(&mut self, levels: &Levels) {
+        let ids: Vec<String> = self.catalog.ambient.iter().map(|sound| sound.id.clone()).collect();
+        for id in ids {
+            self.set_level(&id, levels.get(&id).copied().unwrap_or(0));
+        }
+    }
+
+    fn apply_mix(&mut self, index: usize) {
+        let Some(mix) = self.mixes.get(index).cloned() else {
+            return;
+        };
+        self.apply_levels(&mix.levels);
+        self.mix_name = Some(mix.name);
+    }
+
+    fn matching_mix_name(&self) -> Option<String> {
+        self.mixes
+            .iter()
+            .find(|mix| mix.levels == self.levels)
+            .map(|mix| mix.name.clone())
+    }
+
+    fn refresh_mixes(&mut self) {
+        let known = |mix: &Mix| mix.levels.keys().any(|id| self.catalog.sound(id).is_some());
+        let mut mixes: Vec<Mix> = self.catalog.mixes.iter().filter(|mix| known(mix)).cloned().collect();
+        mixes.extend(self.store.mixes().unwrap_or_default());
+        self.mixes = mixes;
+    }
+
+    fn load_scene(&mut self, index: usize) {
+        let Some(scene) = self.scenes.get(index).cloned() else {
+            return;
+        };
+        if self.timer.mode() != scene.timer {
+            self.set_timer_mode(scene.timer);
+        }
+        self.set_balance(scene.balance);
+        self.apply_levels(&scene.levels);
+        self.mix_name = self.matching_mix_name();
+        self.timer_follows_play = true;
+        if scene.source == Source::Soundscape {
+            self.enter_soundscape();
+        } else if self.items_for(&scene.source).is_empty() {
+            self.enter_soundscape();
+            self.toast(
+                Tone::Error,
+                format!("The music in \"{}\" is gone, playing its ambience only", scene.name),
+            );
+            return;
+        } else {
+            self.play_source(scene.source, scene.item_key.as_deref());
+        }
+        self.toast(Tone::Done, format!("Scene \"{}\"", scene.name));
+    }
+
+    fn row(&self, index: usize) -> Option<Row> {
+        self.rows(self.tab).into_iter().nth(index)
+    }
+
+    pub fn row_item(&self, index: usize) -> Option<Item> {
+        let row = self.row(index)?;
+        match row.target {
+            Target::Track(i) => self
+                .catalog
+                .tracks
+                .get(i)
+                .map(|track| Item::from_track(&self.catalog, track)),
+            Target::Liked(i) => self.likes.get(i).cloned(),
+            Target::Saved(i) => self.saved.get(i).and_then(|saved| match saved.items.as_slice() {
+                [item] => Some(item.clone()),
+                _ => None,
+            }),
+            Target::Mix(_) | Target::Scene(_) => None,
+        }
+    }
+
+    fn toggle_like(&mut self, item: Item) {
+        let liked = !self.is_liked(&item.key);
+        if let Err(error) = self.store.set_liked(&item, liked) {
+            self.toast(Tone::Error, format!("Could not save the like: {error}"));
+            return;
+        }
+        self.load_likes();
+        if liked {
+            self.events.push(Event::Liked);
+        }
+    }
+
+    fn activate(&mut self, index: usize) {
+        let Some(row) = self.row(index) else {
+            return;
+        };
+        match row.target {
+            Target::Track(i) => {
+                let key = self.catalog.tracks.get(i).map(|track| format!("r2:{}", track.id));
+                self.play_source(Source::Tracks, key.as_deref());
+            }
+            Target::Liked(i) => {
+                let key = self.likes.get(i).map(|item| item.key.clone());
+                self.play_source(Source::Liked, key.as_deref());
+            }
+            Target::Saved(i) => {
+                if let Some(saved) = self.saved.get(i) {
+                    let source = Source::Saved { id: saved.id.clone() };
+                    let start = youtube::start_key(&saved.url);
+                    self.play_source(source, start.as_deref());
+                }
+            }
+            Target::Mix(i) => self.dispatch(Action::PlaySoundscape(i)),
+            Target::Scene(i) => self.load_scene(i),
+        }
+    }
+
+    fn enqueue(&mut self, index: usize) {
+        let Some(row) = self.row(index) else {
+            return;
+        };
+        let items = match row.target {
+            Target::Saved(i) => self.saved.get(i).map(|saved| saved.items.clone()).unwrap_or_default(),
+            Target::Mix(i) => return self.apply_mix(i),
+            Target::Scene(_) => return,
+            _ => self.row_item(index).into_iter().collect(),
+        };
+        if self.source == Source::Soundscape {
+            return self.activate(index);
+        }
+        let message = match items.as_slice() {
+            [item] => format!("Queued \"{}\"", item.title),
+            _ => format!("Queued {} tracks", items.len()),
+        };
+        for item in items {
+            self.queue.enqueue(item);
+        }
+        self.toast(Tone::Done, message);
+    }
+
+    /// The identity and title behind a library row, for a delete that waits on confirmation.
+    pub fn removal(&self, index: usize) -> Option<(Removal, String)> {
+        let row = self.row(index)?;
+        let removal = match row.target {
+            Target::Saved(i) => Removal::Saved(self.saved.get(i)?.id.clone()),
+            Target::Liked(i) => Removal::Like(self.likes.get(i)?.key.clone()),
+            Target::Mix(i) => {
+                let mix = self.mixes.get(i).filter(|mix| mix.id.starts_with("saved:"))?;
+                Removal::Mix(mix.name.clone())
+            }
+            Target::Scene(i) => Removal::Scene(self.scenes.get(i)?.name.clone()),
+            Target::Track(_) => return None,
+        };
+        Some((removal, row.title))
+    }
+
+    fn remove(&mut self, removal: Removal) {
+        let result = match &removal {
+            Removal::Saved(id) => self.store.forget(id),
+            Removal::Like(key) => match self.likes.iter().find(|item| &item.key == key) {
+                Some(item) => self.store.set_liked(item, false),
+                None => Ok(()),
+            },
+            Removal::Mix(name) => self.store.delete_mix(name),
+            Removal::Scene(name) => self.store.delete_scene(name),
+        };
+        match result {
+            Ok(()) => self.reload_library(),
+            Err(error) => self.toast(Tone::Error, format!("Could not remove it: {error}")),
+        }
+    }
+
+    fn reload_library(&mut self) {
+        self.saved = self.store.saved().unwrap_or_default();
+        self.load_likes();
+        self.scenes = self.store.scenes().unwrap_or_default();
+        self.refresh_mixes();
+        self.mix_name = self.matching_mix_name();
+    }
+
+    fn submit(&mut self, prompt: Prompt, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        match prompt {
+            Prompt::OpenUrl if youtube::looks_like_url(text) => self.open_url(text),
+            Prompt::OpenUrl => self.toast(Tone::Error, "That doesn't look like a link"),
+            Prompt::SaveScene => {
+                let scene = Scene {
+                    name: text.to_string(),
+                    source: self.source.clone(),
+                    item_key: self.current().map(|item| item.key.clone()),
+                    levels: self.levels.clone(),
+                    timer: self.timer.mode(),
+                    balance: self.balance,
+                };
+                match self.store.save_scene(&scene) {
+                    Ok(()) => {
+                        self.reload_library();
+                        self.toast(
+                            Tone::Done,
+                            format!("Saved \"{text}\". Run chill \"{text}\" to start it."),
+                        );
+                    }
+                    Err(error) => self.toast(Tone::Error, format!("Could not save the scene: {error}")),
+                }
+            }
+            Prompt::SaveMix => match self.store.save_mix(text, &self.levels) {
+                Ok(()) => {
+                    self.reload_library();
+                    self.toast(Tone::Done, format!("Saved mix \"{text}\""));
+                }
+                Err(error) => self.toast(Tone::Error, format!("Could not save the mix: {error}")),
+            },
+        }
+    }
+
+    pub fn open_url(&mut self, url: &str) {
+        self.toast(Tone::Info, LOOKING_UP);
+        self.choices += 1;
+        let (jobs, url, choices) = (self.jobs.clone(), url.to_string(), self.choices);
+        std::thread::spawn(move || {
+            let result = youtube::inspect(&url);
+            let _ = jobs.send(Job::Inspected { url, choices, result });
+        });
+    }
+
+    fn inspected(&mut self, url: &str, choices: u64, result: Result<Saved>) {
+        let saved = match result {
+            Ok(saved) => saved,
+            Err(error) => return self.toast(Tone::Error, format!("Could not open that link. {error}")),
+        };
+        if let Err(error) = self.store.save(&saved) {
+            return self.toast(Tone::Error, format!("Could not save it: {error}"));
+        }
+        self.reload_library();
+        // The user picked something else while yt-dlp was looking; keep that playing.
+        if choices == self.choices {
+            let source = Source::Saved { id: saved.id };
+            self.play_source(source, youtube::start_key(url).as_deref());
+        } else {
+            self.toast(Tone::Done, format!("Added \"{}\" to YouTube", saved.title));
+        }
+    }
+
+    fn track_focus(&mut self, now: Instant) {
+        if self.timer.phase() != Phase::Focus || !self.timer.is_running() || self.focus_block.is_some() {
+            return;
+        }
+        let planned = self.timer.phase_length().as_secs();
+        match self.store.begin_focus_block(Timestamp::now(), planned) {
+            Ok(id) => {
+                let before = self.timer.elapsed(now);
+                self.focus_block = Some(FocusBlock {
+                    id,
+                    saved_at: now,
+                    before,
+                });
+            }
+            Err(error) => self.toast(Tone::Error, format!("Could not record focus time: {error}")),
+        }
+    }
+
+    fn save_focus_block(&mut self, now: Instant) {
+        if self.timer.phase() != Phase::Focus {
+            return;
+        }
+        let Some(block) = self.focus_block.as_mut() else { return };
+        block.saved_at = now;
+        let (id, focused) = (block.id, self.timer.elapsed(now).saturating_sub(block.before).as_secs());
+        if let Err(error) = self.store.update_focus_block(id, focused, false) {
+            self.toast(Tone::Error, format!("Could not record focus time: {error}"));
+        }
+        self.refresh_stats();
+    }
+
+    fn refresh_stats(&mut self) {
+        if let Ok(days) = self.store.focus_days(7, &self.zone) {
+            self.focus_days = days;
+        }
+    }
+
+    fn on_phase_ended(&mut self, ended: PhaseEnded, natural: bool) {
+        if ended.ended == Phase::Focus && natural {
+            if let Some(block) = self.focus_block.take() {
+                let focused = ended.length.saturating_sub(block.before).as_secs();
+                if let Err(error) = self.store.update_focus_block(block.id, focused, true) {
+                    self.toast(Tone::Error, format!("Could not record focus time: {error}"));
+                }
+            }
+            self.refresh_stats();
+        }
+        self.focus_block = None;
+        self.events.push(Event::PhaseChanged);
+        if !natural {
+            self.track_focus(Instant::now());
+            return;
+        }
+        if self.config.chime {
+            self.engine.chime();
+        }
+        let minutes = self.timer.phase_length().as_secs() / 60;
+        let (title, body) = match (ended.ended, ended.next) {
+            (Phase::Focus, Phase::Focus) => ("Focus block done".to_string(), "Nice work.".to_string()),
+            (Phase::Focus, next) => (
+                "Focus block done".to_string(),
+                format!("Time for a {minutes} minute {}", next.label()),
+            ),
+            (_, _) => (
+                "Break's over".to_string(),
+                format!("Next up: {minutes} minutes of focus"),
+            ),
+        };
+        self.toast(Tone::Done, format!("{title} · {body}"));
+        if self.config.notifications {
+            std::thread::spawn(move || {
+                let _ = notify_rust::Notification::new()
+                    .summary(&title)
+                    .body(&body)
+                    .appname("chill")
+                    .show();
+            });
+        }
+        self.track_focus(Instant::now());
+    }
+
+    pub fn setting_value(&self, setting: Setting) -> String {
+        let pomodoro = &self.config.pomodoro;
+        let toggle = |on: bool| if on { "on" } else { "off" }.to_string();
+        match setting {
+            Setting::FocusMinutes => format!("{} min", pomodoro.focus_minutes),
+            Setting::BreakMinutes => format!("{} min", pomodoro.break_minutes),
+            Setting::LongBreakMinutes => format!("{} min", pomodoro.long_break_minutes),
+            Setting::LongBreakEvery => format!("{} blocks", pomodoro.long_break_every),
+            Setting::AutoStartBreaks => toggle(pomodoro.auto_start_breaks),
+            Setting::AutoStartFocus => toggle(pomodoro.auto_start_focus),
+            Setting::Chime => toggle(self.config.chime),
+            Setting::Notifications => toggle(self.config.notifications),
+            Setting::ReduceMotion => toggle(self.config.reduce_motion),
+        }
+    }
+
+    /// Steps a number by `delta` or flips a toggle, applies it, and writes config.toml.
+    fn adjust_setting(&mut self, setting: Setting, delta: i8) {
+        let step = |value: u32, by: i32, min: u32, max: u32| {
+            value
+                .clamp(min, max)
+                .saturating_add_signed(by * i32::from(delta.signum()))
+                .clamp(min, max)
+        };
+        let pomodoro = &mut self.config.pomodoro;
+        match setting {
+            Setting::FocusMinutes => pomodoro.focus_minutes = step(pomodoro.focus_minutes, 5, 5, 180),
+            Setting::BreakMinutes => pomodoro.break_minutes = step(pomodoro.break_minutes, 1, 1, 60),
+            Setting::LongBreakMinutes => pomodoro.long_break_minutes = step(pomodoro.long_break_minutes, 5, 5, 90),
+            Setting::LongBreakEvery => pomodoro.long_break_every = step(pomodoro.long_break_every, 1, 2, 8),
+            Setting::AutoStartBreaks => pomodoro.auto_start_breaks = !pomodoro.auto_start_breaks,
+            Setting::AutoStartFocus => pomodoro.auto_start_focus = !pomodoro.auto_start_focus,
+            Setting::Chime => self.config.chime = !self.config.chime,
+            Setting::Notifications => self.config.notifications = !self.config.notifications,
+            Setting::ReduceMotion => self.config.reduce_motion = !self.config.reduce_motion,
+        }
+        self.timer.set_settings(self.config.pomodoro);
+        if let Err(error) = config::save(&self.config_file, &self.config) {
+            self.toast(Tone::Error, format!("Could not save settings: {error}"));
+        }
+    }
+
+    pub fn config_file(&self) -> &std::path::Path {
+        &self.config_file
+    }
+
+    pub fn session(&self) -> Session {
+        Session {
+            source: self.source.clone(),
+            item: self.queue.current().cloned(),
+            position: if self.current().is_some_and(Item::is_live) {
+                0.0
+            } else {
+                self.position()
+            },
+            volume: self.volume,
+            balance: self.balance,
+            levels: self.levels.clone(),
+            timer: self.timer.mode(),
+            shuffle: self.queue.shuffle,
+            repeat: self.queue.repeat,
+        }
+    }
+
+    pub fn shutdown(&mut self) {
+        self.save_focus_block(Instant::now());
+        let _ = self.store.save_session(&self.session());
+    }
+
+    /// Everything that happens without input: finished jobs, audio events, the timer.
+    pub fn tick(&mut self, now: Instant) {
+        // The loop ticks several times a second, so a long gap means the machine slept. Windows
+        // keeps `Instant` running through sleep while macOS doesn't, so the timer drops the gap.
+        let gap = now.saturating_duration_since(self.ticked_at);
+        if gap >= Duration::from_secs(10) {
+            self.timer.defer(gap);
+        }
+        self.ticked_at = now;
+        // Each resolve is a yt-dlp process, so skipping through a playlist settles first.
+        if let Some((_, _, asked)) = &self.pending_resolve
+            && now.duration_since(*asked) >= Duration::from_millis(300)
+            && let Some((url, start_secs, _)) = self.pending_resolve.take()
+        {
+            let (jobs, generation) = (self.jobs.clone(), self.generation);
+            std::thread::spawn(move || {
+                let result = youtube::resolve(&url, start_secs);
+                let _ = jobs.send(Job::Resolved { generation, result });
+            });
+        }
+        self.retry_reconnect(now);
+        // Every seek restarts ffmpeg, so a held key or a scrolled wheel settles first.
+        if let Some((at, asked)) = self.pending_seek
+            && now.duration_since(asked) >= Duration::from_millis(150)
+        {
+            self.pending_seek = None;
+            self.engine.seek(at);
+            self.stream_from = at;
+        }
+        while let Ok(job) = self.inbox.try_recv() {
+            self.handle_job(job);
+        }
+        for event in self.engine.poll_events() {
+            self.handle_engine(event);
+        }
+        if let Some(ended) = self.timer.tick(now) {
+            self.on_phase_ended(ended, true);
+        }
+        if let Some(block) = &self.focus_block
+            && self.timer.is_running()
+            && now.duration_since(block.saved_at) >= Duration::from_secs(30)
+        {
+            self.save_focus_block(now);
+        }
+        if now.duration_since(self.session_saved_at) >= Duration::from_secs(15) {
+            self.session_saved_at = now;
+            let _ = self.store.save_session(&self.session());
+            let today = Timestamp::now().to_zoned(self.zone.clone()).date();
+            if self.focus_days.days.last().is_some_and(|(day, _)| *day != today) {
+                self.refresh_stats();
+            }
+        }
+    }
+
+    fn handle_engine(&mut self, event: EngineEvent) {
+        let reconnected = match &event {
+            EngineEvent::Ended => self.ended_early() && self.reconnect(false),
+            EngineEvent::Failed(_) => self.reconnect(true),
+            _ => false,
+        };
+        if reconnected {
+            return;
+        }
+        match event {
+            EngineEvent::Ended => {
+                self.failures_in_a_row = 0;
+                match self.queue.advance().cloned() {
+                    Some(item) => self.start(item, 0.0),
+                    None => self.music_ended(),
+                }
+            }
+            EngineEvent::Failed(message) => self.failed(message),
+            EngineEvent::AmbientFailed { id, message } => {
+                let label = self.catalog.sound(&id).map_or(id.clone(), |sound| sound.label.clone());
+                self.toast(Tone::Error, format!("{label}: {message}"));
+            }
+            EngineEvent::NoDevice(_) => self.toast(Tone::Error, "No audio output, playing silently"),
+        }
+    }
+
+    /// A live stream never ends on its own, and a video that stops well short of its length
+    /// lost its connection or its URL expired (YouTube's last about six hours).
+    fn ended_early(&self) -> bool {
+        self.current().is_some_and(|item| {
+            item.is_live()
+                || item
+                    .duration
+                    .is_some_and(|length| self.position() + 15.0 < f64::from(length))
+        })
+    }
+
+    /// Picks a dropped stream up where it stopped. An attempt that can't connect tries again after
+    /// a growing pause, so a network outage waits instead of failing the rest of the queue.
+    fn reconnect(&mut self, failed: bool) -> bool {
+        let played = self.position() - self.stream_from;
+        let ongoing = self
+            .reconnecting
+            .filter(|reconnect| reconnect.generation == self.generation);
+        let (at, attempts) = match ongoing {
+            // An attempt that connected and then ended at once is a file that ends there.
+            Some(_) if !failed && played < 1.0 => return false,
+            Some(reconnect) if played < 5.0 => (reconnect.at, reconnect.attempts),
+            // Only a stream that played counts as dropped, not one that failed to start from a
+            // resume point.
+            _ => match self.current() {
+                Some(item) if played >= 5.0 => (if item.is_live() { 0.0 } else { self.position() }, 0),
+                _ => return false,
+            },
+        };
+        let Some(delay) = RECONNECT_DELAYS.get(attempts) else {
+            return false;
+        };
+        if attempts == 0 {
+            self.toast(Tone::Info, "Lost the stream, reconnecting…");
+        }
+        self.stream = Stream::Idle;
+        self.resume_at = Some(at);
+        self.reconnecting = Some(Reconnect {
+            at,
+            attempts: attempts + 1,
+            due: Some(Instant::now() + Duration::from_secs(*delay)),
+            generation: self.generation,
+        });
+        true
+    }
+
+    fn retry_reconnect(&mut self, now: Instant) {
+        let Some(reconnect) = self.reconnecting else {
+            return;
+        };
+        if reconnect.generation != self.generation {
+            self.reconnecting = None;
+        } else if reconnect.due.is_some_and(|due| now >= due) {
+            if let Some(item) = self.current().cloned() {
+                self.start(item, reconnect.at);
+            }
+            self.reconnecting = Some(Reconnect {
+                due: None,
+                generation: self.generation,
+                ..reconnect
+            });
+        } else if reconnect.due.is_none() && self.stream == Stream::Playing && self.position() - self.stream_from > 10.0
+        {
+            // Playing again, so a later drop starts over.
+            self.reconnecting = None;
+        }
+    }
+
+    /// A stream that couldn't play. One still unreachable after every reconnect attempt waits where
+    /// it stopped, so an outage doesn't fail the rest of the queue too.
+    fn failed(&mut self, message: String) {
+        self.stream = Stream::Idle;
+        self.toast(Tone::Error, message);
+        match self
+            .reconnecting
+            .take()
+            .filter(|reconnect| reconnect.generation == self.generation)
+        {
+            Some(reconnect) => {
+                self.music_ended();
+                self.resume_at = Some(reconnect.at);
+            }
+            None => self.after_failure(),
+        }
+    }
+
+    fn after_failure(&mut self) {
+        self.failures_in_a_row += 1;
+        if self.failures_in_a_row >= 3 || self.queue.upcoming().next().is_none() {
+            self.failures_in_a_row = 0;
+            self.music_ended();
+            return;
+        }
+        if let Some(item) = self.queue.next().cloned() {
+            self.start(item, 0.0);
+        }
+    }
+
+    fn handle_job(&mut self, job: Job) {
+        match job {
+            Job::Catalog(Ok(catalog)) => {
+                let tracks = self.items_for(&Source::Tracks);
+                self.catalog = catalog;
+                self.refresh_mixes();
+                self.load_likes();
+                self.refresh_ambience();
+                // Refilling reshuffles and drops anything queued, so only do it when the tracks changed.
+                if self.source == Source::Tracks
+                    && self.stream == Stream::Idle
+                    && self.items_for(&Source::Tracks) != tracks
+                {
+                    let current = self.queue.current().cloned();
+                    let key = current.as_ref().map(|item| item.key.clone());
+                    self.restore_queue(&Source::Tracks, current);
+                    if self.queue.current().map(|item| &item.key) != key.as_ref() {
+                        self.resume_at = None;
+                    }
+                }
+            }
+            Job::Catalog(Err(_)) => {}
+            Job::Inspected { url, choices, result } => {
+                self.events.push(Event::DismissToast(LOOKING_UP));
+                self.inspected(&url, choices, result);
+            }
+            Job::Resolved { generation, result } => {
+                if generation != self.generation {
+                    return;
+                }
+                match result {
+                    Ok(mut input) => {
+                        if let Some(at) = self.resume_at.take()
+                            && !input.live
+                        {
+                            input.start_secs = at;
+                        }
+                        self.engine.play_stream(input);
+                        self.stream = Stream::Playing;
+                    }
+                    Err(error) => {
+                        if !self.reconnect(true) {
+                            self.failed(error.to_string());
+                        }
+                    }
+                }
+            }
+            Job::Cover { url, image } => {
+                if let Some(image) = image {
+                    self.covers.push((url, image));
+                }
+            }
+            Job::Media(command) => match command {
+                MediaCommand::Play if !self.is_playing() => self.toggle_play(),
+                MediaCommand::Pause if self.is_playing() => self.toggle_play(),
+                MediaCommand::Toggle => self.toggle_play(),
+                MediaCommand::Next => self.skip(true),
+                MediaCommand::Previous => self.skip(false),
+                MediaCommand::SeekBy(delta) => self.seek_to(self.position() + delta),
+                MediaCommand::SetPosition(at) => self.seek_to(at),
+                MediaCommand::Play | MediaCommand::Pause => {}
+            },
+            Job::Tools(found) => self.tools_checked(found),
+            Job::Crashed => self.toast(
+                Tone::Error,
+                "Something stopped working in the background. Details are in crash.log in the cache folder.",
+            ),
+        }
+    }
+}
+
+pub fn format_clock(seconds: u32) -> String {
+    let (hours, minutes, seconds) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes}:{seconds:02}")
+    }
+}
+
+fn fetch_cover(url: &str) -> Option<DynamicImage> {
+    let bytes = ureq::get(url)
+        .config()
+        .timeout_global(Some(Duration::from_secs(8)))
+        .build()
+        .call()
+        .ok()?
+        .body_mut()
+        .read_to_vec()
+        .ok()?;
+    let image = image::load_from_memory(&bytes).ok()?;
+    let letterboxed = url.contains("i.ytimg.com") && image.width() * 3 == image.height() * 4;
+    Some(if letterboxed {
+        let height = image.width() * 9 / 16;
+        image.crop_imm(0, (image.height() - height) / 2, image.width(), height)
+    } else {
+        image
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+
+    fn app() -> App {
+        let cache = std::env::temp_dir().join(format!("chill-app-tests-{}", std::process::id()));
+        let config = Config {
+            catalog_url: "http://127.0.0.1:9/catalog.json".into(),
+            chime: false,
+            notifications: false,
+            ..Config::default()
+        };
+        let paths = Paths {
+            config_file: cache.join("config.toml"),
+            database: cache.join("unused.db"),
+            cache: cache.clone(),
+        };
+        App::new(
+            config,
+            paths,
+            Store::open(Path::new(":memory:")).unwrap(),
+            Engine::start(cache),
+        )
+    }
+
+    #[test]
+    fn time_asleep_does_not_count_toward_the_timer() {
+        let mut app = app();
+        let start = Instant::now();
+        app.ticked_at = start;
+        app.timer.start(start);
+        let length = app.timer.phase_length();
+
+        let woke = start + Duration::from_secs(3600);
+        app.tick(woke);
+
+        assert_eq!((app.timer.phase(), app.timer.remaining(woke)), (Phase::Focus, length));
+    }
+
+    #[test]
+    fn a_track_that_fails_at_its_resume_point_moves_on() {
+        let mut app = app();
+        let mut next = app.catalog.tracks[0].clone();
+        next.id = "next".into();
+        app.catalog.tracks.push(next);
+        app.fill_queue(&Source::Tracks, None);
+        let first = app.current().unwrap().clone();
+
+        app.start(first, 300.0);
+        // Holds the playhead at the resume point whether or not ffmpeg is installed.
+        app.pending_seek = Some((300.0, Instant::now()));
+        app.handle_engine(EngineEvent::Failed("HTTP error 404 Not Found".into()));
+
+        assert_eq!(app.current().unwrap().key, "r2:next");
+    }
+
+    #[test]
+    fn a_seek_while_waiting_to_reconnect_moves_the_retry() {
+        let mut app = app();
+        app.stream = Stream::Playing;
+        app.pending_seek = Some((120.0, Instant::now()));
+        app.handle_engine(EngineEvent::Ended);
+
+        app.dispatch(Action::SeekTo(200.0));
+        app.retry_reconnect(Instant::now() + Duration::from_secs(60));
+
+        assert_eq!(app.stream_from, 200.0);
+    }
+
+    #[test]
+    fn a_stream_that_cannot_reconnect_waits_where_it_stopped() {
+        let mut app = app();
+        let item = app.current().unwrap().clone();
+        app.stream = Stream::Playing;
+        app.pending_seek = Some((120.0, Instant::now()));
+
+        app.handle_engine(EngineEvent::Ended);
+        let later = Instant::now() + Duration::from_secs(60);
+        for _ in RECONNECT_DELAYS {
+            app.retry_reconnect(later);
+            app.handle_engine(EngineEvent::Failed("Connection refused".into()));
+        }
+
+        assert_eq!(app.current(), Some(&item));
+        assert_eq!(app.stream, Stream::Idle);
+        assert_eq!(app.position(), 120.0);
+    }
+}
