@@ -52,7 +52,7 @@ impl Prompt {
 
     pub fn placeholder(self) -> &'static str {
         match self {
-            Prompt::OpenUrl => "youtube.com/watch?v=…",
+            Prompt::OpenUrl => "https://youtu.be/…",
             Prompt::SaveScene => "rainy study",
             Prompt::SaveMix => "my rain",
         }

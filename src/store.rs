@@ -31,6 +31,9 @@ CREATE INDEX IF NOT EXISTS focus_blocks_started_at ON focus_blocks (started_at);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 ";
 
+/// Recorded in `user_version`, so a later release knows which of its migrations a library needs.
+const SCHEMA_VERSION: i64 = 1;
+
 /// Focused minutes per local calendar day, oldest first, ending today.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FocusDays {
@@ -57,6 +60,10 @@ impl Store {
         db.busy_timeout(std::time::Duration::from_secs(2))?;
         db.pragma_update(None, "journal_mode", "WAL")?;
         db.execute_batch(SCHEMA)?;
+        let version: i64 = db.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if version == 0 {
+            db.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        }
         Ok(Store { db })
     }
 

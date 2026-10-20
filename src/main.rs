@@ -14,10 +14,11 @@ mod ui;
 mod youtube;
 
 use std::io::{self, Write, stdout};
+use std::process::ExitCode;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event,
@@ -47,15 +48,29 @@ enum CliCommand {
     Doctor,
 }
 
-fn main() -> Result<()> {
+fn main() -> Result<ExitCode> {
     let cli = Cli::parse();
     let paths = config::Paths::resolve()?;
     if let Some(CliCommand::Doctor) = cli.command {
-        doctor(&paths);
-        return Ok(());
+        return Ok(if doctor(&paths) {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        });
     }
     let config = config::load(&paths.config_file)?;
-    let store = store::Store::open(&paths.database)?;
+    let store = store::Store::open(&paths.database).with_context(|| {
+        format!(
+            "could not open the library at {}",
+            config::display_path(&paths.database)
+        )
+    })?;
+    // Without an app to post as, notify-rust asks AppleScript for one named "use_default", and
+    // macOS answers with a "Where is use_default?" file picker.
+    #[cfg(target_os = "macos")]
+    let _ = notify_rust::set_application(
+        &std::env::var("__CFBundleIdentifier").unwrap_or_else(|_| "com.apple.Terminal".to_owned()),
+    );
     media::run_app(move || {
         signals::listen();
         let theme = ui::theme::Theme::detect();
@@ -81,11 +96,10 @@ fn main() -> Result<()> {
                 .and_then(|mut log| writeln!(log, "{info}"));
         }));
 
-        // An unanswered capability query leaves ratatui-image's reader blocked on stdin, where it
-        // swallows the first keypress, and tmux drops those queries unless passthrough is on.
-        let picker = match std::env::var_os("TMUX") {
-            Some(_) => Picker::halfblocks(),
-            None => Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks()),
+        let picker = if answers_image_query() {
+            Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks())
+        } else {
+            Picker::halfblocks()
         };
         let mut ui = Ui::new(theme, picker, app.config.reduce_motion);
         let jobs = app.jobs.clone();
@@ -105,11 +119,25 @@ fn main() -> Result<()> {
         let _ = execute!(stdout(), DisableMouseCapture, DisableBracketedPaste, cursor::Show);
         let _ = ratatui::try_restore();
         std::mem::forget(terminal);
-        result
+        result.map(|()| ExitCode::SUCCESS)
     })
 }
 
-fn doctor(paths: &config::Paths) {
+/// An unanswered capability query leaves ratatui-image's reader blocked on stdin for two seconds,
+/// where it swallows the first keypress. Multiplexers drop the query, including over SSH from
+/// inside one, where only `TERM` says so.
+fn answers_image_query() -> bool {
+    let term = std::env::var("TERM").unwrap_or_default();
+    let multiplexed = ["TMUX", "STY", "ZELLIJ"]
+        .iter()
+        .any(|name| std::env::var_os(name).is_some())
+        || term.starts_with("tmux")
+        || term.starts_with("screen");
+    !multiplexed
+}
+
+/// Prints what chill depends on and where it keeps its files, and returns whether all of it is usable.
+fn doctor(paths: &config::Paths) -> bool {
     println!("chill {}\n", env!("CARGO_PKG_VERSION"));
     let today = jiff::Zoned::now().date();
     let found: Vec<(Tool, Option<String>)> = Tool::ALL.into_iter().map(|tool| (tool, tool.version())).collect();
@@ -120,6 +148,7 @@ fn doctor(paths: &config::Paths) {
         .unwrap_or(0)
         + 2;
     let indent = 8 + width;
+    let mut healthy = found.iter().all(|(_, version)| version.is_some());
     for (tool, version) in found {
         let shown = version.as_deref().unwrap_or("missing");
         println!("{:<8}{shown:<width$}{}", tool.name(), tool.purpose());
@@ -135,11 +164,15 @@ fn doctor(paths: &config::Paths) {
     println!();
     let config = match config::load(&paths.config_file) {
         Ok(_) => String::new(),
-        Err(error) => format!("  ({error:#})"),
+        Err(error) => {
+            healthy = false;
+            format!("  ({error:#})")
+        }
     };
     println!("{:<9}{}{config}", "config", config::display_path(&paths.config_file));
     println!("{:<9}{}", "library", config::display_path(&paths.database));
     println!("{:<9}{}", "cache", config::display_path(&paths.cache));
+    healthy
 }
 
 fn run(terminal: &mut DefaultTerminal, app: &mut App, ui: &mut Ui, media: &mut Media) -> Result<()> {
