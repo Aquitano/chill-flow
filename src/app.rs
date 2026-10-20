@@ -1044,8 +1044,16 @@ impl App {
                 self.play_source(Source::Tracks, key.as_deref());
             }
             Target::Liked(i) => {
-                let key = self.likes.get(i).map(|item| item.key.clone());
-                self.play_source(Source::Liked, key.as_deref());
+                let Some(item) = self.likes.get(i) else {
+                    return;
+                };
+                // A like the catalog dropped stays listed so it can be removed, but has nothing to play.
+                if item.clone().refreshed(&self.catalog).is_none() {
+                    let message = format!("\"{}\" is no longer in the catalog", item.title);
+                    return self.toast(Tone::Error, message);
+                }
+                let key = item.key.clone();
+                self.play_source(Source::Liked, Some(&key));
             }
             Target::Saved(i) => {
                 if let Some(saved) = self.saved.get(i) {
@@ -1912,6 +1920,23 @@ mod tests {
         assert!(app.saved[0].items.is_empty());
         assert_eq!(app.current().unwrap().key, extra.key);
         assert_eq!((app.choices, app.timer.is_running(), app.engine.is_paused()), before);
+    }
+
+    #[test]
+    fn playing_an_unavailable_like_keeps_the_current_playback() {
+        let mut app = app();
+        let mut survivor = app.catalog.tracks[0].clone();
+        survivor.id = "survivor".into();
+        survivor.file = "survivor.mp3".into();
+        app.catalog.tracks.push(survivor);
+        app.likes = app.items_for(&Source::Tracks).into_iter().take(2).collect();
+        app.catalog.tracks.remove(0);
+        app.tab = Tab::Liked;
+        let before = (app.source.clone(), app.current().cloned());
+
+        app.activate(0);
+
+        assert_eq!((app.source.clone(), app.current().cloned()), before);
     }
 
     #[test]
