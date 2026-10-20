@@ -707,7 +707,10 @@ impl App {
     }
 
     fn set_timer_running(&mut self, running: bool) {
-        let now = Instant::now();
+        self.set_timer_running_at(running, Instant::now());
+    }
+
+    fn set_timer_running_at(&mut self, running: bool, now: Instant) {
         if running {
             self.timer.start(now);
             self.track_focus(now);
@@ -1440,10 +1443,11 @@ impl App {
     /// Everything that happens without input: finished jobs, audio events, the timer.
     pub fn tick(&mut self, now: Instant) {
         // The loop ticks several times a second, so a long gap means the machine slept. Windows
-        // keeps `Instant` running through sleep while macOS doesn't, so the timer drops the gap.
-        let gap = now.saturating_duration_since(self.ticked_at);
-        if gap >= Duration::from_secs(10) {
-            self.timer.defer(gap);
+        // keeps `Instant` running through sleep while macOS doesn't, so the timer pauses over the
+        // gap itself, which also starts a new focus row on the day it woke up.
+        if now.saturating_duration_since(self.ticked_at) >= Duration::from_secs(10) && self.timer.is_running() {
+            self.set_timer_running_at(false, self.ticked_at);
+            self.set_timer_running_at(true, now);
         }
         self.ticked_at = now;
         // Each resolve is a yt-dlp process, so skipping through a playlist settles first.
@@ -1967,6 +1971,17 @@ mod tests {
             (app.source.clone(), app.current().cloned(), app.queue.upcoming().count()),
             before
         );
+    }
+
+    #[test]
+    fn sleep_starts_a_new_focus_row_when_the_machine_wakes() {
+        let mut app = app();
+        app.set_timer_running(true);
+        let before = app.focus_block.as_ref().unwrap().id;
+
+        app.tick(app.ticked_at + Duration::from_secs(3600));
+
+        assert_ne!(app.focus_block.as_ref().unwrap().id, before);
     }
 
     #[test]
