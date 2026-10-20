@@ -150,11 +150,13 @@ pub fn resolve(url: &str, start_secs: f64) -> Result<StreamInput> {
 
 /// The video a `watch?v=…&list=…` link points at, so a pasted playlist starts there.
 pub fn start_key(url: &str) -> Option<String> {
-    let query = url.split_once('?')?.1;
-    query
+    let url = url.split_once('#').map_or(url, |(url, _)| url);
+    let (path, query) = url.split_once('?').unwrap_or((url, ""));
+    let id = query
         .split('&')
         .find_map(|pair| pair.strip_prefix("v="))
-        .map(|id| format!("yt:{id}"))
+        .or_else(|| path.split_once("youtu.be/").map(|(_, id)| id))?;
+    (!id.is_empty()).then(|| format!("yt:{id}"))
 }
 
 pub fn looks_like_url(text: &str) -> bool {
@@ -192,5 +194,10 @@ mod tests {
             Some("yt:abc")
         );
         assert_eq!(start_key("https://youtube.com/playlist?list=PL1"), None);
+        assert_eq!(start_key("https://youtu.be/abc?list=PL1").as_deref(), Some("yt:abc"));
+        assert_eq!(
+            start_key("https://www.youtube.com/watch?v=abc#t=30").as_deref(),
+            Some("yt:abc")
+        );
     }
 }
