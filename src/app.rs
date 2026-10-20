@@ -880,7 +880,10 @@ impl App {
         }
         // A seek takes a waiting reconnect along, and once playing again, starts a later drop afresh.
         match &mut self.reconnecting {
-            Some(reconnect) if reconnect.due.is_some() => reconnect.at = seconds,
+            Some(reconnect) if reconnect.due.is_some() => {
+                reconnect.at = seconds;
+                reconnect.ended_empty = false;
+            }
             _ => self.reconnecting = None,
         }
     }
@@ -2035,6 +2038,28 @@ mod tests {
         app.retry_reconnect(later);
         app.handle_engine(EngineEvent::Ended);
         assert_eq!(app.current().unwrap().key, "r2:next");
+    }
+
+    #[test]
+    fn a_seek_while_waiting_gives_the_new_position_its_own_tries() {
+        let mut app = app();
+        let mut next = app.catalog.tracks[0].clone();
+        next.id = "next".into();
+        app.catalog.tracks.push(next);
+        app.fill_queue(&Source::Tracks, None);
+        let first = app.current().unwrap().clone();
+        app.stream = Stream::Playing;
+        app.pending_seek = Some((120.0, Instant::now()));
+        app.handle_engine(EngineEvent::Ended);
+        let later = Instant::now() + Duration::from_secs(60);
+        app.retry_reconnect(later);
+        app.handle_engine(EngineEvent::Ended);
+
+        app.dispatch(Action::SeekTo(30.0));
+        app.retry_reconnect(later);
+        app.handle_engine(EngineEvent::Ended);
+
+        assert_eq!(app.current(), Some(&first));
     }
 
     #[test]
