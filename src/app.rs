@@ -136,6 +136,7 @@ pub struct App {
     pub tab: Tab,
     zone: TimeZone,
     session_saved_at: Instant,
+    ticked_at: Instant,
     pub quit: bool,
 }
 
@@ -200,6 +201,7 @@ impl App {
             tab: Tab::Tracks,
             zone,
             session_saved_at: Instant::now(),
+            ticked_at: Instant::now(),
             quit: false,
         };
         app.refresh_mixes();
@@ -1248,6 +1250,13 @@ impl App {
 
     /// Everything that happens without input: finished jobs, audio events, the timer.
     pub fn tick(&mut self, now: Instant) {
+        // The loop ticks several times a second, so a long gap means the machine slept. Windows
+        // keeps `Instant` running through sleep while macOS doesn't, so the timer drops the gap.
+        let gap = now.saturating_duration_since(self.ticked_at);
+        if gap >= Duration::from_secs(10) {
+            self.timer.defer(gap);
+        }
+        self.ticked_at = now;
         // Each resolve is a yt-dlp process, so skipping through a playlist settles first.
         if let Some((_, _, asked)) = &self.pending_resolve
             && now.duration_since(*asked) >= Duration::from_millis(300)
@@ -1536,6 +1545,20 @@ mod tests {
             Store::open(Path::new(":memory:")).unwrap(),
             Engine::start(cache),
         )
+    }
+
+    #[test]
+    fn time_asleep_does_not_count_toward_the_timer() {
+        let mut app = app();
+        let start = Instant::now();
+        app.ticked_at = start;
+        app.timer.start(start);
+        let length = app.timer.phase_length();
+
+        let woke = start + Duration::from_secs(3600);
+        app.tick(woke);
+
+        assert_eq!((app.timer.phase(), app.timer.remaining(woke)), (Phase::Focus, length));
     }
 
     #[test]

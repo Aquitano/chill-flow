@@ -179,6 +179,13 @@ impl Timer {
         }
     }
 
+    /// Moves a running phase's end later, for time that shouldn't count toward it.
+    pub fn defer(&mut self, by: Duration) {
+        if let Some(deadline) = &mut self.deadline {
+            *deadline += by;
+        }
+    }
+
     pub fn pause(&mut self, now: Instant) {
         if let Some(deadline) = self.deadline.take() {
             self.remaining = deadline.saturating_duration_since(now);
