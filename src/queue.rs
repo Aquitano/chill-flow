@@ -76,13 +76,25 @@ impl Queue {
         }
         self.entries = entries;
         let next_cursor = self.entries.len();
-        let mut queued_keys: HashSet<String> = self.entries.iter().map(|entry| entry.item.key.clone()).collect();
+        // Copies count by occurrence, so a source that gains a second copy of an item queues it, while
+        // copies the source already had, or that are queued anyway, aren't added again.
+        let mut had: HashMap<&str, usize> = HashMap::new();
+        for item in previous_source {
+            *had.entry(&item.key).or_default() += 1;
+        }
+        let mut queued: HashMap<String, usize> = HashMap::new();
+        for entry in &self.entries {
+            *queued.entry(entry.item.key.clone()).or_default() += 1;
+        }
+        let mut seen: HashMap<String, usize> = HashMap::new();
         for item in next_source {
-            if previous_keys.contains(item.key.as_str()) || queued_keys.contains(&item.key) {
+            let occurrence = seen.entry(item.key.clone()).or_default();
+            *occurrence += 1;
+            let present = had.get(item.key.as_str()).copied().unwrap_or(0);
+            if *occurrence <= present.max(queued.get(&item.key).copied().unwrap_or(0)) {
                 continue;
             }
             if let Some(item) = refresh(item) {
-                queued_keys.insert(item.key.clone());
                 self.enqueue(item);
             }
         }
@@ -283,6 +295,17 @@ mod tests {
         assert_eq!(queue.entries[3].item.title, "updated queued");
         queue.set_shuffle(false);
         assert_eq!(keys(&queue), ["c", "d", "yt:queued", "e"]);
+    }
+
+    #[test]
+    fn reconciliation_queues_every_new_copy_of_a_repeated_entry() {
+        let previous = items(&["a", "b"]);
+        let mut queue = Queue::default();
+        queue.replace(previous.clone(), None);
+
+        queue.reconcile(&previous, items(&["a", "b", "b", "c", "c"]), Some);
+
+        assert_eq!(keys(&queue), ["b", "b", "c", "c"]);
     }
 
     #[test]
