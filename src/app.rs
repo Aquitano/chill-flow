@@ -91,6 +91,8 @@ struct Reconnect {
     due: Option<Instant>,
     /// The playback the attempts belong to. Anything the user starts moves past it.
     generation: u64,
+    /// The last attempt connected and ended at once, which a file that ends there does every time.
+    ended_empty: bool,
 }
 
 /// Seconds between attempts to reach a dropped stream, about two minutes in all.
@@ -1527,9 +1529,11 @@ impl App {
         let ongoing = self
             .reconnecting
             .filter(|reconnect| reconnect.generation == self.generation);
+        let ended_empty = !failed && played < 1.0;
         let (at, attempts) = match ongoing {
-            // An attempt that connected and then ended at once is a file that ends there.
-            Some(_) if !failed && played < 1.0 => return false,
+            // Once could be a connection that came back and dropped again; twice is a file that
+            // ends there.
+            Some(reconnect) if ended_empty && reconnect.ended_empty => return false,
             Some(reconnect) if played < 5.0 => (reconnect.at, reconnect.attempts),
             // Only a stream that played counts as dropped, not one that failed to start from a
             // resume point.
@@ -1551,6 +1555,7 @@ impl App {
             attempts: attempts + 1,
             due: Some(Instant::now() + Duration::from_secs(*delay)),
             generation: self.generation,
+            ended_empty,
         });
         true
     }
@@ -1975,6 +1980,28 @@ mod tests {
         app.pending_seek = Some((300.0, Instant::now()));
         app.handle_engine(EngineEvent::Failed("HTTP error 404 Not Found".into()));
 
+        assert_eq!(app.current().unwrap().key, "r2:next");
+    }
+
+    #[test]
+    fn a_reconnect_that_ends_at_once_gets_one_more_try_before_moving_on() {
+        let mut app = app();
+        let mut next = app.catalog.tracks[0].clone();
+        next.id = "next".into();
+        app.catalog.tracks.push(next);
+        app.fill_queue(&Source::Tracks, None);
+        let first = app.current().unwrap().clone();
+        app.stream = Stream::Playing;
+        app.pending_seek = Some((120.0, Instant::now()));
+        app.handle_engine(EngineEvent::Ended);
+        let later = Instant::now() + Duration::from_secs(60);
+
+        app.retry_reconnect(later);
+        app.handle_engine(EngineEvent::Ended);
+        assert_eq!(app.current(), Some(&first));
+
+        app.retry_reconnect(later);
+        app.handle_engine(EngineEvent::Ended);
         assert_eq!(app.current().unwrap().key, "r2:next");
     }
 
