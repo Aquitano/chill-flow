@@ -317,6 +317,10 @@ impl Ui {
         let elapsed = now.duration_since(self.last_frame);
         self.last_frame = now;
         self.absorb(app, now);
+        if self.motion {
+            app.engine.spectrum(self.bars.raw_mut());
+            self.bars.update(elapsed.as_secs_f32().min(0.1));
+        }
         self.toasts.retain(|toast| now.duration_since(toast.born) < toast.life);
         self.hits.clear();
         self.cover_rect = None;
@@ -345,7 +349,7 @@ impl Ui {
                 Layout::vertical([Constraint::Fill(1), Constraint::Length(queue_height)]).areas(center);
             let [focus, ambience] = Layout::vertical([Constraint::Length(13), Constraint::Fill(1)]).areas(side);
             panels::library(buf, library, app, self, now);
-            panels::player(buf, player, app, self, now, elapsed);
+            panels::player(buf, player, app, self, now);
             panels::queue(buf, queue, app, self);
             clock_shown = panels::focus(buf, focus, app, self, now);
             panels::ambience(buf, ambience, app, self, now);
@@ -355,7 +359,7 @@ impl Ui {
                 .areas(body);
             let [player, bottom] = Layout::vertical([Constraint::Fill(1), Constraint::Length(13)]).areas(center);
             panels::library(buf, library, app, self, now);
-            panels::player(buf, player, app, self, now, elapsed);
+            panels::player(buf, player, app, self, now);
             if split {
                 let [focus, side] = Layout::horizontal([Constraint::Length(40), Constraint::Fill(1)])
                     .spacing(1)
@@ -376,7 +380,7 @@ impl Ui {
             let bottom_height = (body.height / 2).clamp(6, 14);
             let [player, bottom] =
                 Layout::vertical([Constraint::Fill(1), Constraint::Length(bottom_height)]).areas(body);
-            panels::player(buf, player, app, self, now, elapsed);
+            panels::player(buf, player, app, self, now);
             match self.focus {
                 Panel::Library => panels::library(buf, bottom, app, self, now),
                 Panel::Queue => panels::queue(buf, bottom, app, self),
@@ -511,6 +515,23 @@ mod tests {
                 Event::Paste((0..rng.usize(..6)).map(|_| pieces[rng.usize(..pieces.len())]).collect())
             }
         }
+    }
+
+    #[test]
+    fn hidden_spectrum_settles_after_the_visualizer_no_longer_fits() {
+        let mut app = offline_app();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
+        ui.bars.resize(16);
+        ui.bars.raw_mut().fill(1.0);
+        ui.bars.update(0.1);
+        assert!(!ui.bars.is_still());
+        let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+        for _ in 0..30 {
+            ui.last_frame = Instant::now() - Duration::from_millis(100);
+            terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        }
+        assert!(ui.bars.is_still());
+        assert!(!ui.is_animating(Instant::now() + Duration::from_secs(1)));
     }
 
     #[test]

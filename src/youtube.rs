@@ -1,7 +1,12 @@
 use std::collections::BTreeMap;
-use std::process::Command;
+use std::io::{self, Read};
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::thread;
+use std::time::Duration;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
 
 use crate::audio::StreamInput;
@@ -43,16 +48,98 @@ struct Format {
     is_live: Option<bool>,
 }
 
-fn yt_dlp(args: &[&str]) -> Result<Vec<u8>> {
-    let output = Command::new("yt-dlp")
-        .args(args)
-        .output()
-        .map_err(|error| match error.kind() {
-            std::io::ErrorKind::NotFound => anyhow!(INSTALL_HINT),
-            _ => anyhow!("could not run yt-dlp: {error}"),
-        })?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+pub struct Lookup {
+    process: Option<Arc<LookupProcess>>,
+}
+
+struct LookupProcess {
+    child: Mutex<Child>,
+    cancelled: AtomicBool,
+}
+
+impl Lookup {
+    fn spawn(mut command: Command, report: impl FnOnce(Result<Vec<u8>>) + Send + 'static) -> Self {
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                report(Err(match error.kind() {
+                    io::ErrorKind::NotFound => anyhow!(INSTALL_HINT),
+                    _ => anyhow!("could not run yt-dlp: {error}"),
+                }));
+                return Self { process: None };
+            }
+        };
+        let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
+            let _ = child.kill();
+            let _ = child.wait();
+            report(Err(anyhow!("yt-dlp started without output pipes")));
+            return Self { process: None };
+        };
+        let process = Arc::new(LookupProcess {
+            child: Mutex::new(child),
+            cancelled: AtomicBool::new(false),
+        });
+        let worker = Arc::clone(&process);
+        thread::spawn(move || {
+            let stderr = thread::spawn(move || read_pipe(stderr));
+            let stdout = read_pipe(stdout);
+            let status = worker.wait();
+            let stderr = stderr
+                .join()
+                .unwrap_or_else(|_| Err(io::Error::other("yt-dlp error reader stopped")));
+            if !worker.cancelled.load(Ordering::Acquire) {
+                report(lookup_output(stdout, stderr, status));
+            }
+        });
+        Self { process: Some(process) }
+    }
+}
+
+impl Drop for Lookup {
+    fn drop(&mut self) {
+        if let Some(process) = &self.process {
+            process.cancelled.store(true, Ordering::Release);
+            let mut child = process.child();
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+impl LookupProcess {
+    fn child(&self) -> MutexGuard<'_, Child> {
+        self.child.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn wait(&self) -> io::Result<ExitStatus> {
+        loop {
+            if let Some(status) = self.child().try_wait()? {
+                return Ok(status);
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+fn read_pipe(mut pipe: impl Read) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    pipe.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+fn lookup_output(
+    stdout: io::Result<Vec<u8>>,
+    stderr: io::Result<Vec<u8>>,
+    status: io::Result<ExitStatus>,
+) -> Result<Vec<u8>> {
+    let status = status.context("could not wait for yt-dlp")?;
+    if !status.success() {
+        let stderr = stderr.context("could not read yt-dlp error output")?;
+        let stderr = String::from_utf8_lossy(&stderr);
         let reason = stderr
             .lines()
             .rev()
@@ -67,7 +154,13 @@ fn yt_dlp(args: &[&str]) -> Result<Vec<u8>> {
             .map_or(reason, |(_, message)| message);
         bail!("{reason}");
     }
-    Ok(output.stdout)
+    stdout.context("could not read yt-dlp output")
+}
+
+fn yt_dlp(args: &[&str], report: impl FnOnce(Result<Vec<u8>>) + Send + 'static) -> Lookup {
+    let mut command = Command::new("yt-dlp");
+    command.args(args);
+    Lookup::spawn(command, report)
 }
 
 fn video_item(id: &str, title: Option<String>, channel: Option<String>, duration: Option<f64>, live: bool) -> Item {
@@ -130,22 +223,30 @@ fn saved_from(url: &str, info: Info) -> Result<Saved> {
     })
 }
 
-pub fn inspect(url: &str) -> Result<Saved> {
-    let stdout = yt_dlp(&["-J", "--flat-playlist", "--no-warnings", "--", url])?;
-    saved_from(url, serde_json::from_slice(&stdout)?)
+pub fn inspect(url: &str, report: impl FnOnce(Result<Saved>) + Send + 'static) -> Lookup {
+    let source = url.to_owned();
+    yt_dlp(&["-J", "--flat-playlist", "--no-warnings", "--", url], move |result| {
+        report(result.and_then(|stdout| saved_from(&source, serde_json::from_slice(&stdout)?)));
+    })
 }
 
-pub fn resolve(url: &str, start_secs: f64) -> Result<StreamInput> {
+pub fn resolve(url: &str, start_secs: f64, report: impl FnOnce(Result<StreamInput>) + Send + 'static) -> Lookup {
     let format = "bestaudio[ext=m4a]/bestaudio/best[height<=360]/best";
-    let stdout = yt_dlp(&["-j", "-f", format, "--no-playlist", "--no-warnings", "--", url])?;
-    let format: Format = serde_json::from_slice(&stdout)?;
-    let live = format.is_live.unwrap_or(false);
-    Ok(StreamInput {
-        url: format.url,
-        headers: format.http_headers.into_iter().collect(),
-        start_secs: if live { 0.0 } else { start_secs },
-        live,
-    })
+    yt_dlp(
+        &["-j", "-f", format, "--no-playlist", "--no-warnings", "--", url],
+        move |result| {
+            report(result.and_then(|stdout| {
+                let format: Format = serde_json::from_slice(&stdout)?;
+                let live = format.is_live.unwrap_or(false);
+                Ok(StreamInput {
+                    url: format.url,
+                    headers: format.http_headers.into_iter().collect(),
+                    start_secs: if live { 0.0 } else { start_secs },
+                    live,
+                })
+            }));
+        },
+    )
 }
 
 /// The video a `watch?v=…&list=…` link points at, so a pasted playlist starts there.
@@ -166,7 +267,64 @@ pub fn looks_like_url(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+    use std::sync::mpsc::{self, RecvTimeoutError};
+    use std::time::Instant;
+
     use super::*;
+
+    fn test_command(mode: &str) -> Command {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args(["--exact", "youtube::tests::lookup_test_process", "--nocapture"])
+            .env("CHILL_LOOKUP_TEST_MODE", mode);
+        command
+    }
+
+    #[test]
+    fn lookup_test_process() {
+        match std::env::var("CHILL_LOOKUP_TEST_MODE").as_deref() {
+            Ok("wait") => thread::sleep(Duration::from_secs(30)),
+            Ok("output") => {
+                let bytes = vec![b'x'; 256 * 1024];
+                io::stdout().write_all(&bytes).unwrap();
+                io::stderr().write_all(&bytes).unwrap();
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn dropping_a_lookup_kills_and_reaps_its_process_without_reporting() {
+        let (reported, results) = mpsc::channel();
+        let lookup = Lookup::spawn(test_command("wait"), move |result| {
+            let _ = reported.send(result);
+        });
+        let process = Arc::clone(lookup.process.as_ref().unwrap());
+        assert!(process.child().try_wait().unwrap().is_none());
+
+        let started = Instant::now();
+        drop(lookup);
+
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(process.child().try_wait().unwrap().is_some());
+        assert!(matches!(
+            results.recv_timeout(Duration::from_secs(2)),
+            Err(RecvTimeoutError::Disconnected)
+        ));
+    }
+
+    #[test]
+    fn lookup_drains_both_output_pipes_before_reporting_success() {
+        let (reported, results) = mpsc::channel();
+        let _lookup = Lookup::spawn(test_command("output"), move |result| {
+            let _ = reported.send(result);
+        });
+
+        let output = results.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+
+        assert!(output.len() >= 256 * 1024);
+    }
 
     #[test]
     fn flat_playlists_become_saved_sources_without_private_entries() {
