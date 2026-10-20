@@ -89,7 +89,12 @@ pub fn save(path: &Path, config: &Config) -> Result<()> {
     if let Some(folder) = path.parent() {
         std::fs::create_dir_all(folder).with_context(|| format!("creating {}", folder.display()))?;
     }
-    std::fs::write(path, document.to_string()).with_context(|| format!("writing {}", path.display()))
+    // Written beside the file and renamed over it, so a crash mid-save can't leave a half-written
+    // config that stops the next start.
+    let partial = path.with_extension("toml.part");
+    std::fs::write(&partial, document.to_string())
+        .and_then(|()| std::fs::rename(&partial, path))
+        .with_context(|| format!("writing {}", path.display()))
 }
 
 /// Replaces a value but keeps the spacing and trailing comment around it.
