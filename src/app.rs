@@ -126,6 +126,8 @@ pub struct App {
     choices: u64,
     failures_in_a_row: u32,
     reconnecting: Option<Reconnect>,
+    /// Where the current stream started, so `position` minus this is how much of it has played.
+    stream_from: f64,
     resume_at: Option<f64>,
     pending_seek: Option<(f64, Instant)>,
     pending_resolve: Option<(String, f64, Instant)>,
@@ -191,6 +193,7 @@ impl App {
             choices: 0,
             failures_in_a_row: 0,
             reconnecting: None,
+            stream_from: 0.0,
             resume_at: (session.position > 1.0).then_some(session.position),
             pending_seek: None,
             pending_resolve: None,
@@ -542,6 +545,7 @@ impl App {
 
     fn start(&mut self, item: Item, start_secs: f64) {
         self.generation += 1;
+        self.stream_from = start_secs;
         self.pending_seek = None;
         self.pending_resolve = None;
         self.resume_at = (start_secs > 0.0).then_some(start_secs);
@@ -650,6 +654,7 @@ impl App {
         if !forward && self.position() > 3.0 && self.stream == Stream::Playing {
             self.pending_seek = None;
             self.engine.seek(0.0);
+            self.stream_from = 0.0;
             return;
         }
         self.choices += 1;
@@ -791,6 +796,11 @@ impl App {
         match self.stream {
             Stream::Playing => self.pending_seek = Some((seconds, Instant::now())),
             _ => self.resume_at = Some(seconds),
+        }
+        // A seek takes a waiting reconnect along, and once playing again, starts a later drop afresh.
+        match &mut self.reconnecting {
+            Some(reconnect) if reconnect.due.is_some() => reconnect.at = seconds,
+            _ => self.reconnecting = None,
         }
     }
 
@@ -1277,6 +1287,7 @@ impl App {
         {
             self.pending_seek = None;
             self.engine.seek(at);
+            self.stream_from = at;
         }
         while let Ok(job) = self.inbox.try_recv() {
             self.handle_job(job);
@@ -1343,20 +1354,20 @@ impl App {
     /// Picks a dropped stream up where it stopped. An attempt that can't connect tries again after
     /// a growing pause, so a network outage waits instead of failing the rest of the queue.
     fn reconnect(&mut self, failed: bool) -> bool {
+        let played = self.position() - self.stream_from;
         let ongoing = self
             .reconnecting
             .filter(|reconnect| reconnect.generation == self.generation);
         let (at, attempts) = match ongoing {
-            // An attempt that connected and then ended right away is a file that ends there.
-            Some(_) if !failed => return false,
-            Some(reconnect) => (reconnect.at, reconnect.attempts),
-            None => {
-                let played = self.position();
-                match self.current() {
-                    Some(item) if played >= 5.0 => (if item.is_live() { 0.0 } else { played }, 0),
-                    _ => return false,
-                }
-            }
+            // An attempt that connected and then ended at once is a file that ends there.
+            Some(_) if !failed && played < 1.0 => return false,
+            Some(reconnect) if played < 5.0 => (reconnect.at, reconnect.attempts),
+            // Only a stream that played counts as dropped, not one that failed to start from a
+            // resume point.
+            _ => match self.current() {
+                Some(item) if played >= 5.0 => (if item.is_live() { 0.0 } else { self.position() }, 0),
+                _ => return false,
+            },
         };
         let Some(delay) = RECONNECT_DELAYS.get(attempts) else {
             return false;
@@ -1390,7 +1401,8 @@ impl App {
                 generation: self.generation,
                 ..reconnect
             });
-        } else if reconnect.due.is_none() && self.stream == Stream::Playing && self.position() > reconnect.at + 10.0 {
+        } else if reconnect.due.is_none() && self.stream == Stream::Playing && self.position() - self.stream_from > 10.0
+        {
             // Playing again, so a later drop starts over.
             self.reconnecting = None;
         }
@@ -1565,6 +1577,36 @@ mod tests {
         app.tick(woke);
 
         assert_eq!((app.timer.phase(), app.timer.remaining(woke)), (Phase::Focus, length));
+    }
+
+    #[test]
+    fn a_track_that_fails_at_its_resume_point_moves_on() {
+        let mut app = app();
+        let mut next = app.catalog.tracks[0].clone();
+        next.id = "next".into();
+        app.catalog.tracks.push(next);
+        app.fill_queue(&Source::Tracks, None);
+        let first = app.current().unwrap().clone();
+
+        app.start(first, 300.0);
+        // Holds the playhead at the resume point whether or not ffmpeg is installed.
+        app.pending_seek = Some((300.0, Instant::now()));
+        app.handle_engine(EngineEvent::Failed("HTTP error 404 Not Found".into()));
+
+        assert_eq!(app.current().unwrap().key, "r2:next");
+    }
+
+    #[test]
+    fn a_seek_while_waiting_to_reconnect_moves_the_retry() {
+        let mut app = app();
+        app.stream = Stream::Playing;
+        app.pending_seek = Some((120.0, Instant::now()));
+        app.handle_engine(EngineEvent::Ended);
+
+        app.dispatch(Action::SeekTo(200.0));
+        app.retry_reconnect(Instant::now() + Duration::from_secs(60));
+
+        assert_eq!(app.stream_from, 200.0);
     }
 
     #[test]
