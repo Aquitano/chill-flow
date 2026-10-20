@@ -942,7 +942,10 @@ impl App {
             return;
         };
         let level = level.min(100);
-        let source = match Noise::ALL.into_iter().find(|noise| noise.id() == id) {
+        // Only the entries `with_noise` added have no file; a catalog recording that happens to share
+        // a noise id still plays its file.
+        let noise = Noise::ALL.into_iter().find(|noise| noise.id() == id);
+        let source = match noise.filter(|_| sound.file.is_empty()) {
             Some(noise) => LoopSource::Noise(noise),
             None => LoopSource::File(self.catalog.url(&sound.file)),
         };
