@@ -68,11 +68,25 @@ Focus stats count every minute a focus block ran, including blocks you stopped e
 
 `catalog.json` lists the R2 tracks, the ambient sounds, and the built-in mixes. chill reads it from `catalog_url`, keeps the last copy it fetched for offline starts, and falls back to the copy compiled into the binary from this repository. File names resolve against the folder the catalog sits in.
 
-To add a track, upload the MP3 (and optionally a cover image) to the bucket, add an entry to `catalog.json`, and upload the catalog next to it:
+`chill-catalog` in `tools/catalog` edits that file and uploads to the bucket. It needs ffmpeg and these variables, from the environment or a `.env` file in the repository:
 
-```json
-{ "id": "night-drive-01", "title": "Night Drive", "artist": "…", "file": "night-drive.mp3", "cover": "cover-night-drive.png", "durationSec": 184, "tags": ["focus"] }
+| Variable | Holds |
+| --- | --- |
+| `R2_ACCOUNT_ID` | the Cloudflare account id |
+| `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | an R2 API token with write access to the bucket |
+| `R2_BUCKET` | the bucket name |
+| `R2_JURISDICTION` | the bucket's jurisdiction, such as `eu`; leave it unset for the default |
+
+```bash
+cargo run -p chill-catalog -- add-track night-drive.wav --title "Night Drive" --artist "…" --cover cover.png --tag focus
+cargo run -p chill-catalog -- add-sound rain.flac --label "Rain" --credit "…, CC0 1.0" --start 2 --length 75 --gain 90
+cargo run -p chill-catalog -- check
+cargo run -p chill-catalog -- publish
 ```
+
+`add-track` normalizes the audio to -14 LUFS and `add-sound` cuts a loop and normalizes it to -16 LUFS, both as 192 kbps MP3. They upload the file (and cover), then add the entry to `catalog.json`; the id defaults to the title or label in lowercase with dashes. `check` validates the catalog and confirms the public bucket serves every file it names. `publish` runs `check` and uploads `catalog.json`, which clients cache for five minutes. Add `--dry-run` to any command to see what would be uploaded and written without touching the bucket or the file. Commit `catalog.json` after publishing, so the copy compiled into the next release matches.
+
+Audio and covers are served as immutable and cached for a year, so a client that fetched a file never asks for it again. A changed recording needs a new name: pass a new `--id`. The tool refuses to replace an existing file unless you pass `--force`.
 
 ## Configuration
 
@@ -99,8 +113,8 @@ The library, likes, scenes, mixes, focus history, and the resume point live in `
 
 ```bash
 cargo run
-cargo test
-cargo clippy --all-targets -- -D warnings
+cargo test --workspace
+cargo clippy --all-targets --workspace -- -D warnings
 ```
 
 On Linux the build needs `libasound2-dev`. CI runs the checks on Linux, macOS, and Windows. Pushing a version tag such as `v0.1.0` builds the binaries and installers and publishes them as a GitHub release; bump `version` in `Cargo.toml` to match first.

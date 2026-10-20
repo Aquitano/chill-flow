@@ -99,8 +99,8 @@
       "id": "campfire-night",
       "name": "Campfire night",
       "levels": {
-        "fire-crackle": 65,
         "crickets-night": 35,
+        "fire-crackle": 65,
         "wind-soft": 15
       }
     },

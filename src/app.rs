@@ -9,7 +9,7 @@ use jiff::tz::TimeZone;
 
 use crate::action::{Action, Prompt, Removal, Setting, Tab};
 use crate::audio::{Engine, EngineEvent, StreamInput};
-use crate::catalog::{Catalog, Levels, Mix};
+use crate::catalog::{self, Catalog, Levels, Mix};
 use crate::config::{self, Config, Paths};
 use crate::media::{MediaCommand, NowPlaying};
 use crate::model::{self, Item, Playable, Playback, Saved, Scene, Session, Source};
@@ -189,7 +189,7 @@ impl App {
         } = paths;
         let (jobs, inbox) = mpsc::channel();
         let session = store.session();
-        let catalog = Catalog::offline(&cache_dir, &config.catalog_url);
+        let catalog = catalog::offline(&cache_dir, &config.catalog_url);
         let zone = TimeZone::system();
         let mut app = App {
             timer: Timer::new(session.timer, config.pomodoro),
@@ -310,7 +310,7 @@ impl App {
         let jobs = self.jobs.clone();
         let (cache, url) = (self.cache_dir.clone(), self.config.catalog_url.clone());
         std::thread::spawn(move || {
-            let _ = jobs.send(Job::Catalog(Catalog::fetch(&cache, &url)));
+            let _ = jobs.send(Job::Catalog(catalog::fetch(&cache, &url)));
         });
     }
 
