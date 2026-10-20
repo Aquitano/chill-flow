@@ -1044,16 +1044,9 @@ impl App {
                 self.play_source(Source::Tracks, key.as_deref());
             }
             Target::Liked(i) => {
-                let Some(item) = self.likes.get(i) else {
-                    return;
-                };
-                // A like the catalog dropped stays listed so it can be removed, but has nothing to play.
-                if item.clone().refreshed(&self.catalog).is_none() {
-                    let message = format!("\"{}\" is no longer in the catalog", item.title);
-                    return self.toast(Tone::Error, message);
+                if let Some(item) = self.playable_like(i) {
+                    self.play_source(Source::Liked, Some(&item.key));
                 }
-                let key = item.key.clone();
-                self.play_source(Source::Liked, Some(&key));
             }
             Target::Saved(i) => {
                 if let Some(saved) = self.saved.get(i) {
@@ -1067,6 +1060,16 @@ impl App {
         }
     }
 
+    /// A like the catalog dropped stays listed so it can be removed, but has nothing to play.
+    fn playable_like(&mut self, index: usize) -> Option<Item> {
+        let like = self.likes.get(index)?.clone();
+        let playable = like.clone().refreshed(&self.catalog);
+        if playable.is_none() {
+            self.toast(Tone::Error, format!("\"{}\" is no longer in the catalog", like.title));
+        }
+        playable
+    }
+
     fn enqueue(&mut self, index: usize) {
         let Some(row) = self.row(index) else {
             return;
@@ -1075,7 +1078,8 @@ impl App {
             Target::Saved(i) => self.saved.get(i).map(|saved| saved.items.clone()).unwrap_or_default(),
             Target::Mix(i) => return self.apply_mix(i),
             Target::Scene(_) => return,
-            _ => self.row_item(index).into_iter().collect(),
+            Target::Liked(i) => self.playable_like(i).into_iter().collect(),
+            Target::Track(_) => self.row_item(index).into_iter().collect(),
         };
         if self.source == Source::Soundscape {
             return self.activate(index);
@@ -1923,7 +1927,7 @@ mod tests {
     }
 
     #[test]
-    fn playing_an_unavailable_like_keeps_the_current_playback() {
+    fn an_unavailable_like_neither_plays_nor_queues() {
         let mut app = app();
         let mut survivor = app.catalog.tracks[0].clone();
         survivor.id = "survivor".into();
@@ -1932,11 +1936,15 @@ mod tests {
         app.likes = app.items_for(&Source::Tracks).into_iter().take(2).collect();
         app.catalog.tracks.remove(0);
         app.tab = Tab::Liked;
-        let before = (app.source.clone(), app.current().cloned());
+        let before = (app.source.clone(), app.current().cloned(), app.queue.upcoming().count());
 
         app.activate(0);
+        app.enqueue(0);
 
-        assert_eq!((app.source.clone(), app.current().cloned()), before);
+        assert_eq!(
+            (app.source.clone(), app.current().cloned(), app.queue.upcoming().count()),
+            before
+        );
     }
 
     #[test]
