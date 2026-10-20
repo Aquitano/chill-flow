@@ -6,6 +6,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Margin, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, BorderType, Widget};
+use ratatui_image::picker::ProtocolType;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::widgets::{self, fill, fit, put, wrap};
@@ -190,9 +191,12 @@ fn key_hints(buf: &mut Buffer, x: u16, y: u16, hints: &[(&str, &str)], ui: &Ui) 
 }
 
 pub fn draw(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant) {
-    let shown = ui.overlay_shown.value(now);
-    widgets::dim(buf, screen, shown * BACKDROP_DIM, &ui.theme, ui.cover_rect);
     let Some(overlay) = ui.overlay.take() else { return };
+    // The page dims in one frame: fading it recolors every cell on every frame. Art drawn by a
+    // graphics protocol can't be recolored like cells, and swapping in a darkened copy re-sends
+    // the whole image, which flickers, so it stays as it is.
+    let graphics = ui.picker.protocol_type() != ProtocolType::Halfblocks;
+    widgets::dim(buf, screen, BACKDROP_DIM, &ui.theme, ui.cover_rect.filter(|_| graphics));
     ui.hits.push((screen, Hit::Backdrop));
     if screen.width < 30 || screen.height < 10 {
         ui.overlay = Some(overlay);
@@ -221,7 +225,7 @@ pub fn draw(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant
             let rect = rect.intersection(area);
             (!rect.is_empty()).then_some((rect, hit))
         }));
-        widgets::dim(buf, area, 1.0 - shown, &ui.theme, None);
+        widgets::dim(buf, area, 1.0 - ui.overlay_shown.value(now), &ui.theme, None);
     }
     ui.overlay = Some(overlay);
 }

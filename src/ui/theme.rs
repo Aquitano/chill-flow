@@ -68,10 +68,6 @@ impl Theme {
         self.known.is_some()
     }
 
-    pub fn background_rgb(&self) -> Option<[u8; 3]> {
-        self.known.map(|(_, bg)| bg)
-    }
-
     pub fn text(&self) -> Color {
         self.mix(1.0)
     }
