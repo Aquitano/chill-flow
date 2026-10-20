@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 
-pub use catalog_schema::{Catalog, CatalogTrack, Levels, Mix};
+pub use catalog_schema::{AmbientSound, Catalog, CatalogTrack, Levels, Mix};
 
 const EMBEDDED: &str = include_str!("../catalog.json");
 

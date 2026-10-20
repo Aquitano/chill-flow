@@ -11,9 +11,8 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
-use super::EngineEvent;
-use super::ffmpeg;
 use super::mixer::LaneLevel;
+use super::{EngineEvent, LoopSource, ffmpeg};
 
 const SEAM_SECS: f32 = 0.5;
 const QUIET_WINDOW_SECS: f32 = 0.05;
@@ -26,14 +25,14 @@ pub(super) struct LoadedLoop {
 
 pub(super) struct LoadRequest {
     pub(super) id: String,
-    pub(super) url: String,
+    pub(super) source: LoopSource,
     pub(super) cache_dir: PathBuf,
     pub(super) rate: u32,
     pub(super) level: Arc<LaneLevel>,
 }
 
 pub(super) fn spawn_load(request: LoadRequest, loaded: Sender<LoadedLoop>, events: Sender<EngineEvent>) {
-    thread::spawn(move || match load(&request.url, &request.cache_dir, request.rate) {
+    thread::spawn(move || match load(&request.source, &request.cache_dir, request.rate) {
         Ok(samples) => {
             let _ = loaded.send(LoadedLoop {
                 samples,
@@ -50,7 +49,15 @@ pub(super) fn spawn_load(request: LoadRequest, loaded: Sender<LoadedLoop>, event
     });
 }
 
-fn load(url: &str, cache_dir: &Path, rate: u32) -> Result<Box<[i16]>, String> {
+fn load(source: &LoopSource, cache_dir: &Path, rate: u32) -> Result<Box<[i16]>, String> {
+    let url = match source {
+        LoopSource::File(url) => url,
+        LoopSource::Noise(noise) => {
+            let mut samples = noise.generate(rate);
+            close_loop(&mut samples, (SEAM_SECS * rate as f32) as usize);
+            return Ok(samples.into_boxed_slice());
+        }
+    };
     let path = cached_file(url, cache_dir)?;
     let output = decode(&path, rate).map_err(ffmpeg::spawn_error)?;
     let looped = into_loop(&path, &output, rate);
@@ -216,7 +223,7 @@ mod tests {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, b"not audio").unwrap();
 
-        assert!(load(url, cache.path(), 48_000).is_err());
+        assert!(load(&LoopSource::File(url.into()), cache.path(), 48_000).is_err());
         assert!(!path.exists());
     }
 
