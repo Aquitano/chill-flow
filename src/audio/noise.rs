@@ -44,7 +44,7 @@ impl Noise {
     /// instead of sitting in the middle.
     pub(super) fn generate(self, rate: u32) -> Vec<i16> {
         let frames = (rate * LOOP_SECS) as usize;
-        let [left, right] = [1, 2].map(|seed| self.channel(frames, &mut Rng::with_seed(seed)));
+        let [left, right] = [1, 2].map(|seed| self.channel(frames, rate, &mut Rng::with_seed(seed)));
         left.iter()
             .zip(&right)
             .flat_map(|(&left, &right)| [left, right])
@@ -52,7 +52,7 @@ impl Noise {
             .collect()
     }
 
-    fn channel(self, frames: usize, rng: &mut Rng) -> Vec<f32> {
+    fn channel(self, frames: usize, rate: u32, rng: &mut Rng) -> Vec<f32> {
         let mut white = || rng.f32() * 2.0 - 1.0;
         let mut samples: Vec<f32> = match self {
             Noise::White => (0..frames).map(|_| white()).collect(),
@@ -74,12 +74,14 @@ impl Noise {
                     })
                     .collect()
             }
-            // Integrated white noise, leaking back toward zero so it can't wander off.
+            // Integrated white noise, leaking back toward zero so it can't wander off. The leak is set
+            // per sample from the rate, so it rolls off from the same 150 Hz on any output.
             Noise::Brown => {
+                let leak = (-std::f32::consts::TAU * 150.0 / rate as f32).exp();
                 let mut last = 0.0_f32;
                 (0..frames)
                     .map(|_| {
-                        last = (last + 0.02 * white()) / 1.02;
+                        last = leak * last + (1.0 - leak) * white();
                         last
                     })
                     .collect()
@@ -107,7 +109,7 @@ mod tests {
 
     #[test]
     fn each_color_reaches_its_level_and_darker_ones_keep_more_low_end() {
-        let rate = 8_000;
+        let rate = 48_000;
         let [white, pink, brown] = Noise::ALL.map(|noise| noise.generate(rate));
         for (noise, samples) in Noise::ALL.iter().zip([&white, &pink, &brown]) {
             assert_eq!(samples.len(), (rate * LOOP_SECS * 2) as usize);
@@ -117,5 +119,16 @@ mod tests {
         // Averaging 32 frames at a time leaves only the low frequencies.
         let low = |samples: &[i16]| power_in(samples, 64) / power_in(samples, 1);
         assert!(low(&white) < low(&pink) && low(&pink) < low(&brown));
+    }
+
+    #[test]
+    fn brown_noise_keeps_its_low_end_at_any_output_rate() {
+        // Averaging 2 ms at a time leaves what's under about 250 Hz.
+        let low = |rate: u32| {
+            let samples = Noise::Brown.generate(rate);
+            power_in(&samples, (rate / 500) as usize * 2) / power_in(&samples, 1)
+        };
+        let (at_44, at_96) = (low(44_100), low(96_000));
+        assert!((at_44 - at_96).abs() < 0.05, "{at_44} at 44.1 kHz, {at_96} at 96 kHz");
     }
 }
