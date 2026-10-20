@@ -52,8 +52,12 @@ impl Decoder {
         if start_secs > 0.0 {
             command.arg("-ss").arg(format!("{start_secs:.3}"));
         }
+        // YouTube uploads and live streams are mastered anywhere from very quiet to very loud, so
+        // every stream is brought to -14 LUFS, where streaming services play music, and the
+        // balance against the ambience stays where it was set.
         command
-            .args(["-i", &input.url, "-vn", "-f", "f32le", "-ac", "2", "-ar"])
+            .args(["-i", &input.url, "-vn", "-af", "loudnorm=I=-14:TP=-1.5:LRA=11"])
+            .args(["-f", "f32le", "-ac", "2", "-ar"])
             .arg(rate.to_string())
             .arg("pipe:1")
             .stdout(Stdio::piped())
