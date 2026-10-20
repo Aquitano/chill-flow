@@ -36,6 +36,8 @@ pub enum Job {
     },
     Media(MediaCommand),
     Tools(Vec<(Tool, Option<String>)>),
+    /// A worker thread panicked; the panic itself went to crash.log.
+    Crashed,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1487,6 +1489,10 @@ impl App {
                 MediaCommand::Play | MediaCommand::Pause => {}
             },
             Job::Tools(found) => self.tools_checked(found),
+            Job::Crashed => self.toast(
+                Tone::Error,
+                "Something stopped working in the background. Details are in crash.log in the cache folder.",
+            ),
         }
     }
 }

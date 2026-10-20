@@ -81,6 +81,7 @@ fn main() -> Result<ExitCode> {
         let mut terminal = ratatui::init();
         let _ = execute!(stdout(), EnableMouseCapture, EnableBracketedPaste);
         let ui_thread = std::thread::current().id();
+        let crashed = app.jobs.clone();
         let previous_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
             if std::thread::current().id() == ui_thread {
@@ -94,6 +95,7 @@ fn main() -> Result<ExitCode> {
                 .append(true)
                 .open(&crash_log)
                 .and_then(|mut log| writeln!(log, "{info}"));
+            let _ = crashed.send(Job::Crashed);
         }));
 
         let picker = if answers_image_query() {
