@@ -149,6 +149,11 @@ pub fn footer(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
             ("[ ]", "mix", Some(Action::CycleMix(1))),
         ],
     });
+    if ui.focus == Panel::Library
+        && let Some(saved) = app.playlist_for_row(ui.selected[app.tab.index()])
+    {
+        hints.insert(0, ("R", "refresh", Some(Action::RefreshSaved(saved.id.clone()))));
+    }
     hints.push(("o", "open link", Some(Action::OpenPrompt(Prompt::OpenUrl))));
     let mut pinned = vec![
         ("^p", "commands", Action::OpenPalette),
