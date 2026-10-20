@@ -20,7 +20,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event,
 };
@@ -41,6 +41,13 @@ struct Cli {
     command: Option<CliCommand>,
     /// A YouTube link, or the name of a saved scene, to start right away.
     target: Option<String>,
+}
+
+/// Whether `chill <name>` runs a command rather than the scene with that name.
+pub fn is_command(name: &str) -> bool {
+    let mut cli = Cli::command();
+    cli.build();
+    cli.find_subcommand(name).is_some()
 }
 
 #[derive(Subcommand)]
@@ -243,4 +250,17 @@ fn read_input() -> Receiver<io::Result<Vec<Event>>> {
         }
     });
     receiver
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scene_names_that_match_a_command_are_told_apart() {
+        assert!(is_command("doctor") && is_command("help"));
+        assert!(!is_command("rainy study"));
+        let cli = Cli::try_parse_from(["chill", "--", "doctor"]).unwrap();
+        assert_eq!((cli.command.is_none(), cli.target.as_deref()), (true, Some("doctor")));
+    }
 }

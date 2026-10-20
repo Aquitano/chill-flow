@@ -1167,7 +1167,10 @@ impl App {
                         self.reload_library();
                         self.toast(
                             Tone::Done,
-                            format!("Saved \"{text}\". Run chill \"{text}\" to start it."),
+                            format!(
+                                "Saved \"{text}\". Run chill {}\"{text}\" to start it.",
+                                if crate::is_command(text) { "-- " } else { "" }
+                            ),
                         );
                     }
                     Err(error) => self.toast(Tone::Error, format!("Could not save the scene: {error}")),
