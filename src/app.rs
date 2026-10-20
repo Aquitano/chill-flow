@@ -1167,7 +1167,10 @@ impl App {
                         self.reload_library();
                         self.toast(
                             Tone::Done,
-                            format!("Saved \"{text}\". Run chill \"{text}\" to start it."),
+                            format!(
+                                "Saved \"{text}\". Run chill {}\"{text}\" to start it.",
+                                if crate::is_command(text) { "-- " } else { "" }
+                            ),
                         );
                     }
                     Err(error) => self.toast(Tone::Error, format!("Could not save the scene: {error}")),
@@ -1736,14 +1739,19 @@ fn fetch_cover(url: &str) -> Option<DynamicImage> {
     })
 }
 
+/// An app on an in-memory library whose files go to a folder deleted along with it. Nothing listens
+/// on port 9, so streams, downloads, and the catalog fetch fail fast instead of reaching the network.
 #[cfg(test)]
-mod tests {
-    use std::path::Path;
+pub struct TestApp {
+    app: App,
+    _files: tempfile::TempDir,
+}
 
-    use super::*;
-
-    fn app() -> App {
-        let cache = std::env::temp_dir().join(format!("chill-app-tests-{}", std::process::id()));
+#[cfg(test)]
+impl TestApp {
+    pub fn new() -> TestApp {
+        let files = tempfile::tempdir().unwrap();
+        let cache = files.path().to_path_buf();
         let config = Config {
             catalog_url: "http://127.0.0.1:9/catalog.json".into(),
             chime: false,
@@ -1755,12 +1763,36 @@ mod tests {
             database: cache.join("unused.db"),
             cache: cache.clone(),
         };
-        App::new(
-            config,
-            paths,
-            Store::open(Path::new(":memory:")).unwrap(),
-            Engine::start(cache),
-        )
+        let store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        TestApp {
+            app: App::new(config, paths, store, Engine::start(cache)),
+            _files: files,
+        }
+    }
+}
+
+#[cfg(test)]
+impl std::ops::Deref for TestApp {
+    type Target = App;
+
+    fn deref(&self) -> &App {
+        &self.app
+    }
+}
+
+#[cfg(test)]
+impl std::ops::DerefMut for TestApp {
+    fn deref_mut(&mut self) -> &mut App {
+        &mut self.app
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn app() -> TestApp {
+        TestApp::new()
     }
 
     fn playlist() -> Saved {
@@ -1982,7 +2014,8 @@ mod tests {
         app.set_timer_running(true);
         let before = app.focus_block.as_ref().unwrap().id;
 
-        app.tick(app.ticked_at + Duration::from_secs(3600));
+        let woke = app.ticked_at + Duration::from_secs(3600);
+        app.tick(woke);
 
         assert_ne!(app.focus_block.as_ref().unwrap().id, before);
     }
@@ -2140,8 +2173,9 @@ mod tests {
         app.start(item, 300.0);
         app.seek_to(50.0);
 
+        let generation = app.generation;
         app.handle_job(Job::Resolved {
-            generation: app.generation,
+            generation,
             result: Ok(StreamInput {
                 url: "http://127.0.0.1:9/first".into(),
                 headers: Vec::new(),

@@ -13,12 +13,29 @@ use super::mixer::{BLOCK_FRAMES, Mixer};
 const RETRY_INTERVAL: Duration = Duration::from_secs(2);
 const OPEN_TIMEOUT: Duration = Duration::from_secs(3);
 
+/// The rate the whole session mixes at, fixed when it starts.
 pub(super) fn device_rate() -> Result<u32, String> {
     let device = cpal::default_host()
         .default_output_device()
         .ok_or("no audio output device")?;
-    let config = device.default_output_config().map_err(|error| error.to_string())?;
-    Ok(config.sample_rate())
+    let default = device.default_output_config().map_err(|error| error.to_string())?;
+    let supports_preferred = device.supported_output_configs().map_or(true, |mut configs| {
+        configs.any(|range| (range.min_sample_rate()..=range.max_sample_rate()).contains(&PREFERRED_RATE))
+    });
+    Ok(session_rate(default.sample_rate(), supports_preferred))
+}
+
+const PREFERRED_RATE: u32 = 48_000;
+
+/// Prefers 48 kHz, which every output runs outside a headset's call mode, so a session that
+/// starts during a call isn't stuck at the call's 16 or 24 kHz once it ends. An output that
+/// can't do 48 kHz at all keeps its own rate.
+fn session_rate(default: u32, supports_preferred: bool) -> u32 {
+    if supports_preferred || default < 44_100 {
+        PREFERRED_RATE
+    } else {
+        default
+    }
 }
 
 /// Keeps the mixer running: on the default output device when there is one, otherwise on
@@ -218,6 +235,13 @@ mod tests {
         for (index, sample) in mix.iter_mut().enumerate() {
             *sample = if index % 2 == 0 { 0.5 } else { -0.5 };
         }
+    }
+
+    #[test]
+    fn a_session_started_during_a_call_still_mixes_at_48_khz() {
+        assert_eq!(session_rate(24_000, false), 48_000);
+        assert_eq!(session_rate(44_100, true), 48_000);
+        assert_eq!(session_rate(44_100, false), 44_100);
     }
 
     #[test]

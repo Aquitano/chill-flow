@@ -89,7 +89,14 @@ pub fn save(path: &Path, config: &Config) -> Result<()> {
     if let Some(folder) = path.parent() {
         std::fs::create_dir_all(folder).with_context(|| format!("creating {}", folder.display()))?;
     }
-    std::fs::write(path, document.to_string()).with_context(|| format!("writing {}", path.display()))
+    // Written beside the file and renamed over it, so a crash mid-save can't leave a half-written
+    // config that stops the next start. A config linked from elsewhere, such as a dotfiles
+    // repository, is replaced where the link points, so the link survives.
+    let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let partial = target.with_extension("toml.part");
+    std::fs::write(&partial, document.to_string())
+        .and_then(|()| std::fs::rename(&partial, &target))
+        .with_context(|| format!("writing {}", path.display()))
 }
 
 /// Replaces a value but keeps the spacing and trailing comment around it.
@@ -125,5 +132,27 @@ mod tests {
         assert!(text.contains("chime = false # the bell"));
         assert_eq!(reloaded.catalog_url, "https://example.com/catalog.json");
         assert_eq!((reloaded.chime, reloaded.pomodoro.focus_minutes), (false, 40));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saving_through_a_linked_config_keeps_the_link() {
+        let folder = tempfile::tempdir().unwrap();
+        let dotfile = folder.path().join("dotfiles.toml");
+        let linked = folder.path().join("config.toml");
+        std::fs::write(&dotfile, "chime = true\n").unwrap();
+        std::os::unix::fs::symlink(&dotfile, &linked).unwrap();
+
+        save(
+            &linked,
+            &Config {
+                chime: false,
+                ..Config::default()
+            },
+        )
+        .unwrap();
+
+        assert!(std::fs::symlink_metadata(&linked).unwrap().file_type().is_symlink());
+        assert!(std::fs::read_to_string(&dotfile).unwrap().contains("chime = false"));
     }
 }

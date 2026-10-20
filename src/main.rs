@@ -13,13 +13,14 @@ mod tools;
 mod ui;
 mod youtube;
 
+use std::fs::{File, TryLockError};
 use std::io::{self, Write, stdout};
 use std::process::ExitCode;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event,
 };
@@ -42,6 +43,13 @@ struct Cli {
     target: Option<String>,
 }
 
+/// Whether `chill <name>` runs a command rather than the scene with that name.
+pub fn is_command(name: &str) -> bool {
+    let mut cli = Cli::command();
+    cli.build();
+    cli.find_subcommand(name).is_some()
+}
+
 #[derive(Subcommand)]
 enum CliCommand {
     /// Check that ffmpeg, yt-dlp, and deno are installed, and show where chill keeps its files.
@@ -59,6 +67,17 @@ fn main() -> Result<ExitCode> {
         });
     }
     let config = config::load(&paths.config_file)?;
+    // A second chill would count the same focus time twice and overwrite the first one's session.
+    // The OS lets go of the lock however chill exits.
+    let instance = File::create(paths.database.with_extension("lock")).context("could not lock the library")?;
+    match instance.try_lock() {
+        Ok(()) => {}
+        Err(TryLockError::WouldBlock) => {
+            eprintln!("chill is already running in another terminal.");
+            return Ok(ExitCode::FAILURE);
+        }
+        Err(TryLockError::Error(error)) => return Err(error).context("could not lock the library"),
+    }
     let store = store::Store::open(&paths.database).with_context(|| {
         format!(
             "could not open the library at {}",
@@ -76,6 +95,7 @@ fn main() -> Result<ExitCode> {
         let theme = ui::theme::Theme::detect();
         let engine = audio::Engine::start(paths.cache.clone());
         let crash_log = paths.cache.join("crash.log");
+        let cache = paths.cache.clone();
         let mut app = App::new(config, paths, store, engine);
 
         let mut terminal = ratatui::init();
@@ -105,7 +125,7 @@ fn main() -> Result<ExitCode> {
         };
         let mut ui = Ui::new(theme, picker, app.config.reduce_motion);
         let jobs = app.jobs.clone();
-        let mut media = Media::new(move |command| {
+        let mut media = Media::new(&cache, move |command| {
             let _ = jobs.send(Job::Media(command));
         });
         if let Some(target) = cli.target {
@@ -231,4 +251,17 @@ fn read_input() -> Receiver<io::Result<Vec<Event>>> {
         }
     });
     receiver
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scene_names_that_match_a_command_are_told_apart() {
+        assert!(is_command("doctor") && is_command("help"));
+        assert!(!is_command("rainy study"));
+        let cli = Cli::try_parse_from(["chill", "--", "doctor"]).unwrap();
+        assert_eq!((cli.command.is_none(), cli.target.as_deref()), (true, Some("doctor")));
+    }
 }
