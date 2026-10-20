@@ -174,11 +174,33 @@ impl Ui {
             &self.stats_grow,
             &self.title_shown,
         ];
-        !self.toasts.is_empty()
+        // Without motion a toast doesn't fade, and the slow frame still removes it on time.
+        (self.motion && !self.toasts.is_empty())
             || tweens.iter().any(|tween| tween.active(now))
             || self.panel_glow.iter().any(|tween| tween.active(now))
             || self.levels.values().any(|tween| tween.active(now))
             || (self.motion && !self.bars.is_still())
+    }
+
+    /// Ends every running transition at its target, for when reduced motion turns on.
+    fn settle(&mut self) {
+        let tweens = [
+            &mut self.tab_x,
+            &mut self.tab_width,
+            &mut self.volume,
+            &mut self.heart,
+            &mut self.glow,
+            &mut self.overlay_shown,
+            &mut self.stats_grow,
+            &mut self.title_shown,
+        ];
+        for tween in tweens
+            .into_iter()
+            .chain(&mut self.panel_glow)
+            .chain(self.levels.values_mut())
+        {
+            tween.jump(tween.target());
+        }
     }
 
     pub fn toast(&mut self, tone: Tone, message: String) {
@@ -264,6 +286,11 @@ impl Ui {
     }
 
     fn absorb(&mut self, app: &mut App, now: Instant) {
+        let motion = !app.config.reduce_motion;
+        if self.motion && !motion {
+            self.settle();
+        }
+        self.motion = motion;
         for event in std::mem::take(&mut app.events) {
             match event {
                 Event::Toast(tone, message) => self.toast(tone, message),
@@ -292,7 +319,6 @@ impl Ui {
                 aspect,
             });
         }
-        self.motion = !app.config.reduce_motion;
         self.volume.set(app.volume, now, self.duration(FAST));
         let duration = self.duration(SMOOTH);
         for sound in &app.catalog.ambient {
@@ -599,6 +625,22 @@ mod tests {
                 .iter()
                 .any(|(_, hit)| { *hit == Hit::Act(Action::RefreshSaved("ytpl:study".into())) })
         );
+    }
+
+    #[test]
+    fn turning_on_reduced_motion_ends_running_transitions() {
+        let mut app = offline_app();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
+        app.toast(Tone::Info, "Queued");
+        app.events.push(crate::app::Event::TrackChanged);
+        let now = Instant::now();
+        ui.absorb(&mut app, now);
+        assert!(ui.is_animating(now));
+
+        app.config.reduce_motion = true;
+        ui.absorb(&mut app, now);
+
+        assert!(!ui.is_animating(now));
     }
 
     #[test]
