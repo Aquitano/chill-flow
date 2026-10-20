@@ -2,6 +2,8 @@
 name = "chill"
 version = "0.1.0"
 edition = "2024"
+description = "Lo-fi, ambience, and a focus timer in your terminal"
+repository = "https://github.com/Aquitano/chill-flow"
 
 [dependencies]
 anyhow = "1.0.104"
@@ -37,3 +39,8 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_UI_Wi
 
 [target."cfg(unix)".dependencies]
 signal-hook = "0.3.18"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

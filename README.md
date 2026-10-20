@@ -4,20 +4,32 @@ A terminal player for focused work. It plays lo-fi from your own R2 bucket or fr
 
 ## Install
 
-Install the Rust toolchain from [rustup.rs](https://rustup.rs), plus the tools chill drives:
+chill drives three tools it doesn't ship:
 
 | Tool | What chill uses it for | macOS | Windows |
 | --- | --- | --- | --- |
 | ffmpeg | decoding every stream | `brew install ffmpeg` | `winget install Gyan.FFmpeg` |
 | yt-dlp and deno | resolving YouTube links | `brew install yt-dlp deno` | `winget install yt-dlp.yt-dlp DenoLand.Deno` |
 
-Then:
+Then install chill itself. Prebuilt binaries cover Apple Silicon Macs and 64-bit Windows.
+
+```bash
+# macOS
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Aquitano/chill-flow/releases/latest/download/chill-installer.sh | sh
+```
+
+```powershell
+# Windows
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/Aquitano/chill-flow/releases/latest/download/chill-installer.ps1 | iex"
+```
+
+Both put `chill` in `~/.cargo/bin` and add it to `PATH`. Run the same command again to update. On any other platform, build it with the Rust toolchain from [rustup.rs](https://rustup.rs) (on Windows that also needs the Visual Studio C++ build tools):
 
 ```bash
 cargo install --git https://github.com/Aquitano/chill-flow
 ```
 
-On Windows the Rust toolchain also needs the Visual Studio C++ build tools. After a winget install, open a new terminal so the tools are on `PATH`. `chill doctor` checks that all three are found and prints where chill keeps its config, library, and cache. YouTube changes often enough that an old yt-dlp stops working, so chill mentions it at startup once your yt-dlp is more than 60 days old; update it with `brew upgrade yt-dlp` or `winget upgrade yt-dlp.yt-dlp`.
+After a winget install, open a new terminal so the tools are on `PATH`. `chill doctor` checks that all three are found and prints where chill keeps its config, library, and cache. YouTube changes often enough that an old yt-dlp stops working, so chill mentions it at startup once your yt-dlp is more than 60 days old; update it with `brew upgrade yt-dlp` or `winget upgrade yt-dlp.yt-dlp`.
 
 ## Use
 
@@ -91,7 +103,7 @@ cargo test
 cargo clippy --all-targets -- -D warnings
 ```
 
-On Linux the build needs `libasound2-dev`. CI runs the checks on Linux, macOS, and Windows.
+On Linux the build needs `libasound2-dev`. CI runs the checks on Linux, macOS, and Windows. Pushing a version tag such as `v0.1.0` builds the binaries and installers and publishes them as a GitHub release; bump `version` in `Cargo.toml` to match first.
 
 ## Ambient recordings
 
