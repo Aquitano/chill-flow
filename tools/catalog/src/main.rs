@@ -12,6 +12,7 @@ use bucket::{Bucket, IMMUTABLE, SHORT_LIVED, Upload};
 
 /// The catalog compiled into chill, which is also the one published to the bucket.
 const CATALOG_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../catalog.json");
+const LOCK_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../catalog.json.lock");
 
 #[derive(Parser)]
 #[command(about = "Adds tracks and ambient sounds to chill's catalog.json and publishes it to R2")]
@@ -210,10 +211,11 @@ fn publish(dry_run: bool) -> Result<()> {
 }
 
 /// Held for a whole command, so two runs at once can't drop each other's entry or both upload the
-/// same new file.
+/// same new file. It locks a file of its own: Windows locks are mandatory, and a lock on
+/// catalog.json would stop this run from reading and writing it too.
 fn lock() -> Result<std::fs::File> {
-    let file = std::fs::File::open(CATALOG_PATH).context("opening catalog.json")?;
-    file.lock().context("locking catalog.json")?;
+    let file = std::fs::File::create(LOCK_PATH).context("creating catalog.json.lock")?;
+    file.lock().context("locking catalog.json.lock")?;
     Ok(file)
 }
 
