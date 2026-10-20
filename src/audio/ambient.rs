@@ -52,13 +52,19 @@ pub(super) fn spawn_load(request: LoadRequest, loaded: Sender<LoadedLoop>, event
 
 fn load(url: &str, cache_dir: &Path, rate: u32) -> Result<Box<[i16]>, String> {
     let path = cached_file(url, cache_dir)?;
-    let mut samples = decode(&path, rate)?;
-    trim_quiet_ends(&mut samples, (QUIET_WINDOW_SECS * rate as f32) as usize);
-    close_loop(&mut samples, (SEAM_SECS * rate as f32) as usize);
-    if samples.len() < 2 {
-        return Err(format!("{} contains no audio", path.display()));
+    let looped = decode(&path, rate).and_then(|mut samples| {
+        trim_quiet_ends(&mut samples, (QUIET_WINDOW_SECS * rate as f32) as usize);
+        close_loop(&mut samples, (SEAM_SECS * rate as f32) as usize);
+        if samples.len() < 2 {
+            return Err(format!("{} contains no audio", path.display()));
+        }
+        Ok(samples.into_boxed_slice())
+    });
+    if looped.is_err() {
+        // A damaged download would fail the same way every time, so the next try fetches it again.
+        let _ = fs::remove_file(&path);
     }
-    Ok(samples.into_boxed_slice())
+    looped
 }
 
 fn cached_file(url: &str, cache_dir: &Path) -> Result<PathBuf, String> {
@@ -198,6 +204,18 @@ mod tests {
         trim_quiet_ends(&mut trimmed, 50);
 
         assert_eq!(trimmed.as_slice(), &samples[300..samples.len() - 500]);
+    }
+
+    #[test]
+    fn a_cached_loop_that_cannot_be_decoded_is_dropped() {
+        let cache = tempfile::tempdir().unwrap();
+        let url = "https://example.com/rain.mp3";
+        let path = cache.path().join("ambient").join(cache_name(url).unwrap());
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, b"not audio").unwrap();
+
+        assert!(load(url, cache.path(), 48_000).is_err());
+        assert!(!path.exists());
     }
 
     #[test]
