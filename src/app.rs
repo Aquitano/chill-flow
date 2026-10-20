@@ -719,15 +719,19 @@ impl App {
 
     fn skip(&mut self, forward: bool) {
         self.failures_in_a_row = 0;
-        if !forward
-            && self.position() > 3.0
-            && self.stream == Stream::Playing
-            && self.current().is_some_and(|item| !item.is_live())
-        {
-            self.pending_seek = None;
-            self.engine.seek(0.0);
-            self.stream_from = 0.0;
-            return;
+        if !forward && self.position() > 3.0 && self.current().is_some_and(|item| !item.is_live()) {
+            if self.stream == Stream::Playing {
+                self.pending_seek = None;
+                self.engine.seek(0.0);
+                self.stream_from = 0.0;
+                return;
+            }
+            if self
+                .reconnecting
+                .is_some_and(|reconnect| reconnect.due.is_some() && reconnect.generation == self.generation)
+            {
+                return self.seek_to(0.0);
+            }
         }
         self.choices += 1;
         let next = if forward {
@@ -2003,6 +2007,24 @@ mod tests {
         app.retry_reconnect(later);
         app.handle_engine(EngineEvent::Ended);
         assert_eq!(app.current().unwrap().key, "r2:next");
+    }
+
+    #[test]
+    fn previous_while_waiting_to_reconnect_restarts_the_track() {
+        let mut app = app();
+        let mut next = app.catalog.tracks[0].clone();
+        next.id = "next".into();
+        app.catalog.tracks.push(next);
+        app.fill_queue(&Source::Tracks, None);
+        let second = app.queue.next().cloned().unwrap();
+        app.stream = Stream::Playing;
+        app.pending_seek = Some((120.0, Instant::now()));
+        app.handle_engine(EngineEvent::Ended);
+
+        app.dispatch(Action::Previous);
+        app.retry_reconnect(Instant::now() + Duration::from_secs(60));
+
+        assert_eq!((app.current(), app.stream_from), (Some(&second), 0.0));
     }
 
     #[test]
