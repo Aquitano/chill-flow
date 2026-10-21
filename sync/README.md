@@ -48,11 +48,13 @@ On the Workers Free plan, going past a daily limit makes further calls fail unti
 
 The Worker answers only on `chill-sync.aquitano.me`, chill's default `sync_url`; `domains` in `cloudflare.config.ts` sets it, and the deploy creates the DNS record and certificate. The two rate limiters use namespaces 1001 and 1002, which must be unique within the Cloudflare account, so change them if they are taken.
 
-Sign in with `cf auth login`, or set `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` for a token limited to editing Workers in this account and zone. The first deploy creates `SYNC_SECRET` along with the Worker, without writing it to disk:
+Sign in with `cf auth login`, or set `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` for a token limited to editing Workers in this account and zone. The first deploy creates `SYNC_SECRET` along with the Worker. `cf` reads the secrets file only after building, so it has to be a real file rather than a `<(...)` pipe; this one is readable only by you and gone once the deploy ends:
 
 ```bash
 cf deploy --dry-run
-cf deploy --secrets-file <(printf 'SYNC_SECRET=%s\n' "$(openssl rand -base64 32)")
+secrets=$(mktemp) && chmod 600 "$secrets" \
+  && printf 'SYNC_SECRET=%s\n' "$(openssl rand -base64 32)" > "$secrets" \
+  && cf deploy --secrets-file "$secrets"; rm -f "$secrets"
 ```
 
 Later deploys are `cf deploy` and keep the secret. Changing `SYNC_SECRET` invalidates every token that exists, so pass `--secrets-file` again only to do that on purpose. `cf` can't stream logs yet; `bunx wrangler tail chill-sync` does.
