@@ -70,6 +70,8 @@ Focus stats count every minute a focus block ran, including blocks you stopped e
 
 `catalog.json` lists the R2 tracks, the ambient sounds, and the built-in mixes. chill reads it from `catalog_url`, keeps the last copy it fetched for offline starts, and falls back to the copy compiled into the binary from this repository. File names resolve against the folder the catalog sits in.
 
+Someone can share another catalog with you as a link to its `catalog.json`. Search for **Add a catalog** in the command palette and paste the link; its tracks join Tracks, each showing which catalog it came from, and **Remove catalog** takes it out again. When two catalogs use the same id, the main catalog's entry wins.
+
 `chill-catalog` in `tools/catalog` edits that file and uploads to the bucket. It needs ffmpeg and these variables, from the environment or a `.env` file in the repository:
 
 | Variable | Holds |
@@ -90,12 +92,23 @@ cargo run -p chill-catalog -- publish
 
 Audio and covers are served as immutable and cached for a year, so a client that fetched a file never asks for it again. A changed recording needs a new name: pass a new `--id`. The tool refuses to replace an existing file unless you pass `--force`.
 
+To share music outside the main catalog, start a catalog of its own. `new` creates the file with a `url` under a random folder of the bucket, and `--catalog` points every other command at it:
+
+```bash
+cargo run -p chill-catalog -- new ~/chill/friends.json --name "Friends"
+cargo run -p chill-catalog -- --catalog ~/chill/friends.json add-track home.wav --title "Home" --artist "…"
+cargo run -p chill-catalog -- --catalog ~/chill/friends.json publish
+```
+
+The folder is hard to guess, not secret: anyone with the link can play the files, and taking access back means publishing under a new folder. Only put music there that you may share. Keep the file outside this repository, since it holds the link, and `check` flags ids that the main catalog already uses.
+
 ## Configuration
 
 Press `c` for settings: timer lengths, auto-start, the chime, notifications, and reduced motion. Changes save to `config.toml` right away, keeping anything else you wrote in it. The file is optional and lives in `~/.config/chill/` on macOS and `%APPDATA%\chill\` on Windows. These are the defaults:
 
 ```toml
 catalog_url = "https://chill-data.aquitano.me/catalog.json"
+catalogs = []           # more catalog.json links, added with "Add a catalog"
 reduce_motion = false   # true turns off transitions and the visualizer
 chime = true            # a soft bell when a focus block or break ends
 notifications = true    # an OS notification at the same moments

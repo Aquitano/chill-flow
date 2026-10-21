@@ -3,7 +3,7 @@ use ratatui::layout::Rect;
 
 use super::overlay;
 use super::{Drag, Hit, Overlay, Slider, Ui};
-use crate::action::{Action, Panel, Prompt, Setting, Tab};
+use crate::action::{Action, Panel, Prompt, Removal, Setting, Tab};
 use crate::app::App;
 use crate::youtube;
 
@@ -84,6 +84,16 @@ pub fn apply(app: &mut App, ui: &mut Ui, action: Action) {
                     action: Action::Remove(removal),
                 });
             }
+        }
+        Action::Remove(Removal::Catalog(url)) => {
+            let name = app
+                .added_catalogs()
+                .find(|(known, _)| *known == url)
+                .map_or_else(|| url.clone(), |(_, name)| name);
+            ui.open(Overlay::Confirm {
+                message: format!("Remove the catalog \"{name}\"? Its tracks leave Tracks."),
+                action: Action::Remove(Removal::Catalog(url)),
+            });
         }
         action => app.dispatch(action),
     }

@@ -20,7 +20,16 @@ use crate::tools::Tool;
 use crate::youtube;
 
 pub enum Job {
-    Catalog(Result<Catalog>),
+    Catalog {
+        url: String,
+        /// The `catalog_epoch` the fetch started in.
+        epoch: u64,
+        result: Result<Catalog>,
+    },
+    CatalogAdded {
+        url: String,
+        result: Result<Catalog>,
+    },
     Inspected {
         id: u64,
         result: Result<Saved>,
@@ -123,6 +132,12 @@ pub struct App {
     cache_dir: PathBuf,
     config_file: PathBuf,
     store: Store,
+    /// Every catalog in use, main first, as last loaded. `catalog` is their merge.
+    catalogs: Vec<(String, Catalog)>,
+    /// Catalogs asked for with "Add a catalog" whose first fetch hasn't come back.
+    adding: Vec<String>,
+    /// Moves on with every removal, so a fetch started before it can't bring old contents back.
+    catalog_epoch: u64,
     pub catalog: Catalog,
     pub engine: Engine,
     pub queue: Queue,
@@ -189,7 +204,12 @@ impl App {
         } = paths;
         let (jobs, inbox) = mpsc::channel();
         let session = store.session();
-        let catalog = with_noise(catalog::offline(&cache_dir, &config.catalog_url));
+        let catalogs: Vec<(String, Catalog)> = std::iter::once(&config.catalog_url)
+            .chain(&config.catalogs)
+            .enumerate()
+            .map(|(index, url)| (url.clone(), catalog::offline(&cache_dir, url, index == 0)))
+            .collect();
+        let catalog = with_noise(catalog::merge(&catalogs));
         let zone = TimeZone::system();
         let mut app = App {
             timer: Timer::new(session.timer, config.pomodoro),
@@ -202,6 +222,9 @@ impl App {
             cache_dir,
             config_file,
             store,
+            catalogs,
+            adding: Vec::new(),
+            catalog_epoch: 0,
             catalog,
             engine,
             queue: Queue::new(session.shuffle, session.repeat),
@@ -243,7 +266,7 @@ impl App {
         app.apply_levels(&session.levels);
         app.mix_name = app.matching_mix_name();
         app.restore_playback(&session.playback);
-        app.fetch_catalog();
+        app.fetch_catalogs();
         app
     }
 
@@ -306,12 +329,63 @@ impl App {
         }
     }
 
-    fn fetch_catalog(&self) {
+    fn fetch_catalogs(&self) {
+        for (url, _) in &self.catalogs {
+            let jobs = self.jobs.clone();
+            let (cache, url, epoch) = (self.cache_dir.clone(), url.clone(), self.catalog_epoch);
+            std::thread::spawn(move || {
+                let result = catalog::fetch(&cache, &url);
+                let _ = jobs.send(Job::Catalog { url, epoch, result });
+            });
+        }
+    }
+
+    /// Whether tracks come from more than one catalog, so rows say which one.
+    pub fn has_added_catalogs(&self) -> bool {
+        self.catalogs.len() > 1
+    }
+
+    /// The catalogs added on top of the main one, with the names their tracks show.
+    pub fn added_catalogs(&self) -> impl Iterator<Item = (&str, String)> {
+        self.catalogs
+            .iter()
+            .skip(1)
+            .map(|(url, catalog)| (url.as_str(), catalog::label(catalog, url)))
+    }
+
+    fn add_catalog(&mut self, url: &str) {
+        if self.catalogs.iter().any(|(known, _)| known == url) || self.adding.iter().any(|known| known == url) {
+            self.toast(Tone::Info, "That catalog is already added");
+            return;
+        }
+        self.adding.push(url.to_string());
+        self.toast(Tone::Info, "Loading the catalog…");
         let jobs = self.jobs.clone();
-        let (cache, url) = (self.cache_dir.clone(), self.config.catalog_url.clone());
+        let (cache, url) = (self.cache_dir.clone(), url.to_string());
         std::thread::spawn(move || {
-            let _ = jobs.send(Job::Catalog(catalog::fetch(&cache, &url)));
+            let result = catalog::fetch(&cache, &url);
+            let _ = jobs.send(Job::CatalogAdded { url, result });
         });
+    }
+
+    fn remove_catalog(&mut self, url: &str) {
+        self.catalog_epoch += 1;
+        self.config.catalogs.retain(|known| known != url);
+        self.catalogs
+            .retain(|(known, _)| known != url || known == &self.config.catalog_url);
+        catalog::forget(&self.cache_dir, url);
+        self.save_config();
+        self.merge_catalogs();
+    }
+
+    fn merge_catalogs(&mut self) {
+        let previous = self.items_for(&self.source);
+        self.catalog = with_noise(catalog::merge(&self.catalogs));
+        self.refresh_mixes();
+        self.load_likes();
+        self.refresh_ambience();
+        self.mix_name = self.matching_mix_name();
+        self.reconcile_queue(&previous);
     }
 
     pub fn toast(&mut self, tone: Tone, message: impl Into<String>) {
@@ -399,7 +473,10 @@ impl App {
                 .enumerate()
                 .map(|(index, track)| Row {
                     title: track.title.clone(),
-                    detail: track.artist.clone(),
+                    detail: match &track.catalog {
+                        Some(catalog) if self.has_added_catalogs() => format!("{} · {catalog}", track.artist),
+                        _ => track.artist.clone(),
+                    },
                     meta: duration(Some(track.duration_sec)),
                     current: playing.and_then(|key| key.strip_prefix("r2:")) == Some(&track.id),
                     like_key: Some(format!("r2:{}", track.id)),
@@ -1138,6 +1215,10 @@ impl App {
             },
             Removal::Mix(name) => self.store.delete_mix(name),
             Removal::Scene(name) => self.store.delete_scene(name),
+            Removal::Catalog(url) => {
+                self.remove_catalog(url);
+                return;
+            }
         };
         match result {
             Ok(()) => self.reload_library(),
@@ -1160,6 +1241,8 @@ impl App {
         match prompt {
             Prompt::OpenUrl if youtube::looks_like_url(text) => self.open_url(text),
             Prompt::OpenUrl => self.toast(Tone::Error, "That doesn't look like a link"),
+            Prompt::AddCatalog if text.starts_with("https://") || text.starts_with("http://") => self.add_catalog(text),
+            Prompt::AddCatalog => self.toast(Tone::Error, "A catalog is a link to its catalog.json"),
             Prompt::SaveScene => {
                 let scene = Scene {
                     name: text.to_string(),
@@ -1410,6 +1493,10 @@ impl App {
             Setting::ReduceMotion => self.config.reduce_motion = !self.config.reduce_motion,
         }
         self.timer.set_settings(self.config.pomodoro);
+        self.save_config();
+    }
+
+    fn save_config(&mut self) {
         if let Err(error) = config::save(&self.config_file, &self.config) {
             self.toast(Tone::Error, format!("Could not save settings: {error}"));
         }
@@ -1646,15 +1733,59 @@ impl App {
 
     fn handle_job(&mut self, job: Job) {
         match job {
-            Job::Catalog(Ok(catalog)) => {
-                let previous = self.items_for(&self.source);
-                self.catalog = with_noise(catalog);
-                self.refresh_mixes();
-                self.load_likes();
-                self.refresh_ambience();
-                self.reconcile_queue(&previous);
+            Job::Catalog { epoch, .. } if epoch != self.catalog_epoch => {}
+            Job::Catalog {
+                url,
+                result: Ok(catalog),
+                ..
+            } => {
+                if let Some((_, slot)) = self.catalogs.iter_mut().find(|(known, _)| known == &url) {
+                    *slot = catalog;
+                    self.merge_catalogs();
+                }
             }
-            Job::Catalog(Err(_)) => {}
+            // The main catalog falls back to the copy in the binary, so only an added one that
+            // never loaded is worth a word.
+            Job::Catalog {
+                url,
+                result: Err(error),
+                ..
+            } => {
+                let empty =
+                    self.catalogs.iter().skip(1).any(|(known, catalog)| {
+                        known == &url && catalog.tracks.is_empty() && catalog.ambient.is_empty()
+                    });
+                if empty {
+                    self.toast(Tone::Error, format!("Could not load the catalog at {url}: {error:#}"));
+                }
+            }
+            Job::CatalogAdded {
+                url,
+                result: Ok(catalog),
+            } => {
+                self.adding.retain(|known| known != &url);
+                if self.catalogs.iter().any(|(known, _)| known == &url) {
+                    return;
+                }
+                let message = format!(
+                    "Added {}: {} tracks, {} sounds",
+                    catalog::label(&catalog, &url),
+                    catalog.tracks.len(),
+                    catalog.ambient.len()
+                );
+                self.config.catalogs.push(url.clone());
+                self.catalogs.push((url, catalog));
+                self.save_config();
+                self.merge_catalogs();
+                self.toast(Tone::Done, message);
+            }
+            Job::CatalogAdded {
+                url,
+                result: Err(error),
+            } => {
+                self.adding.retain(|known| known != &url);
+                self.toast(Tone::Error, format!("Could not add that catalog: {error:#}"));
+            }
             Job::Inspected { id, result } => {
                 if !self.inspection.as_ref().is_some_and(|inspection| inspection.id == id) {
                     return;
@@ -1765,6 +1896,19 @@ fn fetch_cover(url: &str) -> Option<DynamicImage> {
 /// An app on an in-memory library whose files go to a folder deleted along with it. Nothing listens
 /// on port 9, so streams, downloads, and the catalog fetch fail fast instead of reaching the network.
 #[cfg(test)]
+const TEST_CATALOG_URL: &str = "http://127.0.0.1:9/catalog.json";
+
+/// A fetch of the main catalog that came back with `catalog`.
+#[cfg(test)]
+fn main_catalog(catalog: Catalog) -> Job {
+    Job::Catalog {
+        url: TEST_CATALOG_URL.into(),
+        epoch: 0,
+        result: Ok(catalog),
+    }
+}
+
+#[cfg(test)]
 pub struct TestApp {
     app: App,
     _files: tempfile::TempDir,
@@ -1776,7 +1920,7 @@ impl TestApp {
         let files = tempfile::tempdir().unwrap();
         let cache = files.path().to_path_buf();
         let config = Config {
-            catalog_url: "http://127.0.0.1:9/catalog.json".into(),
+            catalog_url: TEST_CATALOG_URL.into(),
             chime: false,
             notifications: false,
             ..Config::default()
@@ -1900,6 +2044,39 @@ mod tests {
     }
 
     #[test]
+    fn an_added_catalog_joins_tracks_and_leaves_when_removed() {
+        let mut app = app();
+        let url = "http://127.0.0.1:9/friends/catalog.json".to_string();
+        let friends = Catalog::parse(
+            r#"{"name": "Friends", "tracks": [{"id": "home", "title": "Home", "artist": "B", "file": "home.mp3", "durationSec": 90}], "ambient": []}"#,
+            &url,
+        )
+        .unwrap();
+
+        app.handle_job(Job::CatalogAdded {
+            url: url.clone(),
+            result: Ok(friends),
+        });
+
+        let home = app
+            .rows(Tab::Tracks)
+            .into_iter()
+            .find(|row| row.title == "Home")
+            .unwrap();
+        assert_eq!(home.detail, "B · Friends");
+        assert_eq!(app.config.catalogs, std::slice::from_ref(&url));
+        assert_eq!(
+            config::load(app.config_file()).unwrap().catalogs,
+            std::slice::from_ref(&url)
+        );
+
+        app.dispatch(Action::Remove(Removal::Catalog(url)));
+
+        assert!(app.rows(Tab::Tracks).iter().all(|row| row.title != "Home"));
+        assert!(app.config.catalogs.is_empty());
+    }
+
+    #[test]
     fn catalog_replacement_retires_the_old_current_without_changing_pause_or_timer() {
         for paused in [false, true] {
             let mut app = app();
@@ -1915,7 +2092,7 @@ mod tests {
             let timer_running = app.timer.is_running();
             let generation = app.generation;
 
-            app.handle_job(Job::Catalog(Ok(updated)));
+            app.handle_job(main_catalog(updated));
 
             assert_eq!(app.current().unwrap().key, "r2:replacement");
             assert!(app.generation > generation);
@@ -1936,7 +2113,7 @@ mod tests {
         let mut updated = app.catalog.clone();
         updated.tracks[0].file = "moved.mp3".into();
 
-        app.handle_job(Job::Catalog(Ok(updated.clone())));
+        app.handle_job(main_catalog(updated.clone()));
 
         assert_eq!(app.queue.current(), app.likes.first());
         assert_eq!(app.position(), 42.0);
@@ -1946,7 +2123,7 @@ mod tests {
         app.pending_seek = Some((42.0, Instant::now()));
         let generation = app.generation;
         updated.tracks[0].file = "moved-again.mp3".into();
-        app.handle_job(Job::Catalog(Ok(updated)));
+        app.handle_job(main_catalog(updated));
         assert!(app.generation > generation);
         assert!(app.position() >= 42.0 && app.position() < 43.0);
         assert!(app.engine.is_paused());
@@ -2184,7 +2361,7 @@ mod tests {
 
         let mut updated = app.catalog.clone();
         updated.tracks.remove(0);
-        app.handle_job(Job::Catalog(Ok(updated)));
+        app.handle_job(main_catalog(updated));
 
         assert!(app.reconnecting.is_none());
     }

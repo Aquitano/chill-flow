@@ -7,6 +7,13 @@ pub const DEFAULT_URL: &str = "https://chill-data.aquitano.me/catalog.json";
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Catalog {
+    /// Shown beside its tracks when more than one catalog is in use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Where an added catalog is published, so chill-catalog uploads its files beside it. The
+    /// main catalog leaves it out and lives at `DEFAULT_URL`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
     pub tracks: Vec<CatalogTrack>,
     pub ambient: Vec<AmbientSound>,
     #[serde(default)]
@@ -27,6 +34,9 @@ pub struct CatalogTrack {
     pub duration_sec: u32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// The name of the catalog the track came from, set when catalogs are merged.
+    #[serde(skip)]
+    pub catalog: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
