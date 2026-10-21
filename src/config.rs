@@ -12,6 +12,7 @@ pub struct Config {
     pub catalog_url: String,
     /// Catalogs added on top of `catalog_url`, whose tracks join the same Tracks tab.
     pub catalogs: Vec<String>,
+    pub sync_url: String,
     pub reduce_motion: bool,
     pub chime: bool,
     pub notifications: bool,
@@ -23,6 +24,7 @@ impl Default for Config {
         Config {
             catalog_url: catalog_schema::DEFAULT_URL.into(),
             catalogs: Vec::new(),
+            sync_url: crate::sync::DEFAULT_URL.into(),
             reduce_motion: false,
             chime: true,
             notifications: true,

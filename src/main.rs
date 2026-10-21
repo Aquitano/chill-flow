@@ -8,6 +8,7 @@ mod model;
 mod queue;
 mod signals;
 mod store;
+mod sync;
 mod timer;
 mod tools;
 mod ui;

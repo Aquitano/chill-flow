@@ -26,21 +26,24 @@ impl Decoder {
         rate: u32,
         report: impl Fn(EngineEvent) + Send + 'static,
     ) -> Result<(Self, MusicLane), String> {
-        let mut command = ffmpeg::command();
-        if input.url.starts_with("http://") || input.url.starts_with("https://") {
-            // Without a read timeout, a connection that goes silent (a closed lid, a Wi-Fi
-            // switch) blocks ffmpeg forever instead of ending the stream so the app reconnects.
-            command.args([
-                "-reconnect",
-                "1",
-                "-reconnect_streamed",
-                "1",
-                "-reconnect_delay_max",
-                "5",
-                "-rw_timeout",
-                "10000000",
-            ]);
+        // Links reach here from catalogs and from other machines through sync, and ffmpeg also
+        // reads local files and protocols such as concat:, so nothing but the web gets through.
+        if !(input.url.starts_with("http://") || input.url.starts_with("https://")) {
+            return Err("only http and https links can play".to_owned());
         }
+        let mut command = ffmpeg::command();
+        // Without a read timeout, a connection that goes silent (a closed lid, a Wi-Fi switch)
+        // blocks ffmpeg forever instead of ending the stream so the app reconnects.
+        command.args([
+            "-reconnect",
+            "1",
+            "-reconnect_streamed",
+            "1",
+            "-reconnect_delay_max",
+            "5",
+            "-rw_timeout",
+            "10000000",
+        ]);
         if !input.headers.is_empty() {
             let headers: String = input
                 .headers

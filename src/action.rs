@@ -40,6 +40,7 @@ pub enum Prompt {
     SaveScene,
     SaveMix,
     AddCatalog,
+    JoinSync,
 }
 
 impl Prompt {
@@ -49,6 +50,7 @@ impl Prompt {
             Prompt::SaveScene => "Save scene",
             Prompt::SaveMix => "Save ambience mix",
             Prompt::AddCatalog => "Add a catalog",
+            Prompt::JoinSync => "Join a sync space",
         }
     }
 
@@ -58,6 +60,7 @@ impl Prompt {
             Prompt::SaveScene => "rainy study",
             Prompt::SaveMix => "my rain",
             Prompt::AddCatalog => "https://…/catalog.json",
+            Prompt::JoinSync => "the sync key from your other machine",
         }
     }
 
@@ -66,6 +69,7 @@ impl Prompt {
             Prompt::OpenUrl => "open",
             Prompt::SaveScene | Prompt::SaveMix => "save",
             Prompt::AddCatalog => "add",
+            Prompt::JoinSync => "join",
         }
     }
 
@@ -75,6 +79,7 @@ impl Prompt {
             Prompt::SaveScene => "Keeps what plays, the ambience, and the timer. Start it later with chill <name>.",
             Prompt::SaveMix => "Keeps the current ambience levels under Sounds.",
             Prompt::AddCatalog => "A catalog.json someone shared with you. Its tracks join Tracks.",
+            Prompt::JoinSync => "Copy it with \"Copy sync key\" on the machine that already syncs.",
         }
     }
 }
@@ -197,5 +202,14 @@ pub enum Action {
     OpenStats,
     OpenSettings,
     AdjustSetting(Setting, i8),
+    TurnOnSync,
+    SyncNow,
+    /// Asks before leaving; `LeaveSync` is what the confirmation sends.
+    TurnOffSync,
+    LeaveSync,
+    /// Asks before deleting; `EraseSyncData` is what the confirmation sends.
+    DeleteSyncData,
+    EraseSyncData,
+    CopySyncKey,
     Quit,
 }
