@@ -170,7 +170,6 @@ pub struct App {
     pub timer: Timer,
     pub focus_days: FocusDays,
     focus_block: Option<FocusBlock>,
-    timer_follows_play: bool,
     pub stream: Stream,
     generation: u64,
     /// Counts playback changes the user asked for, unlike `generation`, which also moves when a
@@ -263,7 +262,6 @@ impl App {
             volume: session.volume.clamp(0.0, 1.0),
             balance: model::EVEN,
             focus_block: None,
-            timer_follows_play: true,
             stream: Stream::Idle,
             generation: 0,
             choices: 0,
@@ -747,7 +745,7 @@ impl App {
             Some(item) => self.start(item, 0.0),
             None => self.stop_stream(),
         }
-        self.resume();
+        self.engine.set_paused(false);
     }
 
     fn start(&mut self, item: Item, start_secs: f64) {
@@ -803,7 +801,7 @@ impl App {
         self.source = Source::Soundscape;
         self.refresh_ambience();
         self.events.push(Event::TrackChanged);
-        self.resume();
+        self.engine.set_paused(false);
     }
 
     fn load_cover(&mut self) {
@@ -821,20 +819,10 @@ impl App {
         });
     }
 
-    /// Play starts the timer too, unless the user paused it on its own mid-phase.
-    fn resume(&mut self) {
-        self.engine.set_paused(false);
-        if self.timer_follows_play || self.timer.elapsed(Instant::now()).is_zero() {
-            self.set_timer_running(true);
-        }
-    }
-
+    /// Only the sound: the timer has its own key, so listening never starts a focus block.
     fn toggle_play(&mut self) {
         if self.is_playing() {
-            self.timer_follows_play = self.timer.is_running();
-            self.engine.set_paused(true);
-            self.set_timer_running(false);
-            return;
+            return self.engine.set_paused(true);
         }
         if self.stream == Stream::Idle
             && let Some(item) = self.current().cloned()
@@ -843,7 +831,7 @@ impl App {
             self.failures_in_a_row = 0;
             self.start(item, at);
         }
-        self.resume();
+        self.engine.set_paused(false);
     }
 
     fn set_timer_running(&mut self, running: bool) {
@@ -928,23 +916,18 @@ impl App {
                     self.choices += 1;
                     self.failures_in_a_row = 0;
                     self.start(item, 0.0);
-                    self.resume();
+                    self.engine.set_paused(false);
                 }
             }
             Action::RemoveQueued(offset) => self.queue.remove_upcoming(offset),
             Action::MoveQueued(offset, delta) => {
                 self.queue.move_upcoming(offset, delta);
             }
-            Action::TimerToggle => {
-                let running = !self.timer.is_running();
-                self.timer_follows_play = running;
-                self.set_timer_running(running);
-            }
+            Action::TimerToggle => self.set_timer_running(!self.timer.is_running()),
             Action::TimerReset => {
                 self.save_focus_block(Instant::now());
                 self.focus_block = None;
                 self.timer.reset();
-                self.timer_follows_play = true;
             }
             Action::TimerSkip => {
                 let now = Instant::now();
@@ -1145,7 +1128,6 @@ impl App {
         self.set_balance(scene.balance);
         self.apply_levels(&scene.levels);
         self.mix_name = self.matching_mix_name();
-        self.timer_follows_play = true;
         if scene.playback.source == Source::Soundscape {
             self.enter_soundscape();
         } else {
@@ -2594,6 +2576,22 @@ mod tests {
         app.tick(woke);
 
         assert_eq!((app.timer.phase(), app.timer.remaining(woke)), (Phase::Focus, length));
+    }
+
+    #[test]
+    fn playing_and_pausing_leave_the_timer_alone() {
+        for timing in [false, true] {
+            let mut app = app();
+            app.queue.replace(Vec::new(), None);
+            if timing {
+                app.dispatch(Action::TimerToggle);
+            }
+
+            app.dispatch(Action::TogglePlay);
+            assert_eq!((app.is_playing(), app.timer.is_running()), (true, timing));
+            app.dispatch(Action::TogglePlay);
+            assert_eq!((app.is_playing(), app.timer.is_running()), (false, timing));
+        }
     }
 
     #[test]
