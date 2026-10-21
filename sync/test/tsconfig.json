@@ -3,5 +3,5 @@
   "compilerOptions": {
     "types": ["@cloudflare/vitest-plugin/types"]
   },
-  "include": ["./**/*.ts", "../src"]
+  "include": ["./**/*.ts", "../src", "../.cloudflare/types"]
 }

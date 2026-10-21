@@ -33,9 +33,11 @@ A space holds what chill syncs, readable by whoever runs the Worker: likes and s
 
 ## Development
 
+The Worker is configured in `cloudflare.config.ts` and built and deployed with [`cf`](https://developers.cloudflare.com/cf/), which needs Node.js 22.18 or later.
+
 ```bash
 bun install
-bun run typecheck   # regenerates the binding types, then runs tsc
+bun run typecheck   # generates the binding types from cloudflare.config.ts, then runs tsc
 bun run test        # vitest inside the Workers runtime
 bun run dev         # local server; put SYNC_SECRET=... in .dev.vars first
 ```
@@ -44,11 +46,13 @@ bun run dev         # local server; put SYNC_SECRET=... in .dev.vars first
 
 On the Workers Free plan, going past a daily limit makes further calls fail until 00:00 UTC instead of adding to a bill, so the worst case is sync stopping for the day. On the Paid plan, set a billing notification in the dashboard as well.
 
-The two rate limiters in `wrangler.jsonc` use `namespace_id` 1001 and 1002. These ids must be unique within the Cloudflare account, so change them if they are taken.
+The Worker answers only on `chill-sync.aquitano.me`, chill's default `sync_url`; `domains` in `cloudflare.config.ts` sets it, and the deploy creates the DNS record and certificate. The two rate limiters use namespaces 1001 and 1002, which must be unique within the Cloudflare account, so change them if they are taken.
+
+Sign in with `cf auth login`, or set `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` for a token limited to editing Workers in this account and zone. The first deploy creates `SYNC_SECRET` along with the Worker, without writing it to disk:
 
 ```bash
-openssl rand -base64 32 | bunx wrangler secret put SYNC_SECRET
-bunx wrangler deploy
+cf deploy --dry-run
+cf deploy --secrets-file <(printf 'SYNC_SECRET=%s\n' "$(openssl rand -base64 32)")
 ```
 
-Changing `SYNC_SECRET` later invalidates every token that exists. To serve the Worker on your own hostname, add a custom domain route to `wrangler.jsonc`, for example `"routes": [{ "pattern": "sync.example.com", "custom_domain": true }]`, and deploy again.
+Later deploys are `cf deploy` and keep the secret. Changing `SYNC_SECRET` invalidates every token that exists, so pass `--secrets-file` again only to do that on purpose. `cf` can't stream logs yet; `bunx wrangler tail chill-sync` does.
