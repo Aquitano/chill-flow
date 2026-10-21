@@ -1,6 +1,8 @@
 # chill
 
-A terminal player for focused work. It plays lo-fi from your own R2 bucket or from YouTube, layers ambient sound underneath, and runs a focus timer that keeps track of the time you actually spent focusing. It ships as one binary for macOS and Windows.
+A terminal player for focused work. It plays lo-fi from a hosted catalog or from YouTube, layers ambient sound underneath, and runs a focus timer that keeps track of the time you actually spent focusing. It ships as one binary for macOS and Windows.
+
+![chill playing a Lofi Girl stream with the Rainy study mix and a focus block running](docs/screenshot.png)
 
 ## Install
 
