@@ -1,0 +1,21 @@
+{
+  "name": "chill-sync",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "types": "wrangler types src/worker-configuration.d.ts",
+    "typecheck": "wrangler types src/worker-configuration.d.ts && tsc -p . && tsc -p test",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "arktype": "^2.2.8"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.4.6",
+    "fast-check": "^4.10.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.151.3"
+  }
+}

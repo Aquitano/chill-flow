@@ -38,3 +38,17 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --workspace -- -D warnings
       - run: cargo test --workspace
+
+  sync:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sync
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run test
