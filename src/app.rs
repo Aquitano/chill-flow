@@ -2085,17 +2085,14 @@ impl App {
                             self.toast(Tone::Done, "Synced");
                         }
                     }
-                    Err(error) if error.is::<sync::Gone>() => {
-                        if let Some(gone) = error.downcast_ref::<sync::Gone>() {
-                            self.sync_gone(*gone);
-                        }
-                    }
-                    // Pages before the failure are already in chill.db.
+                    // Pages before the failure are already in chill.db, whatever ended the sync.
                     Err(error) => {
                         self.reload_library();
                         self.refresh_stats();
-                        if manual {
-                            self.toast(Tone::Error, format!("Could not sync: {error:#}"));
+                        match error.downcast_ref::<sync::Gone>() {
+                            Some(gone) => self.sync_gone(*gone),
+                            None if manual => self.toast(Tone::Error, format!("Could not sync: {error:#}")),
+                            None => {}
                         }
                     }
                 }
