@@ -132,3 +132,7 @@ On Linux the build needs `libasound2-dev`. CI runs the checks on Linux, macOS, a
 | Waves | Dsw4 | Public domain |
 | Café | Stephan (pdsounds.org) | Public domain |
 | Crickets | Serg Childed | CC BY-SA 4.0 (the trimmed loop is an adaptation and stays BY-SA) |
+
+## License
+
+The code is licensed under the [Apache License 2.0](LICENSE). The audio in the catalog is not part of this repository and keeps the licenses listed above.
