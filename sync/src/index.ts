@@ -16,6 +16,8 @@ export default {
           return await createSpace(request, env);
         case "POST /v1/sync":
           return await sync(request, env);
+        case "DELETE /v1/space":
+          return await deleteSpace(request, env);
         default:
           return fail(404, "there is nothing at this address");
       }
@@ -55,8 +57,16 @@ async function sync(request: Request, env: Env) {
   const result = await space.sync(parsed.cursor, parsed.changes);
   if (result.type === "full") return fail(507, "this sync space is full");
   if (result.type === "over budget") return fail(429, "this sync space changed too much today, try again tomorrow");
+  if (result.type === "deleted") return fail(410, "this sync space was deleted");
   const { cursor, changes, more } = result;
   return Response.json({ cursor, changes: changes.map(toRecord), more });
+}
+
+async function deleteSpace(request: Request, env: Env) {
+  const space = await openSpace(request, env);
+  if (space instanceof Response) return space;
+  await space.deleteSpace();
+  return new Response(null, { status: 204 });
 }
 
 /** Every check that can reject a request runs here, before anything reaches a Durable Object. */

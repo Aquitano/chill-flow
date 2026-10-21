@@ -87,14 +87,13 @@ it("rejects a sync that would overfill the space and applies none of it", async 
     if (response.status === 507) {
       expect(batch).toBeGreaterThan(1);
       expect(await response.json()).toEqual({ error: "this sync space is full" });
-      const stored = await pull(token);
-      expect(stored.changes).toHaveLength(perBatch * batch);
-      expect(stored.cursor).toBe(cursor);
-      // The refused batch still counts against the day's allowance: its rows were written.
-      const budget = await runInDurableObject(env.SYNC_SPACE.getByName(token.split(".")[0]!), (_, state) =>
-        state.storage.sql.exec<{ changes: number }>("SELECT changes FROM budget").one(),
-      );
-      expect(budget.changes).toBe(perBatch * (batch + 1));
+      // Nothing of the refused batch is stored, but it still counts against the day's allowance,
+      // since its rows were written before the rollback.
+      const stored = await runInDurableObject(env.SYNC_SPACE.getByName(token.split(".")[0]!), (_, state) => ({
+        ...state.storage.sql.exec<{ records: number; seq: number }>("SELECT count(*) AS records, max(seq) AS seq FROM records").one(),
+        ...state.storage.sql.exec<{ changes: number }>("SELECT changes FROM budget").one(),
+      }));
+      expect(stored).toEqual({ records: perBatch * batch, seq: cursor, changes: perBatch * (batch + 1) });
       return;
     }
     expect(response.status).toBe(200);
@@ -150,6 +149,39 @@ it("turns a space away for the day once it has used its allowance of changes", a
   expect(over.status).toBe(429);
   expect(await over.json()).toEqual({ error: "this sync space changed too much today, try again tomorrow" });
   expect((await pull(token, 6000)).changes).toEqual([]);
+});
+
+it("deletes a space for good, so a machine still holding the token is told it is gone", async () => {
+  const token = await newToken();
+  await sync(token, { cursor: 0, changes: [like("a", 1), like("b", 1)] });
+  const remove = () => send("/v1/space", { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+
+  expect((await remove()).status).toBe(204);
+
+  const after = await sync(token, { cursor: 0, changes: [like("c", 1)] });
+  expect(after.status).toBe(410);
+  expect(await after.json()).toEqual({ error: "this sync space was deleted" });
+  expect((await remove()).status).toBe(204);
+  const kept = await runInDurableObject(env.SYNC_SPACE.getByName(token.split(".")[0]!), (_, state) =>
+    state.storage.sql.exec<{ records: number }>("SELECT count(*) AS records FROM records").one(),
+  );
+  expect(kept.records).toBe(0);
+});
+
+it("ends a page early rather than send more than a few MiB at once", async () => {
+  const token = await newToken();
+  const body = { filler: "x".repeat(250 * 1024) };
+  for (let batch = 0; batch < 3; batch++) {
+    const changes = Array.from({ length: 7 }, (_, index) => like(`${batch}-${index}`, 1, body));
+    expect((await sync(token, { cursor: 0, changes })).status).toBe(200);
+  }
+
+  const first = await pull(token);
+  expect(first.more).toBe(true);
+  expect(JSON.stringify(first.changes).length).toBeLessThan(limits.pageBytes + 64 * 1024);
+  const second = await pull(token, first.cursor);
+  expect(second.more).toBe(false);
+  expect(first.changes.length + second.changes.length).toBe(21);
 });
 
 it("answers unknown routes with 404", async () => {

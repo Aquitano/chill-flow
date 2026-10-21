@@ -8,10 +8,11 @@ All bodies are UTF-8 JSON. Errors are `{"error": "<sentence>"}` with the status 
 
 - `POST /v1/spaces` returns `201 {"token": "<spaceId>.<signature>"}`.
 - `POST /v1/sync` with `Authorization: Bearer <token>` and `{"cursor": 0, "changes": [Record]}` returns `200 {"cursor": n, "changes": [Record], "more": bool}`.
+- `DELETE /v1/space` with the bearer token wipes the space and closes it for good, returning `204`. Every later sync with that token gets `410`, so a machine that still holds it learns the space is gone instead of filling it again.
 
 A record is `{"kind", "id", "updatedAt", "deleted", "body"}`. `kind` is one of `like`, `saved`, `scene`, `mix`, `focus`, `setting`. `updatedAt` is milliseconds since the epoch. A deleted record keeps its key with `body: null`, and a record that isn't deleted must have a body other than `null`. A sync changes each `(kind, id)` at most once.
 
-The server keeps the record with the greater `updatedAt` for each `(kind, id)`. On equal timestamps it keeps the one whose serialized body sorts later byte by byte, where a deleted record counts as `null`. Only the server decides ties: when a pushed record loses one, the response also carries the winner even if its `seq` is at or below the cursor, and a client takes an equal-time record from the server unless it has an unsent change of its own for that item. Every applied change gets the next `seq`. The response holds up to 1000 records with `seq` above the request cursor. When `more` is true, the client calls again with the returned cursor and no changes. Spaces are never deleted, so a `seq` is never reused.
+The server keeps the record with the greater `updatedAt` for each `(kind, id)`. On equal timestamps it keeps the one whose serialized body sorts later byte by byte, where a deleted record counts as `null`. Only the server decides ties: when a pushed record loses one, the response also carries the winner even if its `seq` is at or below the cursor, and a client takes an equal-time record from the server unless it has an unsent change of its own for that item. Every applied change gets the next `seq`. The response holds up to 1000 records with `seq` above the request cursor. A page also ends once its bodies pass about 4 MiB. When `more` is true, the client calls again with the returned cursor and no changes. A deleted space never reopens, so a `seq` is never reused.
 
 [`fixtures/exchange.json`](fixtures/exchange.json) is a complete request and response. The tests and the Rust client both parse it, so it is the contract for field names and types.
 
@@ -25,6 +26,10 @@ The server keeps the record with the greater `updatedAt` for each `(kind, id)`. 
 - 30 syncs per minute per space. Cloudflare counts this per location and only roughly, so it only filters bursts before they reach a Durable Object.
 - Request bodies are capped at 2 MiB (413). A sync carries at most 2000 records, ids up to 200 characters, and bodies up to 256 KiB of JSON each (400).
 - A space holds about 10 MiB. A sync that would go past that is rolled back whole and answered with 507.
+
+## Privacy
+
+A space holds what chill syncs, readable by whoever runs the Worker: likes and saved YouTube links with their titles, scene and mix names, focus blocks with their start times and lengths, and settings including added catalog links. It holds no names, email addresses, or IP addresses. The rate limiters see the client's IP address but keep only counters, and the Worker's logs keep its own error lines without request headers. "Delete sync data" in chill deletes everything a space holds.
 
 ## Development
 

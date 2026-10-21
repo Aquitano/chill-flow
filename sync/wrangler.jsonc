@@ -34,7 +34,9 @@
   "secrets": { "required": ["SYNC_SECRET"] },
   "observability": {
     "enabled": true,
-    "logs": { "enabled": true, "head_sampling_rate": 1 },
+    // Invocation logs would record each request, Authorization header included, so only the
+    // Worker's own error lines are kept.
+    "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": false },
     "traces": { "enabled": true, "head_sampling_rate": 0.01 }
   }
 }

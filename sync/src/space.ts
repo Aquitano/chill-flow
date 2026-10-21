@@ -43,12 +43,14 @@ export class SyncSpace extends DurableObject<Env> {
         );
         CREATE INDEX IF NOT EXISTS records_by_seq ON records (seq);
         CREATE TABLE IF NOT EXISTS budget (day TEXT PRIMARY KEY, changes INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS closed (at INTEGER NOT NULL);
       `);
     });
   }
 
   sync(cursor: number, changes: StoredChange[]): SyncResult {
     const sql = this.ctx.storage.sql;
+    if (this.isClosed()) return { type: "deleted" };
     const lostTies: StoredChange[] = [];
     // Charged in a transaction of its own, so a sync rolled back below still counts: SQLite bills
     // the rows it wrote before the rollback.
@@ -93,13 +95,38 @@ export class SyncSpace extends DurableObject<Env> {
         limits.recordsPerPage + 1,
       )
       .toArray();
-    const page = rows.slice(0, limits.recordsPerPage);
+    // A page also stops at a size, so a client never has to hold a thousand of the largest bodies.
+    const page: Row[] = [];
+    let bytes = 0;
+    for (const row of [...rows.slice(0, limits.recordsPerPage), ...winners]) {
+      if (page.length > 0 && bytes + row.body.length > limits.pageBytes) break;
+      page.push(row);
+      bytes += row.body.length;
+    }
+    const sent = page.filter((row) => row.seq > cursor);
     return {
       type: "synced",
-      cursor: page.at(-1)?.seq ?? cursor,
-      changes: [...page, ...winners].map(toChange),
-      more: rows.length > page.length,
+      cursor: sent.at(-1)?.seq ?? cursor,
+      changes: page.map(toChange),
+      more: sent.length < rows.length,
     };
+  }
+
+  /**
+   * Wipes the space and closes it for good. Another machine that still holds the token is told
+   * the space is gone, rather than filling it again, and a seq is never reused.
+   */
+  deleteSpace() {
+    const sql = this.ctx.storage.sql;
+    this.ctx.storage.transactionSync(() => {
+      sql.exec("DELETE FROM records");
+      sql.exec("DELETE FROM budget");
+      if (!this.isClosed()) sql.exec("INSERT INTO closed (at) VALUES (?)", Date.now());
+    });
+  }
+
+  private isClosed() {
+    return this.ctx.storage.sql.exec("SELECT 1 FROM closed").toArray().length > 0;
   }
 
   /**

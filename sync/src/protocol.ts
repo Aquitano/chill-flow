@@ -6,6 +6,7 @@ export const limits = {
   idChars: 200,
   bodyBytes: 256 * 1024,
   recordsPerPage: 1000,
+  pageBytes: 4 * 1024 * 1024,
   spaceBytes: 10 * 1024 * 1024,
 };
 
@@ -50,4 +51,5 @@ export type StoredChange = typeof incomingRecord.infer;
 export type SyncResult =
   | { type: "synced"; cursor: number; changes: StoredChange[]; more: boolean }
   | { type: "full" }
-  | { type: "over budget" };
+  | { type: "over budget" }
+  | { type: "deleted" };
