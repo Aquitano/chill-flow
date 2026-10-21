@@ -9,9 +9,11 @@ use crate::store::Store;
 
 pub const DEFAULT_URL: &str = "https://chill-sync.aquitano.me";
 
-/// The Worker's limits are 256 KiB per record and 2 MiB per request, so uploads go in batches
-/// that stay under both, and a record too big to ever fit stays on this machine.
+/// The Worker's limits are 256 KiB per record, ids of 200 UTF-16 units, and 2 MiB per request,
+/// so uploads go in batches that stay under them, and a record that could never fit stays on
+/// this machine rather than block every other one.
 const RECORD_LIMIT: usize = 256 * 1024;
+const ID_LIMIT: usize = 200;
 const BATCH_BYTES: usize = 1536 * 1024;
 const BATCH_RECORDS: usize = 1000;
 
@@ -89,13 +91,6 @@ impl std::fmt::Display for Rejected {
 
 impl std::error::Error for Rejected {}
 
-/// What a sync brought in from the other machines.
-#[derive(Debug, Default)]
-pub struct Outcome {
-    pub library_changed: bool,
-    pub settings: Vec<(String, Value)>,
-}
-
 pub fn create_space(server: &str) -> Result<String> {
     let request = ureq::post(format!("{server}/v1/spaces"))
         .config()
@@ -108,35 +103,28 @@ pub fn create_space(server: &str) -> Result<String> {
 }
 
 /// Uploads what changed here since the last sync and takes in what changed elsewhere, on a
-/// connection of its own so the app keeps running meanwhile.
-pub fn run(database: &Path, server: &str, token: &str) -> Result<Outcome> {
+/// connection of its own so the app keeps running meanwhile. Returns whether the library changed;
+/// settings that arrived wait in the store for the app to take in.
+pub fn run(database: &Path, server: &str, token: &str) -> Result<bool> {
     let store = Store::open(database)?;
-    let mut outcome = Outcome::default();
+    let mut library_changed = false;
     let mut cursor = store.sync_cursor();
     let outgoing: Vec<Record> = store
         .outgoing()?
         .into_iter()
-        .filter(|record| size(record) <= RECORD_LIMIT)
+        .filter(|record| size(record) <= RECORD_LIMIT && record.id.encode_utf16().count() <= ID_LIMIT)
         .collect();
     let mut batches = batches(&outgoing).into_iter();
     loop {
         let changes = batches.next().unwrap_or(&[]);
         let response = exchange(server, token, cursor, changes)?;
-        store.pushed(changes)?;
-        for record in store.apply(&response.changes)? {
-            match record.kind {
-                Kind::Setting => {
-                    if let Some(body) = &record.body {
-                        outcome.settings.push((record.id.clone(), body.clone()));
-                    }
-                }
-                _ => outcome.library_changed = true,
-            }
+        match store.record_exchange(token, changes, &response.changes, response.cursor)? {
+            Some(changed) => library_changed |= changed,
+            None => return Ok(library_changed),
         }
         cursor = response.cursor;
-        store.set_sync_cursor(cursor)?;
         if !response.more && batches.len() == 0 {
-            return Ok(outcome);
+            return Ok(library_changed);
         }
     }
 }

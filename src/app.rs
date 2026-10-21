@@ -34,8 +34,10 @@ pub enum Job {
     },
     SpaceCreated(Result<String>),
     Synced {
+        space: u64,
         manual: bool,
-        result: Result<sync::Outcome>,
+        /// Whether the library changed.
+        result: Result<bool>,
     },
     Inspected {
         id: u64,
@@ -189,7 +191,11 @@ pub struct App {
     ticked_at: Instant,
     database: PathBuf,
     sync_token: Option<String>,
+    /// Counts joins and leaves, so the end of a sync for a space this machine has left is ignored.
+    sync_space: u64,
     syncing: bool,
+    /// A sync asked for while one ran, and whether someone asked for it by hand.
+    sync_queued: Option<bool>,
     synced_at: Option<Instant>,
     pub quit: bool,
 }
@@ -274,7 +280,9 @@ impl App {
             ticked_at: Instant::now(),
             sync_token,
             database,
+            sync_space: 0,
             syncing: false,
+            sync_queued: None,
             synced_at: None,
             quit: false,
         };
@@ -1589,6 +1597,7 @@ impl App {
             return;
         }
         self.sync_token = Some(token.to_string());
+        self.sync_space += 1;
         self.start_sync(true);
     }
 
@@ -1596,6 +1605,7 @@ impl App {
         match self.store.set_sync_token(None) {
             Ok(()) => {
                 self.sync_token = None;
+                self.sync_space += 1;
                 self.toast(Tone::Done, "Sync is off. This machine keeps everything it has.");
             }
             Err(error) => self.toast(Tone::Error, format!("Could not turn off sync: {error}")),
@@ -1617,7 +1627,13 @@ impl App {
         ])
     }
 
-    fn apply_synced_settings(&mut self, settings: Vec<(String, serde_json::Value)>) {
+    fn take_arrived_settings(&mut self) {
+        if let Ok(settings) = self.store.take_arrived_settings() {
+            self.apply_settings(settings);
+        }
+    }
+
+    fn apply_settings(&mut self, settings: Vec<(String, serde_json::Value)>) {
         if settings.is_empty() {
             return;
         }
@@ -1649,18 +1665,27 @@ impl App {
     fn start_sync(&mut self, manual: bool) {
         let Some(token) = self.sync_token.clone() else { return };
         if self.syncing {
+            self.sync_queued = Some(manual || self.sync_queued == Some(true));
             return;
         }
         self.syncing = true;
         self.synced_at = Some(Instant::now());
+        // Settings that arrived last time go into config.toml first, so they aren't mistaken for
+        // edits made here.
+        self.take_arrived_settings();
         let settings = self.sync_settings();
         for (name, value) in self.store.changed_settings(&settings) {
             let _ = self.store.set_synced_setting(name, value);
         }
-        let (jobs, database, server) = (self.jobs.clone(), self.database.clone(), self.config.sync_url.clone());
+        let (jobs, database, server, space) = (
+            self.jobs.clone(),
+            self.database.clone(),
+            self.config.sync_url.clone(),
+            self.sync_space,
+        );
         std::thread::spawn(move || {
             let result = sync::run(&database, &server, &token);
-            let _ = jobs.send(Job::Synced { manual, result });
+            let _ = jobs.send(Job::Synced { space, manual, result });
         });
     }
 
@@ -1981,15 +2006,15 @@ impl App {
             Job::SpaceCreated(Err(error)) => {
                 self.toast(Tone::Error, format!("Could not turn on sync: {error:#}"));
             }
-            Job::Synced { manual, result } => {
+            Job::Synced { space, manual, result } => {
                 self.syncing = false;
                 match result {
-                    Ok(outcome) => {
-                        if outcome.library_changed {
+                    _ if space != self.sync_space => {}
+                    Ok(library_changed) => {
+                        if library_changed {
                             self.reload_library();
                             self.refresh_stats();
                         }
-                        self.apply_synced_settings(outcome.settings);
                         if manual {
                             self.toast(Tone::Done, "Synced");
                         }
@@ -1997,6 +2022,7 @@ impl App {
                     Err(error) if error.is::<sync::Rejected>() => {
                         let _ = self.store.set_sync_token(None);
                         self.sync_token = None;
+                        self.sync_space += 1;
                         self.toast(
                             Tone::Error,
                             "The sync server did not accept the sync key, so sync is off",
@@ -2004,6 +2030,10 @@ impl App {
                     }
                     Err(error) if manual => self.toast(Tone::Error, format!("Could not sync: {error:#}")),
                     Err(_) => {}
+                }
+                self.take_arrived_settings();
+                if let Some(manual) = self.sync_queued.take() {
+                    self.start_sync(manual);
                 }
             }
             Job::Inspected { id, result } => {
@@ -2268,7 +2298,7 @@ mod tests {
         let mut app = app();
         let url = "http://127.0.0.1:9/friends/catalog.json";
 
-        app.apply_synced_settings(vec![
+        app.apply_settings(vec![
             ("chime".into(), true.into()),
             ("catalogs".into(), serde_json::json!([url])),
         ]);

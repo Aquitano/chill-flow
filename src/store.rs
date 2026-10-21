@@ -118,28 +118,50 @@ impl Store {
         Ok(Store { db })
     }
 
-    /// Marks an item as changed here, for the next sync to upload. The time only moves forward,
-    /// so a change made within the same millisecond as the last still wins.
-    fn touch(&self, kind: Kind, id: &str, deleted: bool) -> Result<()> {
-        self.db.execute(
-            "INSERT INTO sync_state (kind, id, updated_at, deleted, dirty) VALUES (?1, ?2, ?3, ?4, 1)
-             ON CONFLICT (kind, id) DO UPDATE SET
-                 updated_at = max(excluded.updated_at, sync_state.updated_at + 1),
-                 deleted = excluded.deleted,
-                 dirty = 1",
-            params![kind.as_str(), id, now_ms(), deleted],
-        )?;
-        Ok(())
+    /// Runs `work` as one transaction that takes the write lock up front. The sync thread writes
+    /// to the same file, so a change and its sync mark land together, and waiting for the other
+    /// side falls under the busy timeout instead of failing on a stale snapshot.
+    fn transaction<T>(&self, work: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        self.db.execute_batch("BEGIN IMMEDIATE")?;
+        let result = work(&self.db).and_then(|value| {
+            self.db.execute_batch("COMMIT")?;
+            Ok(value)
+        });
+        if result.is_err() {
+            let _ = self.db.execute_batch("ROLLBACK");
+        }
+        result
     }
 
     /// Records a synced setting's new value together with the time it changed, so an upload
-    /// always sends the value that goes with its time.
+    /// always sends the value that goes with its time. It replaces a value that arrived from
+    /// another machine and wasn't taken in yet.
     pub fn set_synced_setting(&self, name: &str, value: &Value) -> Result<()> {
-        let transaction = self.db.unchecked_transaction()?;
-        set_setting_value(&transaction, name, value)?;
-        self.touch(Kind::Setting, name, false)?;
-        transaction.commit()?;
-        Ok(())
+        self.transaction(|db| {
+            set_setting_value(db, name, value)?;
+            db.execute("DELETE FROM kv WHERE key = ?1", [format!("arrived:{name}")])?;
+            touch(db, Kind::Setting, name, false)
+        })
+    }
+
+    /// Settings that arrived from other machines since the last call, with their values.
+    pub fn take_arrived_settings(&self) -> Result<Vec<(String, Value)>> {
+        self.transaction(|db| {
+            let mut statement = db.prepare(
+                "SELECT substr(arrived.key, 9), setting.value FROM kv AS arrived
+                 JOIN kv AS setting ON setting.key = 'setting:' || substr(arrived.key, 9)
+                 WHERE arrived.key LIKE 'arrived:%'",
+            )?;
+            let arrived = statement
+                .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+                .filter_map(|row| {
+                    let (name, value) = row.ok()?;
+                    Some((name, serde_json::from_str(&value).ok()?))
+                })
+                .collect();
+            db.execute("DELETE FROM kv WHERE key LIKE 'arrived:%'", [])?;
+            Ok(arrived)
+        })
     }
 
     /// Settings whose value in `settings` differs from the one last synced, such as after an edit
@@ -173,17 +195,21 @@ impl Store {
     }
 
     pub fn save(&self, saved: &Saved) -> Result<()> {
-        self.db.execute(
-            "INSERT INTO saved (id, body, added_at) VALUES (?1, ?2, ?3)
-             ON CONFLICT (id) DO UPDATE SET body = excluded.body",
-            params![saved.id, json(saved)?, now()],
-        )?;
-        self.touch(Kind::Saved, &saved.id, false)
+        self.transaction(|db| {
+            db.execute(
+                "INSERT INTO saved (id, body, added_at) VALUES (?1, ?2, ?3)
+                 ON CONFLICT (id) DO UPDATE SET body = excluded.body",
+                params![saved.id, json(saved)?, now()],
+            )?;
+            touch(db, Kind::Saved, &saved.id, false)
+        })
     }
 
     pub fn forget(&self, id: &str) -> Result<()> {
-        self.db.execute("DELETE FROM saved WHERE id = ?1", [id])?;
-        self.touch(Kind::Saved, id, true)
+        self.transaction(|db| {
+            db.execute("DELETE FROM saved WHERE id = ?1", [id])?;
+            touch(db, Kind::Saved, id, true)
+        })
     }
 
     pub fn likes(&self) -> Result<Vec<Item>> {
@@ -191,15 +217,17 @@ impl Store {
     }
 
     pub fn set_liked(&self, item: &Item, liked: bool) -> Result<()> {
-        if liked {
-            self.db.execute(
-                "INSERT OR REPLACE INTO likes (key, item, added_at) VALUES (?1, ?2, ?3)",
-                params![item.key, json(item)?, now()],
-            )?;
-        } else {
-            self.db.execute("DELETE FROM likes WHERE key = ?1", [&item.key])?;
-        }
-        self.touch(Kind::Like, &item.key, !liked)
+        self.transaction(|db| {
+            if liked {
+                db.execute(
+                    "INSERT OR REPLACE INTO likes (key, item, added_at) VALUES (?1, ?2, ?3)",
+                    params![item.key, json(item)?, now()],
+                )?;
+            } else {
+                db.execute("DELETE FROM likes WHERE key = ?1", [&item.key])?;
+            }
+            touch(db, Kind::Like, &item.key, !liked)
+        })
     }
 
     pub fn mixes(&self) -> Result<Vec<Mix>> {
@@ -220,16 +248,20 @@ impl Store {
     }
 
     pub fn save_mix(&self, name: &str, levels: &Levels) -> Result<()> {
-        self.db.execute(
-            "INSERT OR REPLACE INTO mixes (name, levels) VALUES (?1, ?2)",
-            params![name, json(levels)?],
-        )?;
-        self.touch(Kind::Mix, name, false)
+        self.transaction(|db| {
+            db.execute(
+                "INSERT OR REPLACE INTO mixes (name, levels) VALUES (?1, ?2)",
+                params![name, json(levels)?],
+            )?;
+            touch(db, Kind::Mix, name, false)
+        })
     }
 
     pub fn delete_mix(&self, name: &str) -> Result<()> {
-        self.db.execute("DELETE FROM mixes WHERE name = ?1", [name])?;
-        self.touch(Kind::Mix, name, true)
+        self.transaction(|db| {
+            db.execute("DELETE FROM mixes WHERE name = ?1", [name])?;
+            touch(db, Kind::Mix, name, true)
+        })
     }
 
     pub fn scenes(&self) -> Result<Vec<Scene>> {
@@ -237,16 +269,20 @@ impl Store {
     }
 
     pub fn save_scene(&self, scene: &Scene) -> Result<()> {
-        self.db.execute(
-            "INSERT OR REPLACE INTO scenes (name, body) VALUES (?1, ?2)",
-            params![scene.name, json(scene)?],
-        )?;
-        self.touch(Kind::Scene, &scene.name, false)
+        self.transaction(|db| {
+            db.execute(
+                "INSERT OR REPLACE INTO scenes (name, body) VALUES (?1, ?2)",
+                params![scene.name, json(scene)?],
+            )?;
+            touch(db, Kind::Scene, &scene.name, false)
+        })
     }
 
     pub fn delete_scene(&self, name: &str) -> Result<()> {
-        self.db.execute("DELETE FROM scenes WHERE name = ?1", [name])?;
-        self.touch(Kind::Scene, name, true)
+        self.transaction(|db| {
+            db.execute("DELETE FROM scenes WHERE name = ?1", [name])?;
+            touch(db, Kind::Scene, name, true)
+        })
     }
 
     pub fn session(&self) -> Session {
@@ -270,29 +306,32 @@ impl Store {
     }
 
     pub fn begin_focus_block(&self, started_at: Timestamp, planned_sec: u64) -> Result<i64> {
-        let (id, uid): (i64, String) = self.db.query_row(
-            "INSERT INTO focus_blocks (uid, started_at, focused_sec, planned_sec, completed)
-             VALUES (lower(hex(randomblob(16))), ?1, 0, ?2, 0) RETURNING id, uid",
-            params![started_at.as_second(), planned_sec as i64],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
-        self.touch(Kind::Focus, &uid, false)?;
-        Ok(id)
+        self.transaction(|db| {
+            let (id, uid): (i64, String) = db.query_row(
+                "INSERT INTO focus_blocks (uid, started_at, focused_sec, planned_sec, completed)
+                 VALUES (lower(hex(randomblob(16))), ?1, 0, ?2, 0) RETURNING id, uid",
+                params![started_at.as_second(), planned_sec as i64],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            touch(db, Kind::Focus, &uid, false)?;
+            Ok(id)
+        })
     }
 
     pub fn update_focus_block(&self, id: i64, focused_sec: u64, completed: bool) -> Result<()> {
-        let uid: Option<String> = self
-            .db
-            .query_row(
-                "UPDATE focus_blocks SET focused_sec = ?2, completed = ?3 WHERE id = ?1 RETURNING uid",
-                params![id, focused_sec as i64, completed],
-                |row| row.get(0),
-            )
-            .optional()?;
-        match uid {
-            Some(uid) => self.touch(Kind::Focus, &uid, false),
-            None => Ok(()),
-        }
+        self.transaction(|db| {
+            let uid: Option<String> = db
+                .query_row(
+                    "UPDATE focus_blocks SET focused_sec = ?2, completed = ?3 WHERE id = ?1 RETURNING uid",
+                    params![id, focused_sec as i64, completed],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            match uid {
+                Some(uid) => touch(db, Kind::Focus, &uid, false),
+                None => Ok(()),
+            }
+        })
     }
 
     fn kv(&self, key: &str) -> Option<String> {
@@ -320,8 +359,10 @@ impl Store {
     /// Joins the sync space behind `token`, or with `None` leaves it, starting over from the
     /// first change next time.
     pub fn set_sync_token(&self, token: Option<&str>) -> Result<()> {
-        self.set_kv("sync_token", token)?;
-        self.set_kv("sync_cursor", None)
+        self.transaction(|_| {
+            self.set_kv("sync_token", token)?;
+            self.set_kv("sync_cursor", None)
+        })
     }
 
     pub fn sync_cursor(&self) -> u64 {
@@ -330,41 +371,40 @@ impl Store {
             .unwrap_or(0)
     }
 
-    pub fn set_sync_cursor(&self, cursor: u64) -> Result<()> {
-        self.set_kv("sync_cursor", Some(&cursor.to_string()))
-    }
-
     /// Queues the whole library for the next upload, for a space this machine just joined. Items
     /// never changed since the sync table existed get their library time, or none, so a version
     /// already in the space wins over them; that is how a joining machine takes on the space's
     /// settings.
     pub fn queue_everything_for_sync(&self, settings: &BTreeMap<String, Value>) -> Result<()> {
-        let transaction = self.db.unchecked_transaction()?;
-        transaction.execute_batch(
-            "UPDATE sync_state SET dirty = 1;
+        self.transaction(|transaction| {
+            transaction.execute_batch(
+                "UPDATE sync_state SET dirty = 1;
              INSERT OR IGNORE INTO sync_state SELECT 'like', key, added_at * 1000, 0, 1 FROM likes;
              INSERT OR IGNORE INTO sync_state SELECT 'saved', id, added_at * 1000, 0, 1 FROM saved;
              INSERT OR IGNORE INTO sync_state SELECT 'scene', name, 0, 0, 1 FROM scenes;
              INSERT OR IGNORE INTO sync_state SELECT 'mix', name, 0, 0, 1 FROM mixes;
              INSERT OR IGNORE INTO sync_state SELECT 'focus', uid, started_at * 1000, 0, 1 FROM focus_blocks;",
-        )?;
-        for (name, value) in settings {
-            set_setting_value(&transaction, name, value)?;
-            transaction.execute(
-                "INSERT OR IGNORE INTO sync_state VALUES ('setting', ?1, 0, 0, 1)",
-                [name],
             )?;
-        }
-        transaction.commit()?;
-        Ok(())
+            for (name, value) in settings {
+                set_setting_value(transaction, name, value)?;
+                transaction.execute(
+                    "INSERT OR IGNORE INTO sync_state VALUES ('setting', ?1, 0, 0, 1)",
+                    [name],
+                )?;
+            }
+            Ok(())
+        })
     }
 
     /// Everything changed here since the last upload. An item gone from its table is sent as
     /// deleted.
     pub fn outgoing(&self) -> Result<Vec<Record>> {
-        let mut statement = self
-            .db
-            .prepare("SELECT kind, id, updated_at, deleted FROM sync_state WHERE dirty = 1 ORDER BY updated_at")?;
+        self.transaction(|db| self.dirty_records(db))
+    }
+
+    fn dirty_records(&self, db: &Connection) -> Result<Vec<Record>> {
+        let mut statement =
+            db.prepare("SELECT kind, id, updated_at, deleted FROM sync_state WHERE dirty = 1 ORDER BY updated_at")?;
         let rows = statement.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -428,43 +468,67 @@ impl Store {
         })
     }
 
-    /// Clears the upload mark of records the server took, unless the item changed again since.
-    pub fn pushed(&self, records: &[Record]) -> Result<()> {
-        let transaction = self.db.unchecked_transaction()?;
-        for record in records {
-            transaction.execute(
-                "UPDATE sync_state SET dirty = 0 WHERE kind = ?1 AND id = ?2 AND updated_at = ?3",
-                params![record.kind.as_str(), record.id, record.updated_at],
-            )?;
-        }
-        transaction.commit()?;
-        Ok(())
+    /// Records one answer from the sync server in a single transaction: clears the upload mark of
+    /// `pushed` unless an item changed again since, takes in `incoming`, and moves the cursor.
+    /// Nothing happens unless `token` is still this machine's sync key, so a sync from a space it
+    /// has since left can't touch the new one. Returns whether the library changed, or `None`
+    /// when the key had changed.
+    pub fn record_exchange(
+        &self,
+        token: &str,
+        pushed: &[Record],
+        incoming: &[Record],
+        cursor: u64,
+    ) -> Result<Option<bool>> {
+        self.transaction(|db| {
+            if self.sync_token().as_deref() != Some(token) {
+                return Ok(None);
+            }
+            for record in pushed {
+                db.execute(
+                    "UPDATE sync_state SET dirty = 0 WHERE kind = ?1 AND id = ?2 AND updated_at = ?3",
+                    params![record.kind.as_str(), record.id, record.updated_at],
+                )?;
+            }
+            let mut library_changed = false;
+            for record in incoming {
+                if !self.wins_here(db, record)? || !apply_one(db, record)? {
+                    continue;
+                }
+                db.execute(
+                    "INSERT OR REPLACE INTO sync_state (kind, id, updated_at, deleted, dirty) VALUES (?1, ?2, ?3, ?4, 0)",
+                    params![record.kind.as_str(), record.id, record.updated_at, record.deleted],
+                )?;
+                library_changed |= record.kind != Kind::Setting;
+            }
+            self.set_kv("sync_cursor", Some(&cursor.to_string()))?;
+            Ok(Some(library_changed))
+        })
     }
 
-    /// Takes in records from other machines, skipping any this machine changed more recently,
-    /// and returns the ones it took. A body this version can't read is skipped too.
-    pub fn apply<'a>(&self, records: &'a [Record]) -> Result<Vec<&'a Record>> {
-        let transaction = self.db.unchecked_transaction()?;
-        let mut applied = Vec::new();
-        for record in records {
-            let local: Option<i64> = transaction
-                .query_row(
-                    "SELECT updated_at FROM sync_state WHERE kind = ?1 AND id = ?2",
-                    params![record.kind.as_str(), record.id],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            if local.is_some_and(|local| local >= record.updated_at) || !apply_one(&transaction, record)? {
-                continue;
+    /// Whether `record` replaces this machine's version, by the server's rule: the later change
+    /// wins, and at the same time the greater JSON body does.
+    fn wins_here(&self, db: &Connection, record: &Record) -> Result<bool> {
+        let local: Option<(i64, bool)> = db
+            .query_row(
+                "SELECT updated_at, deleted FROM sync_state WHERE kind = ?1 AND id = ?2",
+                params![record.kind.as_str(), record.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        Ok(match local {
+            None => true,
+            Some((updated_at, _)) if updated_at != record.updated_at => record.updated_at > updated_at,
+            Some((_, deleted)) => {
+                let local = if deleted {
+                    None
+                } else {
+                    self.body(record.kind, &record.id)?
+                };
+                let text = |body: Option<&Value>| serde_json::to_string(&body).unwrap_or_default();
+                text(record.body.as_ref()) > text(local.as_ref())
             }
-            transaction.execute(
-                "INSERT OR REPLACE INTO sync_state (kind, id, updated_at, deleted, dirty) VALUES (?1, ?2, ?3, ?4, 0)",
-                params![record.kind.as_str(), record.id, record.updated_at, record.deleted],
-            )?;
-            applied.push(record);
-        }
-        transaction.commit()?;
-        Ok(applied)
+        })
     }
 
     /// A block that runs past midnight is split between the two days it touched.
@@ -509,6 +573,20 @@ fn set_setting_value(db: &Connection, name: &str, value: &Value) -> Result<()> {
     Ok(())
 }
 
+/// Marks an item as changed here, for the next sync to upload. The time only moves forward, so a
+/// change made within the same millisecond as the last still wins.
+fn touch(db: &Connection, kind: Kind, id: &str, deleted: bool) -> Result<()> {
+    db.execute(
+        "INSERT INTO sync_state (kind, id, updated_at, deleted, dirty) VALUES (?1, ?2, ?3, ?4, 1)
+         ON CONFLICT (kind, id) DO UPDATE SET
+             updated_at = max(excluded.updated_at, sync_state.updated_at + 1),
+             deleted = excluded.deleted,
+             dirty = 1",
+        params![kind.as_str(), id, now_ms(), deleted],
+    )?;
+    Ok(())
+}
+
 /// Writes one record from another machine into its table, or returns false for a body this
 /// version can't read.
 fn apply_one(db: &Connection, record: &Record) -> Result<bool> {
@@ -526,7 +604,10 @@ fn apply_one(db: &Connection, record: &Record) -> Result<bool> {
         (Kind::Setting, false) => {
             let Some(value) = &record.body else { return Ok(false) };
             set_setting_value(db, id, value)?;
-            0
+            db.execute(
+                "INSERT OR REPLACE INTO kv (key, value) VALUES (?1, '1')",
+                [format!("arrived:{id}")],
+            )?
         }
         (Kind::Like, false) => {
             let Some(like) = body::<LikeBody>(record) else {
@@ -596,43 +677,56 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_change_uploads_once_and_loses_only_to_a_newer_one_from_elsewhere() {
+    fn syncing() -> Store {
         let store = Store::open(Path::new(":memory:")).unwrap();
+        store.set_sync_token(Some("key")).unwrap();
+        store
+    }
+
+    #[test]
+    fn a_change_uploads_once_and_loses_only_to_a_later_or_greater_one_from_elsewhere() {
+        let store = syncing();
         store.set_liked(&item("r2:home"), true).unwrap();
 
         let outgoing = store.outgoing().unwrap();
         assert_eq!(outgoing.len(), 1);
         assert_eq!(outgoing[0].body.as_ref().unwrap()["item"]["key"], "r2:home");
-        store.pushed(&outgoing).unwrap();
+        store.record_exchange("key", &outgoing, &[], 1).unwrap();
         assert!(store.outgoing().unwrap().is_empty());
 
-        let older = Record {
+        let at = outgoing[0].updated_at;
+        let unliked = |updated_at| Record {
             kind: Kind::Like,
             id: "r2:home".into(),
-            updated_at: outgoing[0].updated_at - 1,
+            updated_at,
             deleted: true,
             body: None,
         };
-        assert!(store.apply(std::slice::from_ref(&older)).unwrap().is_empty());
+        // At the same time the server keeps the greater body, and `null` sorts below an object.
+        let ignored = store.record_exchange("key", &[], &[unliked(at - 1), unliked(at)], 2);
+        assert_eq!(ignored.unwrap(), Some(false));
         assert_eq!(store.likes().unwrap().len(), 1);
 
-        let newer = Record {
-            updated_at: outgoing[0].updated_at + 1,
-            ..older
-        };
-        assert_eq!(store.apply(std::slice::from_ref(&newer)).unwrap().len(), 1);
+        store.set_sync_token(Some("another key")).unwrap();
+        assert_eq!(store.record_exchange("key", &[], &[unliked(at + 1)], 3).unwrap(), None);
+        assert_eq!((store.likes().unwrap().len(), store.sync_cursor()), (1, 0));
+
+        let taken = store.record_exchange("another key", &[], &[unliked(at + 1)], 3);
+        assert_eq!(taken.unwrap(), Some(true));
         assert!(store.likes().unwrap().is_empty());
         assert!(store.outgoing().unwrap().is_empty());
+        assert_eq!(store.sync_cursor(), 3);
     }
 
     #[test]
-    fn a_joining_machine_uploads_its_library_but_takes_the_spaces_settings() {
-        let store = Store::open(Path::new(":memory:")).unwrap();
+    fn a_joining_machine_takes_the_spaces_settings_unless_it_changes_them_first() {
+        let store = syncing();
         store.set_liked(&item("r2:home"), true).unwrap();
-        store.pushed(&store.outgoing().unwrap()).unwrap();
+        store
+            .record_exchange("key", &store.outgoing().unwrap(), &[], 1)
+            .unwrap();
 
-        let settings = BTreeMap::from([("chime".to_string(), Value::Bool(true))]);
+        let settings = BTreeMap::from([("chime".to_string(), Value::Bool(false))]);
         store.queue_everything_for_sync(&settings).unwrap();
 
         let queued: Vec<(Kind, String)> = store
@@ -645,31 +739,43 @@ mod tests {
             queued,
             [(Kind::Setting, "chime".into()), (Kind::Like, "r2:home".into())]
         );
-        let from_the_space = Record {
+        let chime = |updated_at, on| Record {
             kind: Kind::Setting,
             id: "chime".into(),
-            updated_at: 1,
+            updated_at,
             deleted: false,
-            body: Some(Value::Bool(false)),
+            body: Some(Value::Bool(on)),
         };
-        assert_eq!(store.apply(&[from_the_space]).unwrap().len(), 1);
-        assert_eq!(store.changed_settings(&settings).len(), 1);
+        store.record_exchange("key", &[], &[chime(0, true)], 2).unwrap();
+        assert_eq!(
+            store.take_arrived_settings().unwrap(),
+            [("chime".to_string(), Value::Bool(true))]
+        );
+        assert!(store.take_arrived_settings().unwrap().is_empty());
+
+        store.record_exchange("key", &[], &[chime(5, false)], 3).unwrap();
+        store.set_synced_setting("chime", &Value::Bool(true)).unwrap();
+        assert!(store.take_arrived_settings().unwrap().is_empty());
+        let outgoing = store.outgoing().unwrap();
+        let chime = outgoing.iter().find(|record| record.kind == Kind::Setting).unwrap();
+        assert_eq!(chime.body, Some(Value::Bool(true)));
     }
 
     #[test]
     fn the_sync_servers_example_fills_the_library_and_uploads_back_unchanged() {
         let exchange: Value = serde_json::from_str(include_str!("../sync/fixtures/exchange.json")).unwrap();
         let records: Vec<Record> = serde_json::from_value(exchange["response"]["changes"].clone()).unwrap();
-        let store = Store::open(Path::new(":memory:")).unwrap();
+        let store = syncing();
 
-        assert_eq!(store.apply(&records).unwrap().len(), records.len());
+        assert_eq!(store.record_exchange("key", &[], &records, 7).unwrap(), Some(true));
         assert_eq!(store.likes().unwrap()[0].title, "Rainy Window");
         assert_eq!(store.saved().unwrap()[0].channel, "Lofi Girl");
         assert_eq!(store.scenes().unwrap()[0].name, "Late night reading");
         assert_eq!(store.mixes().unwrap()[0].name, "Cafe in the rain");
+        let arrived = store.take_arrived_settings().unwrap();
+        assert_eq!(arrived.len(), 1);
 
-        let pomodoro = records.iter().find(|record| record.kind == Kind::Setting).unwrap();
-        let settings = BTreeMap::from([("pomodoro".to_string(), pomodoro.body.clone().unwrap())]);
+        let settings = BTreeMap::from([arrived[0].clone()]);
         store.queue_everything_for_sync(&settings).unwrap();
         assert_eq!(store.outgoing().unwrap(), records);
     }
