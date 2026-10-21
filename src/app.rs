@@ -2612,7 +2612,8 @@ mod tests {
     fn a_hidden_timer_is_saved_and_comes_back_once_it_is_used() {
         let mut app = app();
         app.dispatch(Action::ToggleTimerPanel);
-        assert!(app.session().timer_hidden);
+        app.store.save_session(&app.session()).unwrap();
+        assert!(app.store.session().timer_hidden);
 
         app.dispatch(Action::TimerToggle);
         assert_eq!((app.timer_hidden, app.timer.is_running()), (false, true));
