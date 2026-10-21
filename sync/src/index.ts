@@ -2,6 +2,7 @@ import { type } from "arktype";
 import { limits, syncRequest, type StoredChange, type SyncRecord } from "./protocol";
 import { mintToken, verifyToken } from "./token";
 
+export { Admission } from "./admission";
 export { SyncSpace } from "./space";
 
 const fail = (status: number, error: string) => Response.json({ error }, { status });
@@ -15,8 +16,6 @@ export default {
           return await createSpace(request, env);
         case "POST /v1/sync":
           return await sync(request, env);
-        case "DELETE /v1/space":
-          return await deleteSpace(request, env);
         default:
           return fail(404, "there is nothing at this address");
       }
@@ -37,6 +36,8 @@ async function createSpace(request: Request, env: Env) {
   const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
   const { success } = await env.SPACE_CREATION_LIMITER.limit({ key: ip });
   if (!success) return fail(429, "too many sync spaces were created from this address, try again in a minute");
+  const admitted = await env.ADMISSION.getByName("spaces").admit(Number(env.DAILY_NEW_SPACES));
+  if (!admitted) return fail(503, "sync is not taking new spaces today, try again tomorrow");
   return Response.json({ token: await mintToken(env.SYNC_SECRET) }, { status: 201 });
 }
 
@@ -48,18 +49,14 @@ async function sync(request: Request, env: Env) {
   if (body instanceof Response) return body;
   const parsed = syncRequest(body);
   if (parsed instanceof type.errors) return fail(400, `the sync request is not valid: ${parsed.summary}`);
+  const keys = new Set(parsed.changes.map(({ kind, id }) => `${kind}\u0000${id}`));
+  if (keys.size < parsed.changes.length) return fail(400, "the sync request changes the same record twice");
 
   const result = await space.sync(parsed.cursor, parsed.changes);
   if (result.type === "full") return fail(507, "this sync space is full");
+  if (result.type === "over budget") return fail(429, "this sync space changed too much today, try again tomorrow");
   const { cursor, changes, more } = result;
   return Response.json({ cursor, changes: changes.map(toRecord), more });
-}
-
-async function deleteSpace(request: Request, env: Env) {
-  const space = await openSpace(request, env);
-  if (space instanceof Response) return space;
-  await space.deleteSpace();
-  return new Response(null, { status: 204 });
 }
 
 /** Every check that can reject a request runs here, before anything reaches a Durable Object. */
@@ -70,6 +67,8 @@ async function openSpace(request: Request, env: Env) {
     : null;
   if (!spaceId) return fail(401, "the sync token is missing or not valid");
 
+  // Cloudflare counts this per location and only roughly, so it only filters bursts; the space's
+  // own daily allowance is the limit that holds.
   const { success } = await env.SYNC_LIMITER.limit({ key: spaceId });
   if (!success) return fail(429, "this sync space is syncing too often, try again in a minute");
 

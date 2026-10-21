@@ -19,7 +19,10 @@ const recordKey = {
 
 const encoder = new TextEncoder();
 
+// A record that isn't deleted needs a body: a live `null` would serialize like a tombstone and
+// leave equal-time conflicts without a winner.
 const serializedBody = type("unknown").pipe((body, ctx) => {
+  if (body === null) return ctx.error({ expected: "a body for a record that is not deleted", actual: "null" });
   const json = JSON.stringify(body);
   const bytes = encoder.encode(json).byteLength;
   return bytes <= limits.bodyBytes
@@ -45,4 +48,5 @@ export type StoredChange = typeof incomingRecord.infer;
 
 export type SyncResult =
   | { type: "synced"; cursor: number; changes: StoredChange[]; more: boolean }
-  | { type: "full" };
+  | { type: "full" }
+  | { type: "over budget" };

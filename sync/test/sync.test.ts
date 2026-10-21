@@ -25,16 +25,16 @@ it("keeps the newest write per record, with tombstones and a body tie-break", as
   const token = await newToken();
   await sync(token, { cursor: 0, changes: [like("a", 100, { v: 1 }), like("b", 100, { v: 1 })] });
 
-  await sync(token, {
-    cursor: 0,
-    changes: [
-      like("a", 50, { v: 9 }),
-      like("a", 100, { v: 2 }),
-      like("a", 100, { v: 0 }),
-      { kind: "like", id: "b", updatedAt: 200, deleted: true, body: null },
-      like("b", 150, { v: 3 }),
-    ],
-  });
+  const later = [
+    like("a", 50, { v: 9 }),
+    like("a", 100, { v: 2 }),
+    like("a", 100, { v: 0 }),
+    { kind: "like", id: "b", updatedAt: 200, deleted: true, body: null },
+    like("b", 150, { v: 3 }),
+  ];
+  for (const change of later) {
+    expect((await sync(token, { cursor: 0, changes: [change] })).status).toBe(200);
+  }
 
   const { changes, cursor } = await pull(token);
   expect(changes).toEqual([
@@ -102,6 +102,8 @@ describe("request limits", () => {
     ["a record body that is too large", { cursor: 0, changes: [like("a", 1, "x".repeat(limits.bodyBytes))] }],
     ["an unknown kind", { cursor: 0, changes: [{ ...like("a", 1), kind: "playlist" }] }],
     ["a tombstone with a body", { cursor: 0, changes: [{ ...like("a", 1), deleted: true }] }],
+    ["a live record without a body", { cursor: 0, changes: [like("a", 1, null)] }],
+    ["the same record twice", { cursor: 0, changes: [like("a", 1), like("a", 2)] }],
     ["a negative cursor", { cursor: -1, changes: [] }],
     ["a fractional updatedAt", { cursor: 0, changes: [like("a", 1.5)] }],
   ])("rejects %s", async (_, body) => {
@@ -111,16 +113,18 @@ describe("request limits", () => {
   });
 });
 
-it("deletes a space, and a client that synced it before starts over", async () => {
+it("turns a space away for the day once it has used its allowance of changes", async () => {
+  // The tests allow 6000 changes a day per space.
   const token = await newToken();
-  await sync(token, { cursor: 0, changes: [like("a", 1), like("b", 1)] });
+  for (let batch = 0; batch < 3; batch++) {
+    const changes = Array.from({ length: 2000 }, (_, index) => like(`${batch}-${index}`, 1));
+    expect((await sync(token, { cursor: 0, changes })).status).toBe(200);
+  }
 
-  const deleted = await send("/v1/space", { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
-  expect(deleted.status).toBe(204);
-  expect(await pull(token)).toEqual({ cursor: 0, changes: [], more: false });
-
-  const again = await sync(token, { cursor: 2, changes: [like("c", 1)] });
-  expect(await again.json()).toEqual({ cursor: 1, changes: [like("c", 1)], more: false });
+  const over = await sync(token, { cursor: 0, changes: [like("one-more", 1)] });
+  expect(over.status).toBe(429);
+  expect(await over.json()).toEqual({ error: "this sync space changed too much today, try again tomorrow" });
+  expect((await pull(token, 6000)).changes).toEqual([]);
 });
 
 it("answers unknown routes with 404", async () => {

@@ -8,11 +8,10 @@ All bodies are UTF-8 JSON. Errors are `{"error": "<sentence>"}` with the status 
 
 - `POST /v1/spaces` returns `201 {"token": "<spaceId>.<signature>"}`.
 - `POST /v1/sync` with `Authorization: Bearer <token>` and `{"cursor": 0, "changes": [Record]}` returns `200 {"cursor": n, "changes": [Record], "more": bool}`.
-- `DELETE /v1/space` with the bearer token deletes everything in the space and returns `204`.
 
-A record is `{"kind", "id", "updatedAt", "deleted", "body"}`. `kind` is one of `like`, `saved`, `scene`, `mix`, `focus`, `setting`. `updatedAt` is milliseconds since the epoch. A deleted record keeps its key with `body: null`.
+A record is `{"kind", "id", "updatedAt", "deleted", "body"}`. `kind` is one of `like`, `saved`, `scene`, `mix`, `focus`, `setting`. `updatedAt` is milliseconds since the epoch. A deleted record keeps its key with `body: null`, and a record that isn't deleted must have a body other than `null`. A sync changes each `(kind, id)` at most once.
 
-The server keeps the record with the greater `updatedAt` for each `(kind, id)`. On equal timestamps it keeps the one whose serialized body sorts later byte by byte. Every applied change gets the next `seq`. The response holds up to 1000 records with `seq` above the request cursor. When `more` is true, the client calls again with the returned cursor and no changes. A cursor ahead of the server, which happens after the space was deleted, is treated as 0.
+The server keeps the record with the greater `updatedAt` for each `(kind, id)`. On equal timestamps it keeps the one whose serialized body sorts later byte by byte, where a deleted record counts as `null`. Every applied change gets the next `seq`. The response holds up to 1000 records with `seq` above the request cursor. When `more` is true, the client calls again with the returned cursor and no changes. Spaces are never deleted, so a `seq` is never reused.
 
 [`fixtures/exchange.json`](fixtures/exchange.json) is a complete request and response. The tests and the Rust client both parse it, so it is the contract for field names and types.
 
@@ -21,7 +20,9 @@ The server keeps the record with the greater `updatedAt` for each `(kind, id)`. 
 - A token is the space id plus an HMAC-SHA256 signature made with `SYNC_SECRET`. The Worker checks it before anything else, so a bad token never reaches a Durable Object.
 - Creating a space only signs a token. The Durable Object first exists when that space syncs.
 - Each request makes at most one RPC call to one Durable Object. There are no alarms, WebSockets, or outbound fetches.
-- Rate limits: 5 new spaces per minute per IP address, 30 syncs or deletes per minute per space. Over the limit gets 429.
+- New spaces: 5 per minute per IP address (429), and `DAILY_NEW_SPACES` per UTC day across every address (503), counted in one small `Admission` Durable Object that only space creation touches. Since every space has its own limits below, this daily cap is what bounds how fast storage and writes can grow overall.
+- Each space may write `DAILY_CHANGES_PER_SPACE` changes per UTC day, counted inside its Durable Object; past that a sync with changes gets 429 until the next day. Rows written are billed even when they don't grow the space, so this is the limit on writes. Pulling with no changes is not counted.
+- 30 syncs per minute per space. Cloudflare counts this per location and only roughly, so it only filters bursts before they reach a Durable Object.
 - Request bodies are capped at 2 MiB (413). A sync carries at most 2000 records, ids up to 200 characters, and bodies up to 256 KiB of JSON each (400).
 - A space holds about 10 MiB. A sync that would go past that is rolled back whole and answered with 507.
 
@@ -35,6 +36,8 @@ bun run dev         # local server; put SYNC_SECRET=... in .dev.vars first
 ```
 
 ## Deploy
+
+On the Workers Free plan, going past a daily limit makes further calls fail until 00:00 UTC instead of adding to a bill, so the worst case is sync stopping for the day. On the Paid plan, set a billing notification in the dashboard as well.
 
 The two rate limiters in `wrangler.jsonc` use `namespace_id` 1001 and 1002. These ids must be unique within the Cloudflare account, so change them if they are taken.
 

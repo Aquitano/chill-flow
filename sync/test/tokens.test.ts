@@ -7,7 +7,7 @@ import { send, sync } from "./client";
 const createSpace = (ip: string) =>
   send("/v1/spaces", { method: "POST", headers: { "CF-Connecting-IP": ip } });
 
-it("mints verifiable tokens up to the per-address limit", async () => {
+it("mints verifiable tokens up to the per-address limit and the daily limit", async () => {
   const created = await Promise.all(Array.from({ length: 5 }, () => createSpace("203.0.113.7")));
   for (const response of created) {
     expect(response.status).toBe(201);
@@ -17,7 +17,14 @@ it("mints verifiable tokens up to the per-address limit", async () => {
   }
 
   expect((await createSpace("203.0.113.7")).status).toBe(429);
-  expect((await createSpace("198.51.100.1")).status).toBe(201);
+
+  // The tests allow 8 new spaces a day across every address.
+  for (const ip of ["198.51.100.1", "198.51.100.2", "198.51.100.3"]) {
+    expect((await createSpace(ip)).status).toBe(201);
+  }
+  const closed = await createSpace("198.51.100.4");
+  expect(closed.status).toBe(503);
+  expect(await closed.json()).toEqual({ error: "sync is not taking new spaces today, try again tomorrow" });
 });
 
 it("rejects missing and forged tokens without reaching a Durable Object", async () => {
@@ -31,7 +38,6 @@ it("rejects missing and forged tokens without reaching a Durable Object", async 
     expect(await response.json()).toEqual({ error: "the sync token is missing or not valid" });
   }
   expect((await send("/v1/sync", { method: "POST", body: "{}" })).status).toBe(401);
-  expect((await send("/v1/space", { method: "DELETE" })).status).toBe(401);
 
   expect(await listDurableObjectIds(env.SYNC_SPACE)).toEqual([]);
 });

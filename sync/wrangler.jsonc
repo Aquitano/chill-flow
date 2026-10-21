@@ -6,10 +6,18 @@
   "compatibility_date": "2026-10-19",
   "workers_dev": true,
   "durable_objects": {
-    "bindings": [{ "name": "SYNC_SPACE", "class_name": "SyncSpace" }]
+    "bindings": [
+      { "name": "SYNC_SPACE", "class_name": "SyncSpace" },
+      { "name": "ADMISSION", "class_name": "Admission" }
+    ]
   },
   "exports": {
-    "SyncSpace": { "type": "durable-object", "storage": "sqlite" }
+    "SyncSpace": { "type": "durable-object", "storage": "sqlite" },
+    "Admission": { "type": "durable-object", "storage": "sqlite" }
+  },
+  "vars": {
+    "DAILY_NEW_SPACES": "100",
+    "DAILY_CHANGES_PER_SPACE": "20000"
   },
   "ratelimits": [
     {
