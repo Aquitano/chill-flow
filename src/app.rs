@@ -417,6 +417,7 @@ impl App {
 
     /// Replaces the added catalogs with `urls`, as another machine left them.
     fn set_added_catalogs(&mut self, urls: Vec<String>) {
+        self.catalog_epoch += 1;
         let mut previous = std::mem::take(&mut self.catalogs);
         let wanted: Vec<String> = std::iter::once(self.config.catalog_url.clone())
             .chain(urls.clone())
