@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
@@ -9,9 +8,6 @@ use serde_json::Value;
 use crate::store::Store;
 
 pub const DEFAULT_URL: &str = "https://chill-sync.aquitano.me";
-
-/// The settings that follow a sync space from machine to machine, by the name they sync under.
-pub const SETTINGS: [&str; 5] = ["pomodoro", "chime", "notifications", "reduce_motion", "catalogs"];
 
 /// The Worker's limits are 256 KiB per record and 2 MiB per request, so uploads go in batches
 /// that stay under both, and a record too big to ever fit stays on this machine.
@@ -113,12 +109,12 @@ pub fn create_space(server: &str) -> Result<String> {
 
 /// Uploads what changed here since the last sync and takes in what changed elsewhere, on a
 /// connection of its own so the app keeps running meanwhile.
-pub fn run(database: &Path, server: &str, token: &str, settings: &BTreeMap<String, Value>) -> Result<Outcome> {
+pub fn run(database: &Path, server: &str, token: &str) -> Result<Outcome> {
     let store = Store::open(database)?;
     let mut outcome = Outcome::default();
     let mut cursor = store.sync_cursor();
     let outgoing: Vec<Record> = store
-        .outgoing(settings)?
+        .outgoing()?
         .into_iter()
         .filter(|record| size(record) <= RECORD_LIMIT)
         .collect();

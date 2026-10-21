@@ -390,7 +390,7 @@ impl App {
     fn remove_catalog(&mut self, url: &str) {
         self.catalog_epoch += 1;
         self.config.catalogs.retain(|known| known != url);
-        let _ = self.store.touch_setting("catalogs");
+        self.note_setting_changed("catalogs");
         self.catalogs
             .retain(|(known, _)| known != url || known == &self.config.catalog_url);
         catalog::forget(&self.cache_dir, url);
@@ -1554,8 +1554,14 @@ impl App {
             Setting::ReduceMotion => "reduce_motion",
             _ => "pomodoro",
         };
-        let _ = self.store.touch_setting(synced_as);
+        self.note_setting_changed(synced_as);
         self.save_config();
+    }
+
+    fn note_setting_changed(&mut self, name: &str) {
+        if let Some(value) = self.sync_settings().get(name) {
+            let _ = self.store.set_synced_setting(name, value);
+        }
     }
 
     pub fn sync_key(&self) -> Option<&str> {
@@ -1577,7 +1583,7 @@ impl App {
         let joined = self
             .store
             .set_sync_token(Some(token))
-            .and_then(|()| self.store.queue_everything_for_sync(&sync::SETTINGS));
+            .and_then(|()| self.store.queue_everything_for_sync(&self.sync_settings()));
         if let Err(error) = joined {
             self.toast(Tone::Error, format!("Could not turn on sync: {error}"));
             return;
@@ -1596,7 +1602,7 @@ impl App {
         }
     }
 
-    /// The current value of every setting in `sync::SETTINGS`.
+    /// The settings that follow a sync space between machines, by the name they sync under.
     fn sync_settings(&self) -> BTreeMap<String, serde_json::Value> {
         let config = &self.config;
         BTreeMap::from([
@@ -1647,10 +1653,13 @@ impl App {
         }
         self.syncing = true;
         self.synced_at = Some(Instant::now());
-        let (jobs, database, server) = (self.jobs.clone(), self.database.clone(), self.config.sync_url.clone());
         let settings = self.sync_settings();
+        for (name, value) in self.store.changed_settings(&settings) {
+            let _ = self.store.set_synced_setting(name, value);
+        }
+        let (jobs, database, server) = (self.jobs.clone(), self.database.clone(), self.config.sync_url.clone());
         std::thread::spawn(move || {
-            let result = sync::run(&database, &server, &token, &settings);
+            let result = sync::run(&database, &server, &token);
             let _ = jobs.send(Job::Synced { manual, result });
         });
     }
@@ -1659,14 +1668,10 @@ impl App {
     /// seconds rather than hold the terminal.
     fn sync_before_quitting(&self) {
         let Some(token) = self.sync_token.clone() else { return };
-        let (database, server, settings) = (
-            self.database.clone(),
-            self.config.sync_url.clone(),
-            self.sync_settings(),
-        );
+        let (database, server) = (self.database.clone(), self.config.sync_url.clone());
         let (done, finished) = mpsc::channel();
         std::thread::spawn(move || {
-            let _ = done.send(sync::run(&database, &server, &token, &settings).is_ok());
+            let _ = done.send(sync::run(&database, &server, &token).is_ok());
         });
         let _ = finished.recv_timeout(Duration::from_secs(5));
     }
@@ -1954,7 +1959,7 @@ impl App {
                 );
                 self.config.catalogs.push(url.clone());
                 self.catalogs.push((url, catalog));
-                let _ = self.store.touch_setting("catalogs");
+                self.note_setting_changed("catalogs");
                 self.save_config();
                 self.merge_catalogs();
                 self.toast(Tone::Done, message);
@@ -2259,7 +2264,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_from_another_machine_apply_here_and_every_synced_setting_is_sent() {
+    fn settings_from_another_machine_apply_here() {
         let mut app = app();
         let url = "http://127.0.0.1:9/friends/catalog.json";
 
@@ -2272,12 +2277,6 @@ mod tests {
         assert_eq!(app.config.catalogs, [url]);
         assert_eq!(app.added_catalogs().count(), 1);
         assert!(config::load(app.config_file()).unwrap().chime);
-        let mut synced: Vec<&str> = sync::SETTINGS.to_vec();
-        synced.sort_unstable();
-        assert_eq!(
-            app.sync_settings().keys().map(String::as_str).collect::<Vec<_>>(),
-            synced
-        );
     }
 
     #[test]

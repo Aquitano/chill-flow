@@ -132,8 +132,28 @@ impl Store {
         Ok(())
     }
 
-    pub fn touch_setting(&self, name: &str) -> Result<()> {
-        self.touch(Kind::Setting, name, false)
+    /// Records a synced setting's new value together with the time it changed, so an upload
+    /// always sends the value that goes with its time.
+    pub fn set_synced_setting(&self, name: &str, value: &Value) -> Result<()> {
+        let transaction = self.db.unchecked_transaction()?;
+        set_setting_value(&transaction, name, value)?;
+        self.touch(Kind::Setting, name, false)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Settings whose value in `settings` differs from the one last synced, such as after an edit
+    /// to config.toml by hand.
+    pub fn changed_settings<'a>(&self, settings: &'a BTreeMap<String, Value>) -> Vec<(&'a String, &'a Value)> {
+        settings
+            .iter()
+            .filter(|(name, value)| self.setting_value(name).as_ref() != Some(*value))
+            .collect()
+    }
+
+    fn setting_value(&self, name: &str) -> Option<Value> {
+        self.kv(&format!("setting:{name}"))
+            .and_then(|text| serde_json::from_str(&text).ok())
     }
 
     fn all<T: DeserializeOwned>(&self, sql: &str) -> Result<Vec<T>> {
@@ -318,7 +338,7 @@ impl Store {
     /// never changed since the sync table existed get their library time, or none, so a version
     /// already in the space wins over them; that is how a joining machine takes on the space's
     /// settings.
-    pub fn queue_everything_for_sync(&self, settings: &[&str]) -> Result<()> {
+    pub fn queue_everything_for_sync(&self, settings: &BTreeMap<String, Value>) -> Result<()> {
         let transaction = self.db.unchecked_transaction()?;
         transaction.execute_batch(
             "UPDATE sync_state SET dirty = 1;
@@ -328,7 +348,8 @@ impl Store {
              INSERT OR IGNORE INTO sync_state SELECT 'mix', name, 0, 0, 1 FROM mixes;
              INSERT OR IGNORE INTO sync_state SELECT 'focus', uid, started_at * 1000, 0, 1 FROM focus_blocks;",
         )?;
-        for name in settings {
+        for (name, value) in settings {
+            set_setting_value(&transaction, name, value)?;
             transaction.execute(
                 "INSERT OR IGNORE INTO sync_state VALUES ('setting', ?1, 0, 0, 1)",
                 [name],
@@ -339,8 +360,8 @@ impl Store {
     }
 
     /// Everything changed here since the last upload. An item gone from its table is sent as
-    /// deleted; `settings` holds the current value of each synced setting.
-    pub fn outgoing(&self, settings: &BTreeMap<String, Value>) -> Result<Vec<Record>> {
+    /// deleted.
+    pub fn outgoing(&self) -> Result<Vec<Record>> {
         let mut statement = self
             .db
             .prepare("SELECT kind, id, updated_at, deleted FROM sync_state WHERE dirty = 1 ORDER BY updated_at")?;
@@ -356,7 +377,7 @@ impl Store {
         for row in rows {
             let (kind, id, updated_at, deleted) = row?;
             let Some(kind) = Kind::parse(&kind) else { continue };
-            let body = if deleted { None } else { self.body(kind, &id, settings)? };
+            let body = if deleted { None } else { self.body(kind, &id)? };
             if kind == Kind::Setting && body.is_none() {
                 continue;
             }
@@ -371,7 +392,7 @@ impl Store {
         Ok(records)
     }
 
-    fn body(&self, kind: Kind, id: &str, settings: &BTreeMap<String, Value>) -> Result<Option<Value>> {
+    fn body(&self, kind: Kind, id: &str) -> Result<Option<Value>> {
         let parse = |text: String| serde_json::from_str::<Value>(&text).ok();
         let row = |sql: &str| -> Result<Option<(String, i64)>> {
             Ok(self
@@ -403,7 +424,7 @@ impl Store {
                 .optional()?
                 .map(serde_json::to_value)
                 .transpose()?,
-            Kind::Setting => settings.get(id).cloned(),
+            Kind::Setting => self.setting_value(id),
         })
     }
 
@@ -480,6 +501,14 @@ impl Store {
     }
 }
 
+fn set_setting_value(db: &Connection, name: &str, value: &Value) -> Result<()> {
+    db.execute(
+        "INSERT OR REPLACE INTO kv (key, value) VALUES (?1, ?2)",
+        params![format!("setting:{name}"), json(value)?],
+    )?;
+    Ok(())
+}
+
 /// Writes one record from another machine into its table, or returns false for a body this
 /// version can't read.
 fn apply_one(db: &Connection, record: &Record) -> Result<bool> {
@@ -493,7 +522,12 @@ fn apply_one(db: &Connection, record: &Record) -> Result<bool> {
         (Kind::Scene, true) => db.execute("DELETE FROM scenes WHERE name = ?1", [id])?,
         (Kind::Mix, true) => db.execute("DELETE FROM mixes WHERE name = ?1", [id])?,
         (Kind::Focus, true) => db.execute("DELETE FROM focus_blocks WHERE uid = ?1", [id])?,
-        (Kind::Setting, _) => 0,
+        (Kind::Setting, true) => 0,
+        (Kind::Setting, false) => {
+            let Some(value) = &record.body else { return Ok(false) };
+            set_setting_value(db, id, value)?;
+            0
+        }
         (Kind::Like, false) => {
             let Some(like) = body::<LikeBody>(record) else {
                 return Ok(false);
@@ -565,14 +599,13 @@ mod tests {
     #[test]
     fn a_change_uploads_once_and_loses_only_to_a_newer_one_from_elsewhere() {
         let store = Store::open(Path::new(":memory:")).unwrap();
-        let none = BTreeMap::new();
         store.set_liked(&item("r2:home"), true).unwrap();
 
-        let outgoing = store.outgoing(&none).unwrap();
+        let outgoing = store.outgoing().unwrap();
         assert_eq!(outgoing.len(), 1);
         assert_eq!(outgoing[0].body.as_ref().unwrap()["item"]["key"], "r2:home");
         store.pushed(&outgoing).unwrap();
-        assert!(store.outgoing(&none).unwrap().is_empty());
+        assert!(store.outgoing().unwrap().is_empty());
 
         let older = Record {
             kind: Kind::Like,
@@ -590,20 +623,20 @@ mod tests {
         };
         assert_eq!(store.apply(std::slice::from_ref(&newer)).unwrap().len(), 1);
         assert!(store.likes().unwrap().is_empty());
-        assert!(store.outgoing(&none).unwrap().is_empty());
+        assert!(store.outgoing().unwrap().is_empty());
     }
 
     #[test]
     fn a_joining_machine_uploads_its_library_but_takes_the_spaces_settings() {
         let store = Store::open(Path::new(":memory:")).unwrap();
         store.set_liked(&item("r2:home"), true).unwrap();
-        store.pushed(&store.outgoing(&BTreeMap::new()).unwrap()).unwrap();
-
-        store.queue_everything_for_sync(&["chime"]).unwrap();
+        store.pushed(&store.outgoing().unwrap()).unwrap();
 
         let settings = BTreeMap::from([("chime".to_string(), Value::Bool(true))]);
+        store.queue_everything_for_sync(&settings).unwrap();
+
         let queued: Vec<(Kind, String)> = store
-            .outgoing(&settings)
+            .outgoing()
             .unwrap()
             .into_iter()
             .map(|record| (record.kind, record.id))
@@ -620,6 +653,7 @@ mod tests {
             body: Some(Value::Bool(false)),
         };
         assert_eq!(store.apply(&[from_the_space]).unwrap().len(), 1);
+        assert_eq!(store.changed_settings(&settings).len(), 1);
     }
 
     #[test]
@@ -634,10 +668,10 @@ mod tests {
         assert_eq!(store.scenes().unwrap()[0].name, "Late night reading");
         assert_eq!(store.mixes().unwrap()[0].name, "Cafe in the rain");
 
-        store.queue_everything_for_sync(&["pomodoro"]).unwrap();
         let pomodoro = records.iter().find(|record| record.kind == Kind::Setting).unwrap();
         let settings = BTreeMap::from([("pomodoro".to_string(), pomodoro.body.clone().unwrap())]);
-        assert_eq!(store.outgoing(&settings).unwrap(), records);
+        store.queue_everything_for_sync(&settings).unwrap();
+        assert_eq!(store.outgoing().unwrap(), records);
     }
 
     #[test]
