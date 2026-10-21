@@ -49,6 +49,7 @@ export class SyncSpace extends DurableObject<Env> {
 
   sync(cursor: number, changes: StoredChange[]): SyncResult {
     const sql = this.ctx.storage.sql;
+    const lostTies: StoredChange[] = [];
     try {
       this.ctx.storage.transactionSync(() => {
         if (changes.length > 0) this.spend(changes.length);
@@ -58,6 +59,7 @@ export class SyncSpace extends DurableObject<Env> {
             .exec(upsert, change.kind, change.id, change.updatedAt, change.deleted ? 1 : 0, change.body, seq + 1)
             .toArray();
           if (applied.length > 0) seq++;
+          else lostTies.push(change);
         }
         if (sql.databaseSize > limits.spaceBytes) throw new Refused({ type: "full" });
       });
@@ -65,6 +67,20 @@ export class SyncSpace extends DurableObject<Env> {
       if (error instanceof Refused) return error.result;
       throw error;
     }
+
+    // Only this server decides ties, so a client whose change lost one gets the winner back even
+    // when the client has seen its seq already. Clients take equal-time records from the server.
+    const winners = lostTies.flatMap(({ kind, id, updatedAt }) =>
+      sql
+        .exec<Row>(
+          "SELECT kind, id, updated_at, deleted, body, seq FROM records WHERE kind = ? AND id = ? AND updated_at = ? AND seq <= ?",
+          kind,
+          id,
+          updatedAt,
+          cursor,
+        )
+        .toArray(),
+    );
 
     const rows = sql
       .exec<Row>(
@@ -77,7 +93,7 @@ export class SyncSpace extends DurableObject<Env> {
     return {
       type: "synced",
       cursor: page.at(-1)?.seq ?? cursor,
-      changes: page.map(toChange),
+      changes: [...page, ...winners].map(toChange),
       more: rows.length > page.length,
     };
   }

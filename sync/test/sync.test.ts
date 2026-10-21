@@ -44,6 +44,17 @@ it("keeps the newest write per record, with tombstones and a body tie-break", as
   expect(cursor).toBe(4);
 });
 
+it("sends the winner back to a client whose change lost a tie, even below its cursor", async () => {
+  const token = await newToken();
+  const { cursor } = await sync(token, { cursor: 0, changes: [like("a", 100, { v: 2 })] }).then((response) =>
+    response.json<SyncResponse>(),
+  );
+
+  const lost = await sync(token, { cursor, changes: [like("a", 100, { v: 0 })] });
+
+  expect(await lost.json()).toEqual({ cursor, changes: [like("a", 100, { v: 2 })], more: false });
+});
+
 it("pages through changes in seq order and reports when more remain", async () => {
   const token = await newToken();
   const changes = Array.from({ length: 1500 }, (_, index) => like(`track-${index}`, 1_000 + index));
