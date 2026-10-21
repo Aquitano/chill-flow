@@ -10,6 +10,8 @@ use crate::timer::PomodoroSettings;
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub catalog_url: String,
+    /// Catalogs added on top of `catalog_url`, whose tracks join the same Tracks tab.
+    pub catalogs: Vec<String>,
     pub reduce_motion: bool,
     pub chime: bool,
     pub notifications: bool,
@@ -20,6 +22,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             catalog_url: catalog_schema::DEFAULT_URL.into(),
+            catalogs: Vec::new(),
             reduce_motion: false,
             chime: true,
             notifications: true,
@@ -78,6 +81,11 @@ pub fn save(path: &Path, config: &Config) -> Result<()> {
     set(&mut document["reduce_motion"], config.reduce_motion);
     set(&mut document["chime"], config.chime);
     set(&mut document["notifications"], config.notifications);
+    if config.catalogs.is_empty() {
+        document.remove("catalogs");
+    } else {
+        set(&mut document["catalogs"], toml_edit::Array::from_iter(&config.catalogs));
+    }
     let pomodoro = &config.pomodoro;
     let table = document["pomodoro"].or_insert(toml_edit::table());
     set(&mut table["focus_minutes"], i64::from(pomodoro.focus_minutes));
@@ -123,6 +131,7 @@ mod tests {
         let mut config = load(&path).unwrap();
         config.chime = false;
         config.pomodoro.focus_minutes = 40;
+        config.catalogs = vec!["https://friends.example/catalog.json".into()];
         save(&path, &config).unwrap();
 
         let text = std::fs::read_to_string(&path).unwrap();
@@ -131,6 +140,7 @@ mod tests {
         assert!(text.starts_with("# mine"));
         assert!(text.contains("chime = false # the bell"));
         assert_eq!(reloaded.catalog_url, "https://example.com/catalog.json");
+        assert_eq!(reloaded.catalogs, config.catalogs);
         assert_eq!((reloaded.chime, reloaded.pomodoro.focus_minutes), (false, 40));
     }
 

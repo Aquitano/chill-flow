@@ -39,6 +39,7 @@ pub enum Prompt {
     OpenUrl,
     SaveScene,
     SaveMix,
+    AddCatalog,
 }
 
 impl Prompt {
@@ -47,6 +48,7 @@ impl Prompt {
             Prompt::OpenUrl => "Open a link",
             Prompt::SaveScene => "Save scene",
             Prompt::SaveMix => "Save ambience mix",
+            Prompt::AddCatalog => "Add a catalog",
         }
     }
 
@@ -55,6 +57,7 @@ impl Prompt {
             Prompt::OpenUrl => "https://youtu.be/…",
             Prompt::SaveScene => "rainy study",
             Prompt::SaveMix => "my rain",
+            Prompt::AddCatalog => "https://…/catalog.json",
         }
     }
 
@@ -62,6 +65,7 @@ impl Prompt {
         match self {
             Prompt::OpenUrl => "open",
             Prompt::SaveScene | Prompt::SaveMix => "save",
+            Prompt::AddCatalog => "add",
         }
     }
 
@@ -70,6 +74,7 @@ impl Prompt {
             Prompt::OpenUrl => "A YouTube video, playlist, or stream. Saved under YouTube.",
             Prompt::SaveScene => "Keeps what plays, the ambience, and the timer. Start it later with chill <name>.",
             Prompt::SaveMix => "Keeps the current ambience levels under Sounds.",
+            Prompt::AddCatalog => "A catalog.json someone shared with you. Its tracks join Tracks.",
         }
     }
 }
@@ -143,6 +148,8 @@ pub enum Removal {
     Like(String),
     Mix(String),
     Scene(String),
+    /// An added catalog, by its URL.
+    Catalog(String),
 }
 
 /// Everything the user can ask for, whether by key, mouse, media key, or the palette.

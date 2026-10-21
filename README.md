@@ -68,6 +68,8 @@ Focus stats count every minute a focus block ran, including blocks you stopped e
 
 `catalog.json` lists the R2 tracks, the ambient sounds, and the built-in mixes. chill reads it from `catalog_url`, keeps the last copy it fetched for offline starts, and falls back to the copy compiled into the binary from this repository. File names resolve against the folder the catalog sits in.
 
+Someone can share another catalog with you as a link to its `catalog.json`. Search for **Add a catalog** in the command palette and paste the link; its tracks join Tracks, each showing which catalog it came from, and **Remove catalog** takes it out again. When two catalogs use the same id, the main catalog's entry wins.
+
 `chill-catalog` in `tools/catalog` edits that file and uploads to the bucket. It needs ffmpeg and these variables, from the environment or a `.env` file in the repository:
 
 | Variable | Holds |
@@ -94,6 +96,7 @@ Press `c` for settings: timer lengths, auto-start, the chime, notifications, and
 
 ```toml
 catalog_url = "https://chill-data.aquitano.me/catalog.json"
+catalogs = []           # more catalog.json links, added with "Add a catalog"
 reduce_motion = false   # true turns off transitions and the visualizer
 chime = true            # a soft bell when a focus block or break ends
 notifications = true    # an OS notification at the same moments

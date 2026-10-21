@@ -11,7 +11,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::widgets::{self, fill, fit, put, wrap};
 use super::{BACKDROP_DIM, Hit, Overlay, Ui};
-use crate::action::{Action, Prompt, Setting};
+use crate::action::{Action, Prompt, Removal, Setting};
 use crate::app::{App, Tone};
 use crate::timer::TimerMode;
 
@@ -81,6 +81,14 @@ pub fn commands(app: &App) -> Vec<Command> {
             label: format!("Refresh playlist: {}", saved.title),
             key: "",
             action: Action::RefreshSaved(saved.id.clone()),
+        });
+    }
+    list.push(command("Add a catalog…", "", Action::OpenPrompt(Prompt::AddCatalog)));
+    for (url, name) in app.added_catalogs() {
+        list.push(Command {
+            label: format!("Remove catalog: {name}"),
+            key: "",
+            action: Action::Remove(Removal::Catalog(url.to_string())),
         });
     }
     list.push(command("Focus stats", "i", Action::OpenStats));
