@@ -1,3 +1,5 @@
+import { env } from "cloudflare:workers";
+import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import exchange from "../fixtures/exchange.json";
 import { limits } from "../src/protocol";
@@ -88,6 +90,11 @@ it("rejects a sync that would overfill the space and applies none of it", async 
       const stored = await pull(token);
       expect(stored.changes).toHaveLength(perBatch * batch);
       expect(stored.cursor).toBe(cursor);
+      // The refused batch still counts against the day's allowance: its rows were written.
+      const budget = await runInDurableObject(env.SYNC_SPACE.getByName(token.split(".")[0]!), (_, state) =>
+        state.storage.sql.exec<{ changes: number }>("SELECT changes FROM budget").one(),
+      );
+      expect(budget.changes).toBe(perBatch * (batch + 1));
       return;
     }
     expect(response.status).toBe(200);
@@ -122,6 +129,13 @@ describe("request limits", () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toHaveProperty("error");
   });
+});
+
+it("rejects a live body that JSON turns into null", async () => {
+  const token = await newToken();
+  const body = '{"cursor":0,"changes":[{"kind":"like","id":"a","updatedAt":1,"deleted":false,"body":1e400}]}';
+  const response = await send("/v1/sync", { method: "POST", headers: { Authorization: `Bearer ${token}` }, body });
+  expect(response.status).toBe(400);
 });
 
 it("turns a space away for the day once it has used its allowance of changes", async () => {

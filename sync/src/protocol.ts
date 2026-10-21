@@ -20,10 +20,11 @@ const recordKey = {
 const encoder = new TextEncoder();
 
 // A record that isn't deleted needs a body: a live `null` would serialize like a tombstone and
-// leave equal-time conflicts without a winner.
+// leave equal-time conflicts without a winner. The check runs on the serialized form, since a
+// number too large for JSON.parse turns into Infinity and serializes as `null` too.
 const serializedBody = type("unknown").pipe((body, ctx) => {
-  if (body === null) return ctx.error({ expected: "a body for a record that is not deleted", actual: "null" });
   const json = JSON.stringify(body);
+  if (json === "null") return ctx.error({ expected: "a body for a record that is not deleted", actual: "null" });
   const bytes = encoder.encode(json).byteLength;
   return bytes <= limits.bodyBytes
     ? json

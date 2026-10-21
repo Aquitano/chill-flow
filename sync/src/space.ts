@@ -50,9 +50,13 @@ export class SyncSpace extends DurableObject<Env> {
   sync(cursor: number, changes: StoredChange[]): SyncResult {
     const sql = this.ctx.storage.sql;
     const lostTies: StoredChange[] = [];
+    // Charged in a transaction of its own, so a sync rolled back below still counts: SQLite bills
+    // the rows it wrote before the rollback.
+    if (changes.length > 0 && !this.ctx.storage.transactionSync(() => this.spend(changes.length))) {
+      return { type: "over budget" };
+    }
     try {
       this.ctx.storage.transactionSync(() => {
-        if (changes.length > 0) this.spend(changes.length);
         let seq = sql.exec<{ seq: number | null }>("SELECT max(seq) AS seq FROM records").one().seq ?? 0;
         for (const change of changes) {
           const applied = sql
@@ -100,15 +104,16 @@ export class SyncSpace extends DurableObject<Env> {
 
   /**
    * Rows written are billed whether or not they grow the space, so a space gets a daily
-   * allowance of changes. Throwing rolls back the whole sync.
+   * allowance of changes. Returns false, spending nothing, when `count` doesn't fit today.
    */
-  private spend(count: number) {
+  private spend(count: number): boolean {
     const sql = this.ctx.storage.sql;
     const day = new Date().toISOString().slice(0, 10);
     sql.exec("DELETE FROM budget WHERE day <> ?", day);
     const used = sql.exec<{ changes: number }>("SELECT changes FROM budget WHERE day = ?", day).toArray()[0]?.changes ?? 0;
-    if (used + count > Number(this.env.DAILY_CHANGES_PER_SPACE)) throw new Refused({ type: "over budget" });
+    if (used + count > Number(this.env.DAILY_CHANGES_PER_SPACE)) return false;
     sql.exec("INSERT OR REPLACE INTO budget (day, changes) VALUES (?, ?)", day, used + count);
+    return true;
   }
 }
 
