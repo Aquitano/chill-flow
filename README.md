@@ -1,6 +1,8 @@
 # chill
 
-A terminal player for focused work. It plays lo-fi from your own R2 bucket or from YouTube, layers ambient sound underneath, and runs a focus timer that keeps track of the time you actually spent focusing. It ships as one binary for macOS and Windows.
+A terminal player for focused work. It plays lo-fi from a hosted catalog or from YouTube, layers ambient sound underneath, and runs a focus timer that keeps track of the time you actually spent focusing. It ships as one binary for macOS and Windows.
+
+![chill playing a Lofi Girl stream with the Rainy study mix and a focus block running](docs/screenshot.png)
 
 ## Install
 
@@ -130,3 +132,7 @@ On Linux the build needs `libasound2-dev`. CI runs the checks on Linux, macOS, a
 | Waves | Dsw4 | Public domain |
 | Café | Stephan (pdsounds.org) | Public domain |
 | Crickets | Serg Childed | CC BY-SA 4.0 (the trimmed loop is an adaptation and stays BY-SA) |
+
+## License
+
+The code is licensed under the [Apache License 2.0](LICENSE). The audio in the catalog is not part of this repository and keeps the licenses listed above.
