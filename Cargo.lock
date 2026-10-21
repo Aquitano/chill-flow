@@ -569,6 +569,7 @@ dependencies = [
  "catalog-schema",
  "clap",
  "dotenvy",
+ "getrandom 0.3.4",
  "rusty-s3",
  "serde_json",
  "tempfile",

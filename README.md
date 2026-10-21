@@ -90,6 +90,16 @@ cargo run -p chill-catalog -- publish
 
 Audio and covers are served as immutable and cached for a year, so a client that fetched a file never asks for it again. A changed recording needs a new name: pass a new `--id`. The tool refuses to replace an existing file unless you pass `--force`.
 
+To share music outside the main catalog, start a catalog of its own. `new` creates the file with a `url` under a random folder of the bucket, and `--catalog` points every other command at it:
+
+```bash
+cargo run -p chill-catalog -- new ~/chill/friends.json --name "Friends"
+cargo run -p chill-catalog -- --catalog ~/chill/friends.json add-track home.wav --title "Home" --artist "…"
+cargo run -p chill-catalog -- --catalog ~/chill/friends.json publish
+```
+
+The folder is hard to guess, not secret: anyone with the link can play the files, and taking access back means publishing under a new folder. Only put music there that you may share. Keep the file outside this repository, since it holds the link, and `check` flags ids that the main catalog already uses.
+
 ## Configuration
 
 Press `c` for settings: timer lengths, auto-start, the chime, notifications, and reduced motion. Changes save to `config.toml` right away, keeping anything else you wrote in it. The file is optional and lives in `~/.config/chill/` on macOS and `%APPDATA%\chill\` on Windows. These are the defaults:

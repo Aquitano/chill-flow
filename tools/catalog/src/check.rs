@@ -69,6 +69,21 @@ pub fn problems(catalog: &Catalog) -> Vec<String> {
     problems
 }
 
+/// Ids the main catalog also uses. chill keeps the main catalog's entry, so these would never show.
+pub fn shadowed(catalog: &Catalog, main: &Catalog) -> Vec<String> {
+    let tracks = catalog
+        .tracks
+        .iter()
+        .filter(|track| main.tracks.iter().any(|other| other.id == track.id))
+        .map(|track| format!("track {:?} shares its id with the main catalog, which wins", track.id));
+    let sounds = catalog
+        .ambient
+        .iter()
+        .filter(|sound| main.sound(&sound.id).is_some())
+        .map(|sound| format!("sound {:?} shares its id with the main catalog, which wins", sound.id));
+    tracks.chain(sounds).collect()
+}
+
 fn duplicates<'a>(what: &str, ids: impl Iterator<Item = &'a String>, problems: &mut Vec<String>) {
     let mut seen = HashSet::new();
     for id in ids {

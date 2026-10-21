@@ -10,9 +10,8 @@ use clap::{Args, Parser, Subcommand};
 
 use bucket::{Bucket, IMMUTABLE, SHORT_LIVED, Upload};
 
-/// The catalog compiled into chill, which is also the one published to the bucket.
+/// The main catalog, compiled into chill and published at `DEFAULT_URL`.
 const CATALOG_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../catalog.json");
-const LOCK_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../catalog.json.lock");
 
 #[derive(Parser)]
 #[command(about = "Adds tracks and ambient sounds to chill's catalog.json and publishes it to R2")]
@@ -20,6 +19,9 @@ struct Cli {
     /// Print what would be uploaded and written without touching the bucket or catalog.json
     #[arg(long, global = true)]
     dry_run: bool,
+    /// The catalog file to work on; the main catalog in this repository when left out
+    #[arg(long, global = true, value_name = "FILE")]
+    catalog: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -34,6 +36,16 @@ enum Command {
     Check,
     /// Check catalog.json, then upload it to the bucket
     Publish,
+    /// Start an added catalog in FILE, published under a random folder that is hard to guess
+    New(NewArgs),
+}
+
+#[derive(Args)]
+struct NewArgs {
+    file: PathBuf,
+    /// Shown beside the catalog's tracks in chill
+    #[arg(long)]
+    name: String,
 }
 
 #[derive(Args)]
@@ -84,44 +96,48 @@ struct SoundArgs {
 fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
     let cli = Cli::parse();
+    let file = cli.catalog.unwrap_or_else(|| PathBuf::from(CATALOG_PATH));
     match cli.command {
-        Command::AddTrack(args) => add_track(args, cli.dry_run),
-        Command::AddSound(args) => add_sound(args, cli.dry_run),
-        Command::Check => check(),
-        Command::Publish => publish(cli.dry_run),
+        Command::AddTrack(args) => add_track(&file, args, cli.dry_run),
+        Command::AddSound(args) => add_sound(&file, args, cli.dry_run),
+        Command::Check => check(&file),
+        Command::Publish => publish(&file, cli.dry_run),
+        Command::New(args) => new_catalog(args),
     }
 }
 
-fn add_track(args: TrackArgs, dry_run: bool) -> Result<()> {
-    let _lock = lock()?;
-    let mut catalog = load()?;
+fn add_track(path: &Path, args: TrackArgs, dry_run: bool) -> Result<()> {
+    let _lock = lock(path)?;
+    let mut catalog = load(path)?;
     let id = entry_id(args.id, &args.title)?;
     ensure!(
         catalog.tracks.iter().all(|track| track.id != id),
         "catalog.json already has a track with the id {id:?}"
     );
     let file = format!("{id}.mp3");
+    let key = bucket_key(&catalog, &file)?;
     let cover = args
         .cover
         .map(|path| image_type(&path).map(|(extension, content_type)| (path, extension, content_type)))
         .transpose()?;
-    let cover_key = cover
+    let cover_file = cover
         .as_ref()
         .map(|(_, extension, _)| format!("cover-{id}.{extension}"));
+    let cover_key = cover_file.as_ref().map(|file| bucket_key(&catalog, file)).transpose()?;
     let bucket = connect(
         dry_run,
         args.force,
-        [Some(&file), cover_key.as_ref()].into_iter().flatten(),
+        [Some(&key), cover_key.as_ref()].into_iter().flatten(),
     )?;
 
     let scratch = tempfile::tempdir()?;
     let encoded = scratch.path().join(&file);
     encode::track(&args.audio, &encoded)?;
-    let mut uploads = vec![mp3(&file, &encoded)?];
-    if let (Some((path, _, content_type)), Some(key)) = (&cover, &cover_key) {
-        let body = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    let mut uploads = vec![mp3(&key, &encoded)?];
+    if let (Some((cover_path, _, content_type)), Some(cover_key)) = (&cover, &cover_key) {
+        let body = std::fs::read(cover_path).with_context(|| format!("reading {}", cover_path.display()))?;
         uploads.push(Upload {
-            key: key.clone(),
+            key: cover_key.clone(),
             body,
             content_type,
             cache_control: IMMUTABLE,
@@ -132,19 +148,20 @@ fn add_track(args: TrackArgs, dry_run: bool) -> Result<()> {
         title: args.title,
         artist: args.artist,
         file,
-        cover: cover_key,
+        cover: cover_file,
         duration_sec: encode::duration_sec(&encoded)?,
         tags: args.tags,
+        catalog: None,
     };
     let entry = serde_json::to_string_pretty(&track)?;
     catalog.tracks.push(track);
     validate(&catalog)?;
-    ship(bucket.as_ref(), &uploads, &catalog, &entry)
+    ship(path, bucket.as_ref(), &uploads, &catalog, &entry)
 }
 
-fn add_sound(args: SoundArgs, dry_run: bool) -> Result<()> {
-    let _lock = lock()?;
-    let mut catalog = load()?;
+fn add_sound(path: &Path, args: SoundArgs, dry_run: bool) -> Result<()> {
+    let _lock = lock(path)?;
+    let mut catalog = load(path)?;
     let id = entry_id(args.id, &args.label)?;
     ensure!(
         catalog.sound(&id).is_none(),
@@ -156,12 +173,13 @@ fn add_sound(args: SoundArgs, dry_run: bool) -> Result<()> {
         "--start must be at least 0 and --length above 0"
     );
     let file = format!("ambient-{id}.mp3");
-    let bucket = connect(dry_run, args.force, [&file])?;
+    let key = bucket_key(&catalog, &file)?;
+    let bucket = connect(dry_run, args.force, [&key])?;
 
     let scratch = tempfile::tempdir()?;
     let encoded = scratch.path().join(&file);
     encode::ambient_loop(&args.audio, &encoded, args.start, args.length)?;
-    let uploads = [mp3(&file, &encoded)?];
+    let uploads = [mp3(&key, &encoded)?];
     let sound = AmbientSound {
         id,
         label: args.label,
@@ -172,12 +190,15 @@ fn add_sound(args: SoundArgs, dry_run: bool) -> Result<()> {
     let entry = serde_json::to_string_pretty(&sound)?;
     catalog.ambient.push(sound);
     validate(&catalog)?;
-    ship(bucket.as_ref(), &uploads, &catalog, &entry)
+    ship(path, bucket.as_ref(), &uploads, &catalog, &entry)
 }
 
-fn check() -> Result<()> {
-    let catalog = load()?;
+fn check(path: &Path) -> Result<()> {
+    let catalog = load(path)?;
     let mut problems = check::problems(&catalog);
+    if catalog.url.is_some() {
+        problems.extend(check::shadowed(&catalog, &load(Path::new(CATALOG_PATH))?));
+    }
     problems.extend(check::unreachable(&catalog));
     for problem in &problems {
         eprintln!("- {problem}");
@@ -192,12 +213,14 @@ fn check() -> Result<()> {
     Ok(())
 }
 
-fn publish(dry_run: bool) -> Result<()> {
-    let _lock = lock()?;
-    check()?;
+fn publish(path: &Path, dry_run: bool) -> Result<()> {
+    let _lock = lock(path)?;
+    check(path)?;
+    let catalog = load(path)?;
+    let url = catalog.url.as_deref().unwrap_or(catalog_schema::DEFAULT_URL);
     let upload = Upload {
-        key: "catalog.json".into(),
-        body: std::fs::read(CATALOG_PATH).context("reading catalog.json")?,
+        key: bucket_key(&catalog, url)?,
+        body: std::fs::read(path).with_context(|| format!("reading {}", path.display()))?,
         content_type: "application/json",
         cache_control: SHORT_LIVED,
     };
@@ -207,15 +230,58 @@ fn publish(dry_run: bool) -> Result<()> {
     }
     Bucket::from_env()?.put(&upload)?;
     println!("uploaded {}", upload.describe());
+    if catalog.url.is_some() {
+        println!("Share {url} so others can add it in chill with \"Add a catalog\".");
+    }
     Ok(())
+}
+
+fn new_catalog(args: NewArgs) -> Result<()> {
+    ensure!(!args.file.exists(), "{} already exists", args.file.display());
+    let mut secret = [0u8; 16];
+    getrandom::fill(&mut secret).map_err(|error| anyhow::anyhow!("could not pick a random folder: {error}"))?;
+    let folder: String = secret.iter().map(|byte| format!("{byte:02x}")).collect();
+    let url = format!("{}c/{folder}/catalog.json", public_base());
+    let catalog = Catalog {
+        name: Some(args.name),
+        url: Some(url.clone()),
+        ..Catalog::default()
+    };
+    std::fs::write(&args.file, catalog.to_json()).with_context(|| format!("writing {}", args.file.display()))?;
+    let file = args.file.display();
+    println!(
+        "Created {file}, to be published at\n  {url}\nAdd to it with `chill-catalog --catalog {file} add-track …`, then run \
+         `chill-catalog --catalog {file} publish`. Keep {file} out of this repository: anyone who reads the URL in it \
+         can play the catalog."
+    );
+    Ok(())
+}
+
+/// The folder the bucket is served from, which every catalog and file sits under.
+fn public_base() -> &'static str {
+    catalog_schema::DEFAULT_URL
+        .rsplit_once('/')
+        .map_or(catalog_schema::DEFAULT_URL, |(base, _)| {
+            &catalog_schema::DEFAULT_URL[..=base.len()]
+        })
+}
+
+/// The bucket key that `file`, named as in the catalog, is served from.
+fn bucket_key(catalog: &Catalog, file: &str) -> Result<String> {
+    let url = catalog.url(file);
+    url.strip_prefix(public_base())
+        .map(str::to_string)
+        .with_context(|| format!("{url} is not served from the bucket at {}", public_base()))
 }
 
 /// Held for a whole command, so two runs at once can't drop each other's entry or both upload the
 /// same new file. It locks a file of its own: Windows locks are mandatory, and a lock on
 /// catalog.json would stop this run from reading and writing it too.
-fn lock() -> Result<std::fs::File> {
-    let file = std::fs::File::create(LOCK_PATH).context("creating catalog.json.lock")?;
-    file.lock().context("locking catalog.json.lock")?;
+fn lock(path: &Path) -> Result<std::fs::File> {
+    let lock_path = path.with_extension("json.lock");
+    let file = std::fs::File::create(&lock_path).with_context(|| format!("creating {}", lock_path.display()))?;
+    file.lock()
+        .with_context(|| format!("locking {}", lock_path.display()))?;
     Ok(file)
 }
 
@@ -230,9 +296,14 @@ fn validate(catalog: &Catalog) -> Result<()> {
     Ok(())
 }
 
-fn load() -> Result<Catalog> {
-    let text = std::fs::read_to_string(CATALOG_PATH).context("reading catalog.json")?;
-    Catalog::parse(&text, catalog_schema::DEFAULT_URL).context("catalog.json is malformed")
+fn load(path: &Path) -> Result<Catalog> {
+    let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let malformed = || format!("{} is malformed", path.display());
+    let catalog = Catalog::parse(&text, catalog_schema::DEFAULT_URL).with_context(malformed)?;
+    match &catalog.url {
+        Some(url) => Catalog::parse(&text, url).with_context(malformed),
+        None => Ok(catalog),
+    }
 }
 
 /// The bucket to upload to, or `None` on a dry run. Refuses keys the bucket already holds
@@ -255,7 +326,7 @@ fn connect<'a>(dry_run: bool, force: bool, keys: impl IntoIterator<Item = &'a St
     Ok(Some(bucket))
 }
 
-fn ship(bucket: Option<&Bucket>, uploads: &[Upload], catalog: &Catalog, entry: &str) -> Result<()> {
+fn ship(path: &Path, bucket: Option<&Bucket>, uploads: &[Upload], catalog: &Catalog, entry: &str) -> Result<()> {
     let Some(bucket) = bucket else {
         for upload in uploads {
             println!("would upload {}", upload.describe());
@@ -267,7 +338,7 @@ fn ship(bucket: Option<&Bucket>, uploads: &[Upload], catalog: &Catalog, entry: &
         bucket.put(upload)?;
         println!("uploaded {}", upload.describe());
     }
-    std::fs::write(CATALOG_PATH, catalog.to_json()).context("writing catalog.json")?;
+    std::fs::write(path, catalog.to_json()).with_context(|| format!("writing {}", path.display()))?;
     println!("added to catalog.json:\n{entry}\nRun `publish` to upload the catalog.");
     Ok(())
 }
@@ -347,7 +418,7 @@ mod tests {
             force: false,
         };
 
-        let error = add_track(args, true).unwrap_err();
+        let error = add_track(Path::new(CATALOG_PATH), args, true).unwrap_err();
 
         assert!(error.to_string().contains("nothing was uploaded"), "{error}");
     }
@@ -368,6 +439,33 @@ mod tests {
     }
 
     #[test]
+    fn an_added_catalog_uploads_beside_its_url_and_flags_ids_the_main_catalog_shadows() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("friends.json");
+        let main = repo_catalog();
+        let mut catalog = Catalog {
+            url: Some(format!("{}c/k3x9/catalog.json", public_base())),
+            ambient: vec![main.ambient[0].clone()],
+            ..Catalog::default()
+        };
+        std::fs::write(&path, catalog.to_json()).unwrap();
+        catalog = load(&path).unwrap();
+
+        assert_eq!(
+            bucket_key(&catalog, "night-drive.mp3").unwrap(),
+            "c/k3x9/night-drive.mp3"
+        );
+        assert_eq!(bucket_key(&main, "night-drive.mp3").unwrap(), "night-drive.mp3");
+        assert_eq!(
+            check::shadowed(&catalog, &main),
+            [format!(
+                "sound {:?} shares its id with the main catalog, which wins",
+                main.ambient[0].id
+            )]
+        );
+    }
+
+    #[test]
     fn added_entries_survive_the_trip_through_the_apps_parser() {
         let mut catalog = repo_catalog();
         catalog.tracks.push(CatalogTrack {
@@ -378,6 +476,7 @@ mod tests {
             cover: None,
             duration_sec: 184,
             tags: vec!["focus".into()],
+            catalog: None,
         });
         catalog.ambient.push(AmbientSound {
             id: "hail".into(),
