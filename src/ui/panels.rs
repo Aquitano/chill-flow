@@ -762,6 +762,10 @@ pub fn focus(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant)
     let timer = &app.timer;
     let glow = ui.glow.value(now).max(if timer.is_running() { 0.25 } else { 0.0 });
     let inner = panel(buf, area, "Focus", glow, ui);
+    let close = Rect::new(area.right().saturating_sub(4), area.y, 3, 1);
+    let close_color = if ui.hovered(close) { theme.text() } else { theme.faint() };
+    put(buf, close.x, close.y, " × ", Style::new().fg(close_color));
+    ui.hit(close, Hit::Act(Action::ToggleTimerPanel));
     if inner.height < 8 || inner.width < 34 {
         return false;
     }

@@ -44,6 +44,11 @@ pub fn commands(app: &App) -> Vec<Command> {
         command("Timer: start or pause", "t", Action::TimerToggle),
         command("Timer: reset", "T", Action::TimerReset),
         command("Timer: skip to the next phase", "x", Action::TimerSkip),
+        command(
+            if app.timer_hidden { "Timer: show" } else { "Timer: hide" },
+            "F",
+            Action::ToggleTimerPanel,
+        ),
     ];
     for mode in TimerMode::PRESETS {
         let label = match mode {
@@ -354,7 +359,7 @@ fn confirm(buf: &mut Buffer, screen: Rect, ui: &mut Ui, message: &str) {
     );
 }
 
-const KEYS: [(&str, &str); 29] = [
+const KEYS: [(&str, &str); 30] = [
     ("space", "play or pause the sound"),
     ("n / p", "next / previous"),
     (", / .", "back / forward 10 s"),
@@ -365,6 +370,7 @@ const KEYS: [(&str, &str); 29] = [
     ("t / T", "start or pause / reset timer"),
     ("x", "skip to the next phase"),
     ("m", "next timer preset"),
+    ("F", "show or hide the timer"),
     ("o", "open or paste a YouTube link"),
     ("tab", "move between panels"),
     ("1-5", "library tabs"),

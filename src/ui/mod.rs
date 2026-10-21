@@ -362,12 +362,16 @@ impl Ui {
             let queue_height = (center.height / 5).max(5);
             let [player, queue] =
                 Layout::vertical([Constraint::Fill(1), Constraint::Length(queue_height)]).areas(center);
-            let [focus, ambience] = Layout::vertical([Constraint::Length(13), Constraint::Fill(1)]).areas(side);
             panels::library(buf, library, app, self, now);
             panels::player(buf, player, app, self, now);
             panels::queue(buf, queue, app, self);
-            clock_shown = panels::focus(buf, focus, app, self, now);
-            panels::ambience(buf, ambience, app, self, now);
+            if app.timer_hidden {
+                panels::ambience(buf, side, app, self, now);
+            } else {
+                let [focus, ambience] = Layout::vertical([Constraint::Length(13), Constraint::Fill(1)]).areas(side);
+                clock_shown = panels::focus(buf, focus, app, self, now);
+                panels::ambience(buf, ambience, app, self, now);
+            }
         } else if medium {
             let [library, center] = Layout::horizontal([Constraint::Length(36), Constraint::Fill(1)])
                 .spacing(1)
@@ -375,7 +379,8 @@ impl Ui {
             let [player, bottom] = Layout::vertical([Constraint::Fill(1), Constraint::Length(13)]).areas(center);
             panels::library(buf, library, app, self, now);
             panels::player(buf, player, app, self, now);
-            if split {
+            let timer = !app.timer_hidden;
+            if split && timer {
                 let [focus, side] = Layout::horizontal([Constraint::Length(40), Constraint::Fill(1)])
                     .spacing(1)
                     .areas(bottom);
@@ -386,9 +391,9 @@ impl Ui {
                 }
             } else {
                 match self.focus {
-                    Panel::Library => clock_shown = panels::focus(buf, bottom, app, self, now),
+                    Panel::Library if timer => clock_shown = panels::focus(buf, bottom, app, self, now),
                     Panel::Queue => panels::queue(buf, bottom, app, self),
-                    Panel::Ambience => panels::ambience(buf, bottom, app, self, now),
+                    _ => panels::ambience(buf, bottom, app, self, now),
                 }
             }
         } else {
@@ -402,7 +407,8 @@ impl Ui {
                 Panel::Ambience => panels::ambience(buf, bottom, app, self, now),
             }
         }
-        panels::header(buf, header, app, self, now, !clock_shown);
+        let show_timer = !clock_shown && (!app.timer_hidden || app.timer.is_running());
+        panels::header(buf, header, app, self, now, show_timer);
 
         overlay::toasts(buf, footer, self, now);
 
@@ -437,7 +443,7 @@ mod tests {
     }
 
     fn random_event(rng: &mut fastrand::Rng, width: u16, height: u16) -> Event {
-        const KEYS: &str = " npfsrtTxmo:?ic[]12345adjkhlgG/JK0,.+-<>qyz";
+        const KEYS: &str = " npfsrtTxmFo:?ic[]12345adjkhlgG/JK0,.+-<>qyz";
         let code = |rng: &mut fastrand::Rng| match rng.u8(..12) {
             0 => KeyCode::Enter,
             1 => KeyCode::Esc,
@@ -631,6 +637,32 @@ mod tests {
         }
         assert!(ui.bars.is_still());
         assert!(!ui.is_animating(Instant::now() + Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn a_hidden_timer_leaves_the_page_and_shows_in_the_header_only_while_running() {
+        let mut app = offline_app();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
+        let mut terminal = Terminal::new(TestBackend::new(160, 44)).unwrap();
+        let mut draw = |app: &mut TestApp| {
+            terminal.draw(|frame| ui.draw(frame, app)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let row = |y: u16| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            };
+            let page: String = (1..buffer.area.height).map(row).collect();
+            (row(0).contains("focus "), page.contains(" Focus "))
+        };
+        assert_eq!(draw(&mut app), (false, true));
+
+        app.dispatch(Action::ToggleTimerPanel);
+        assert_eq!(draw(&mut app), (false, false));
+
+        app.dispatch(Action::TimerToggle);
+        app.dispatch(Action::ToggleTimerPanel);
+        assert_eq!(draw(&mut app), (true, false));
     }
 
     #[test]

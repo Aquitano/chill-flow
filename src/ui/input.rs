@@ -182,6 +182,7 @@ fn key_pressed(app: &mut App, ui: &mut Ui, key: KeyEvent) {
         KeyCode::Char('T') => Some(Action::TimerReset),
         KeyCode::Char('x') => Some(Action::TimerSkip),
         KeyCode::Char('m') => Some(Action::CycleTimerMode),
+        KeyCode::Char('F') => Some(Action::ToggleTimerPanel),
         KeyCode::Char('o') => Some(Action::OpenPrompt(Prompt::OpenUrl)),
         KeyCode::Char(':') => Some(Action::OpenPalette),
         KeyCode::Char('?') => Some(Action::OpenHelp),

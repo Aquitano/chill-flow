@@ -168,6 +168,7 @@ pub struct App {
     /// 0 favors the music, 1 the ambience, and 0.5 leaves both at their own levels.
     pub balance: f32,
     pub timer: Timer,
+    pub timer_hidden: bool,
     pub focus_days: FocusDays,
     focus_block: Option<FocusBlock>,
     pub stream: Stream,
@@ -241,6 +242,7 @@ impl App {
         let zone = TimeZone::system();
         let mut app = App {
             timer: Timer::new(session.timer, config.pomodoro),
+            timer_hidden: session.timer_hidden,
             focus_days: store.focus_days(7, &zone).unwrap_or(FocusDays { days: Vec::new() }),
             saved: store.saved().unwrap_or_default(),
             likes: Vec::new(),
@@ -881,6 +883,16 @@ impl App {
     }
 
     pub fn dispatch(&mut self, action: Action) {
+        if matches!(
+            action,
+            Action::TimerToggle
+                | Action::TimerReset
+                | Action::TimerSkip
+                | Action::SetTimerMode(_)
+                | Action::CycleTimerMode
+        ) {
+            self.timer_hidden = false;
+        }
         match action {
             Action::TogglePlay => self.toggle_play(),
             Action::Next => self.skip(true),
@@ -945,6 +957,7 @@ impl App {
                     .map_or(0, |i| i + 1);
                 self.set_timer_mode(presets[index % presets.len()]);
             }
+            Action::ToggleTimerPanel => self.timer_hidden = !self.timer_hidden,
             Action::SetLevel(id, level) => {
                 self.set_level(&id, level);
                 self.mix_name = self.matching_mix_name();
@@ -1756,6 +1769,7 @@ impl App {
             balance: self.balance,
             levels: self.levels.clone(),
             timer: self.timer.mode(),
+            timer_hidden: self.timer_hidden,
             shuffle: self.queue.shuffle,
             repeat: self.queue.repeat,
         }
@@ -2592,6 +2606,16 @@ mod tests {
             app.dispatch(Action::TogglePlay);
             assert_eq!((app.is_playing(), app.timer.is_running()), (false, timing));
         }
+    }
+
+    #[test]
+    fn a_hidden_timer_is_saved_and_comes_back_once_it_is_used() {
+        let mut app = app();
+        app.dispatch(Action::ToggleTimerPanel);
+        assert!(app.session().timer_hidden);
+
+        app.dispatch(Action::TimerToggle);
+        assert_eq!((app.timer_hidden, app.timer.is_running()), (false, true));
     }
 
     #[test]
