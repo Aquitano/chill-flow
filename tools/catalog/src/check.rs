@@ -81,7 +81,12 @@ pub fn shadowed(catalog: &Catalog, main: &Catalog) -> Vec<String> {
         .iter()
         .filter(|sound| main.sound(&sound.id).is_some())
         .map(|sound| format!("sound {:?} shares its id with the main catalog, which wins", sound.id));
-    tracks.chain(sounds).collect()
+    let mixes = catalog
+        .mixes
+        .iter()
+        .filter(|mix| main.mixes.iter().any(|other| other.id == mix.id))
+        .map(|mix| format!("mix {:?} shares its id with the main catalog, which wins", mix.id));
+    tracks.chain(sounds).chain(mixes).collect()
 }
 
 fn duplicates<'a>(what: &str, ids: impl Iterator<Item = &'a String>, problems: &mut Vec<String>) {

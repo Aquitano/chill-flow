@@ -252,7 +252,10 @@ fn new_catalog(args: NewArgs, dry_run: bool) -> Result<()> {
         println!("would create {file}, to be published at\n  {url}");
         return Ok(());
     }
-    std::fs::write(&args.file, catalog.to_json()).with_context(|| format!("writing {file}"))?;
+    // Opened with create_new, so a second `new` started at the same moment can't overwrite it.
+    std::fs::File::create_new(&args.file)
+        .and_then(|mut created| std::io::Write::write_all(&mut created, catalog.to_json().as_bytes()))
+        .with_context(|| format!("creating {file}"))?;
     println!(
         "Created {file}, to be published at\n  {url}\nAdd to it with `chill-catalog --catalog {file} add-track …`, then run \
          `chill-catalog --catalog {file} publish`. Keep {file} out of this repository: anyone who reads the URL in it \

@@ -22,6 +22,8 @@ use crate::youtube;
 pub enum Job {
     Catalog {
         url: String,
+        /// The `catalog_epoch` the fetch started in.
+        epoch: u64,
         result: Result<Catalog>,
     },
     CatalogAdded {
@@ -134,6 +136,8 @@ pub struct App {
     catalogs: Vec<(String, Catalog)>,
     /// Catalogs asked for with "Add a catalog" whose first fetch hasn't come back.
     adding: Vec<String>,
+    /// Moves on with every removal, so a fetch started before it can't bring old contents back.
+    catalog_epoch: u64,
     pub catalog: Catalog,
     pub engine: Engine,
     pub queue: Queue,
@@ -220,6 +224,7 @@ impl App {
             store,
             catalogs,
             adding: Vec::new(),
+            catalog_epoch: 0,
             catalog,
             engine,
             queue: Queue::new(session.shuffle, session.repeat),
@@ -327,10 +332,10 @@ impl App {
     fn fetch_catalogs(&self) {
         for (url, _) in &self.catalogs {
             let jobs = self.jobs.clone();
-            let (cache, url) = (self.cache_dir.clone(), url.clone());
+            let (cache, url, epoch) = (self.cache_dir.clone(), url.clone(), self.catalog_epoch);
             std::thread::spawn(move || {
                 let result = catalog::fetch(&cache, &url);
-                let _ = jobs.send(Job::Catalog { url, result });
+                let _ = jobs.send(Job::Catalog { url, epoch, result });
             });
         }
     }
@@ -364,6 +369,7 @@ impl App {
     }
 
     fn remove_catalog(&mut self, url: &str) {
+        self.catalog_epoch += 1;
         self.config.catalogs.retain(|known| known != url);
         self.catalogs
             .retain(|(known, _)| known != url || known == &self.config.catalog_url);
@@ -1727,9 +1733,11 @@ impl App {
 
     fn handle_job(&mut self, job: Job) {
         match job {
+            Job::Catalog { epoch, .. } if epoch != self.catalog_epoch => {}
             Job::Catalog {
                 url,
                 result: Ok(catalog),
+                ..
             } => {
                 if let Some((_, slot)) = self.catalogs.iter_mut().find(|(known, _)| known == &url) {
                     *slot = catalog;
@@ -1741,6 +1749,7 @@ impl App {
             Job::Catalog {
                 url,
                 result: Err(error),
+                ..
             } => {
                 let empty =
                     self.catalogs.iter().skip(1).any(|(known, catalog)| {
@@ -1894,6 +1903,7 @@ const TEST_CATALOG_URL: &str = "http://127.0.0.1:9/catalog.json";
 fn main_catalog(catalog: Catalog) -> Job {
     Job::Catalog {
         url: TEST_CATALOG_URL.into(),
+        epoch: 0,
         result: Ok(catalog),
     }
 }
