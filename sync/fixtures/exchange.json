@@ -1,0 +1,243 @@
+{
+  "request": {
+    "cursor": 0,
+    "changes": [
+      {
+        "kind": "like",
+        "id": "r2:rainy-window",
+        "updatedAt": 1761000000000,
+        "deleted": false,
+        "body": {
+          "item": {
+            "key": "r2:rainy-window",
+            "title": "Rainy Window",
+            "artist": "Lofi Fruits",
+            "duration": 154,
+            "cover": "https://catalog.chill.example/covers/rainy-window.jpg",
+            "play": {
+              "kind": "file",
+              "url": "https://catalog.chill.example/tracks/rainy-window.mp3"
+            }
+          },
+          "addedAt": 1761000000
+        }
+      },
+      {
+        "kind": "like",
+        "id": "yt:5yx6BWlEVcY",
+        "updatedAt": 1761000300000,
+        "deleted": true,
+        "body": null
+      },
+      {
+        "kind": "saved",
+        "id": "jfKfPfyJRdk",
+        "updatedAt": 1761000600000,
+        "deleted": false,
+        "body": {
+          "saved": {
+            "id": "jfKfPfyJRdk",
+            "url": "https://www.youtube.com/watch?v=jfKfPfyJRdk",
+            "title": "lofi hip hop radio - beats to relax/study to",
+            "channel": "Lofi Girl",
+            "items": [
+              {
+                "key": "yt:jfKfPfyJRdk",
+                "title": "lofi hip hop radio - beats to relax/study to",
+                "artist": "Lofi Girl",
+                "duration": null,
+                "cover": null,
+                "play": {
+                  "kind": "youtube",
+                  "url": "https://www.youtube.com/watch?v=jfKfPfyJRdk",
+                  "live": true
+                }
+              }
+            ]
+          },
+          "addedAt": 1761000600
+        }
+      },
+      {
+        "kind": "scene",
+        "id": "Late night reading",
+        "updatedAt": 1761000900000,
+        "deleted": false,
+        "body": {
+          "name": "Late night reading",
+          "source": {
+            "kind": "liked"
+          },
+          "item": null,
+          "levels": {
+            "rain": 60,
+            "fireplace": 35
+          },
+          "timer": {
+            "kind": "focus",
+            "minutes": 50
+          },
+          "balance": 0.5
+        }
+      },
+      {
+        "kind": "mix",
+        "id": "Cafe in the rain",
+        "updatedAt": 1761001200000,
+        "deleted": false,
+        "body": {
+          "cafe": 45,
+          "rain": 70,
+          "brown-noise": 20
+        }
+      },
+      {
+        "kind": "focus",
+        "id": "0b6f3c8a-91d4-4c2e-9f7a-5e1d2b8c4a60",
+        "updatedAt": 1761001500000,
+        "deleted": false,
+        "body": {
+          "startedAt": 1761000000,
+          "focusedSec": 1500,
+          "plannedSec": 1500,
+          "completed": true
+        }
+      },
+      {
+        "kind": "setting",
+        "id": "pomodoro",
+        "updatedAt": 1761001800000,
+        "deleted": false,
+        "body": {
+          "focus_minutes": 25,
+          "break_minutes": 5,
+          "long_break_minutes": 15,
+          "long_break_every": 4,
+          "auto_start_breaks": true,
+          "auto_start_focus": true
+        }
+      }
+    ]
+  },
+  "response": {
+    "cursor": 7,
+    "changes": [
+      {
+        "kind": "like",
+        "id": "r2:rainy-window",
+        "updatedAt": 1761000000000,
+        "deleted": false,
+        "body": {
+          "item": {
+            "key": "r2:rainy-window",
+            "title": "Rainy Window",
+            "artist": "Lofi Fruits",
+            "duration": 154,
+            "cover": "https://catalog.chill.example/covers/rainy-window.jpg",
+            "play": {
+              "kind": "file",
+              "url": "https://catalog.chill.example/tracks/rainy-window.mp3"
+            }
+          },
+          "addedAt": 1761000000
+        }
+      },
+      {
+        "kind": "like",
+        "id": "yt:5yx6BWlEVcY",
+        "updatedAt": 1761000300000,
+        "deleted": true,
+        "body": null
+      },
+      {
+        "kind": "saved",
+        "id": "jfKfPfyJRdk",
+        "updatedAt": 1761000600000,
+        "deleted": false,
+        "body": {
+          "saved": {
+            "id": "jfKfPfyJRdk",
+            "url": "https://www.youtube.com/watch?v=jfKfPfyJRdk",
+            "title": "lofi hip hop radio - beats to relax/study to",
+            "channel": "Lofi Girl",
+            "items": [
+              {
+                "key": "yt:jfKfPfyJRdk",
+                "title": "lofi hip hop radio - beats to relax/study to",
+                "artist": "Lofi Girl",
+                "duration": null,
+                "cover": null,
+                "play": {
+                  "kind": "youtube",
+                  "url": "https://www.youtube.com/watch?v=jfKfPfyJRdk",
+                  "live": true
+                }
+              }
+            ]
+          },
+          "addedAt": 1761000600
+        }
+      },
+      {
+        "kind": "scene",
+        "id": "Late night reading",
+        "updatedAt": 1761000900000,
+        "deleted": false,
+        "body": {
+          "name": "Late night reading",
+          "source": {
+            "kind": "liked"
+          },
+          "item": null,
+          "levels": {
+            "rain": 60,
+            "fireplace": 35
+          },
+          "timer": {
+            "kind": "focus",
+            "minutes": 50
+          },
+          "balance": 0.5
+        }
+      },
+      {
+        "kind": "mix",
+        "id": "Cafe in the rain",
+        "updatedAt": 1761001200000,
+        "deleted": false,
+        "body": {
+          "cafe": 45,
+          "rain": 70,
+          "brown-noise": 20
+        }
+      },
+      {
+        "kind": "focus",
+        "id": "0b6f3c8a-91d4-4c2e-9f7a-5e1d2b8c4a60",
+        "updatedAt": 1761001500000,
+        "deleted": false,
+        "body": {
+          "startedAt": 1761000000,
+          "focusedSec": 1500,
+          "plannedSec": 1500,
+          "completed": true
+        }
+      },
+      {
+        "kind": "setting",
+        "id": "pomodoro",
+        "updatedAt": 1761001800000,
+        "deleted": false,
+        "body": {
+          "focus_minutes": 25,
+          "break_minutes": 5,
+          "long_break_minutes": 15,
+          "long_break_every": 4,
+          "auto_start_breaks": true,
+          "auto_start_focus": true
+        }
+      }
+    ],
+    "more": false
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "chill-sync",
+  "main": "src/index.ts",
+  // The newest date the pinned workerd supports; tests fail on a later one.
+  "compatibility_date": "2026-10-19",
+  "workers_dev": true,
+  "durable_objects": {
+    "bindings": [{ "name": "SYNC_SPACE", "class_name": "SyncSpace" }]
+  },
+  "exports": {
+    "SyncSpace": { "type": "durable-object", "storage": "sqlite" }
+  },
+  "ratelimits": [
+    {
+      "name": "SPACE_CREATION_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 5, "period": 60 }
+    },
+    {
+      "name": "SYNC_LIMITER",
+      "namespace_id": "1002",
+      "simple": { "limit": 30, "period": 60 }
+    }
+  ],
+  "secrets": { "required": ["SYNC_SECRET"] },
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.01 }
+  }
+}
