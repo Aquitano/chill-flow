@@ -91,6 +91,14 @@ pub fn commands(app: &App) -> Vec<Command> {
             action: Action::Remove(Removal::Catalog(url.to_string())),
         });
     }
+    if app.sync_key().is_some() {
+        list.push(command("Sync now", "", Action::SyncNow));
+        list.push(command("Copy sync key", "", Action::CopySyncKey));
+        list.push(command("Turn off sync", "", Action::TurnOffSync));
+    } else {
+        list.push(command("Turn on sync", "", Action::TurnOnSync));
+        list.push(command("Join a sync space…", "", Action::OpenPrompt(Prompt::JoinSync)));
+    }
     list.push(command("Focus stats", "i", Action::OpenStats));
     list.push(command("Settings", "c", Action::OpenSettings));
     list.push(command("Keyboard shortcuts", "?", Action::OpenHelp));

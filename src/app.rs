@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
@@ -15,6 +16,7 @@ use crate::media::{MediaCommand, NowPlaying};
 use crate::model::{self, Item, Playable, Playback, Saved, Scene, Session, Source};
 use crate::queue::Queue;
 use crate::store::{FocusDays, Store};
+use crate::sync;
 use crate::timer::{Phase, PhaseEnded, Timer, TimerMode};
 use crate::tools::Tool;
 use crate::youtube;
@@ -29,6 +31,11 @@ pub enum Job {
     CatalogAdded {
         url: String,
         result: Result<Catalog>,
+    },
+    SpaceCreated(Result<String>),
+    Synced {
+        manual: bool,
+        result: Result<sync::Outcome>,
     },
     Inspected {
         id: u64,
@@ -180,8 +187,15 @@ pub struct App {
     zone: TimeZone,
     session_saved_at: Instant,
     ticked_at: Instant,
+    database: PathBuf,
+    sync_token: Option<String>,
+    syncing: bool,
+    synced_at: Option<Instant>,
     pub quit: bool,
 }
+
+/// How often a running chill syncs, besides on start and on quit.
+const SYNC_EVERY: Duration = Duration::from_secs(60 * 60);
 
 const LOOKING_UP: &str = "Looking up that link…";
 
@@ -200,10 +214,11 @@ impl App {
         let Paths {
             config_file,
             cache: cache_dir,
-            ..
+            database,
         } = paths;
         let (jobs, inbox) = mpsc::channel();
         let session = store.session();
+        let sync_token = store.sync_token();
         let catalogs: Vec<(String, Catalog)> = std::iter::once(&config.catalog_url)
             .chain(&config.catalogs)
             .enumerate()
@@ -257,6 +272,10 @@ impl App {
             zone,
             session_saved_at: Instant::now(),
             ticked_at: Instant::now(),
+            sync_token,
+            database,
+            syncing: false,
+            synced_at: None,
             quit: false,
         };
         app.refresh_mixes();
@@ -371,11 +390,37 @@ impl App {
     fn remove_catalog(&mut self, url: &str) {
         self.catalog_epoch += 1;
         self.config.catalogs.retain(|known| known != url);
+        let _ = self.store.touch_setting("catalogs");
         self.catalogs
             .retain(|(known, _)| known != url || known == &self.config.catalog_url);
         catalog::forget(&self.cache_dir, url);
         self.save_config();
         self.merge_catalogs();
+    }
+
+    /// Replaces the added catalogs with `urls`, as another machine left them.
+    fn set_added_catalogs(&mut self, urls: Vec<String>) {
+        let mut previous = std::mem::take(&mut self.catalogs);
+        let wanted: Vec<String> = std::iter::once(self.config.catalog_url.clone())
+            .chain(urls.clone())
+            .collect();
+        for (url, _) in previous.iter().filter(|(url, _)| !wanted.contains(url)) {
+            catalog::forget(&self.cache_dir, url);
+        }
+        self.catalogs = wanted
+            .into_iter()
+            .enumerate()
+            .map(|(index, url)| {
+                let catalog = match previous.iter().position(|(known, _)| known == &url) {
+                    Some(position) => previous.swap_remove(position).1,
+                    None => catalog::offline(&self.cache_dir, &url, index == 0),
+                };
+                (url, catalog)
+            })
+            .collect();
+        self.config.catalogs = urls;
+        self.merge_catalogs();
+        self.fetch_catalogs();
     }
 
     fn merge_catalogs(&mut self) {
@@ -932,8 +977,13 @@ impl App {
             Action::LoadScene(index) => self.load_scene(index),
             Action::Submit(prompt, text) => self.submit(prompt, text.trim()),
             Action::AdjustSetting(setting, delta) => self.adjust_setting(setting, delta),
+            Action::TurnOnSync => self.turn_on_sync(),
+            Action::SyncNow => self.start_sync(true),
+            Action::LeaveSync => self.leave_sync(),
             Action::Quit => self.quit = true,
-            Action::ShowTab(_)
+            Action::TurnOffSync
+            | Action::CopySyncKey
+            | Action::ShowTab(_)
             | Action::RemoveRow(_)
             | Action::Focus(_)
             | Action::OpenPrompt(_)
@@ -1243,6 +1293,11 @@ impl App {
             Prompt::OpenUrl => self.toast(Tone::Error, "That doesn't look like a link"),
             Prompt::AddCatalog if text.starts_with("https://") || text.starts_with("http://") => self.add_catalog(text),
             Prompt::AddCatalog => self.toast(Tone::Error, "A catalog is a link to its catalog.json"),
+            Prompt::JoinSync if self.sync_token.is_some() => {
+                self.toast(Tone::Error, "This machine already syncs. Turn off sync first.");
+            }
+            Prompt::JoinSync if text.contains('.') && !text.contains(char::is_whitespace) => self.join_sync(text),
+            Prompt::JoinSync => self.toast(Tone::Error, "That doesn't look like a sync key"),
             Prompt::SaveScene => {
                 let scene = Scene {
                     name: text.to_string(),
@@ -1493,7 +1548,127 @@ impl App {
             Setting::ReduceMotion => self.config.reduce_motion = !self.config.reduce_motion,
         }
         self.timer.set_settings(self.config.pomodoro);
+        let synced_as = match setting {
+            Setting::Chime => "chime",
+            Setting::Notifications => "notifications",
+            Setting::ReduceMotion => "reduce_motion",
+            _ => "pomodoro",
+        };
+        let _ = self.store.touch_setting(synced_as);
         self.save_config();
+    }
+
+    pub fn sync_key(&self) -> Option<&str> {
+        self.sync_token.as_deref()
+    }
+
+    fn turn_on_sync(&mut self) {
+        if self.sync_token.is_some() {
+            return;
+        }
+        self.toast(Tone::Info, "Creating a sync space…");
+        let (jobs, server) = (self.jobs.clone(), self.config.sync_url.clone());
+        std::thread::spawn(move || {
+            let _ = jobs.send(Job::SpaceCreated(sync::create_space(&server)));
+        });
+    }
+
+    fn join_sync(&mut self, token: &str) {
+        let joined = self
+            .store
+            .set_sync_token(Some(token))
+            .and_then(|()| self.store.queue_everything_for_sync(&sync::SETTINGS));
+        if let Err(error) = joined {
+            self.toast(Tone::Error, format!("Could not turn on sync: {error}"));
+            return;
+        }
+        self.sync_token = Some(token.to_string());
+        self.start_sync(true);
+    }
+
+    fn leave_sync(&mut self) {
+        match self.store.set_sync_token(None) {
+            Ok(()) => {
+                self.sync_token = None;
+                self.toast(Tone::Done, "Sync is off. This machine keeps everything it has.");
+            }
+            Err(error) => self.toast(Tone::Error, format!("Could not turn off sync: {error}")),
+        }
+    }
+
+    /// The current value of every setting in `sync::SETTINGS`.
+    fn sync_settings(&self) -> BTreeMap<String, serde_json::Value> {
+        let config = &self.config;
+        BTreeMap::from([
+            (
+                "pomodoro".into(),
+                serde_json::to_value(config.pomodoro).unwrap_or_default(),
+            ),
+            ("chime".into(), config.chime.into()),
+            ("notifications".into(), config.notifications.into()),
+            ("reduce_motion".into(), config.reduce_motion.into()),
+            ("catalogs".into(), config.catalogs.clone().into()),
+        ])
+    }
+
+    fn apply_synced_settings(&mut self, settings: Vec<(String, serde_json::Value)>) {
+        if settings.is_empty() {
+            return;
+        }
+        for (name, value) in settings {
+            let flag = value.as_bool();
+            match (name.as_str(), flag) {
+                ("chime", Some(on)) => self.config.chime = on,
+                ("notifications", Some(on)) => self.config.notifications = on,
+                ("reduce_motion", Some(on)) => self.config.reduce_motion = on,
+                ("pomodoro", _) => {
+                    if let Ok(pomodoro) = serde_json::from_value(value) {
+                        self.config.pomodoro = pomodoro;
+                    }
+                }
+                ("catalogs", _) => {
+                    if let Ok(urls) = serde_json::from_value::<Vec<String>>(value)
+                        && urls != self.config.catalogs
+                    {
+                        self.set_added_catalogs(urls);
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.timer.set_settings(self.config.pomodoro);
+        self.save_config();
+    }
+
+    fn start_sync(&mut self, manual: bool) {
+        let Some(token) = self.sync_token.clone() else { return };
+        if self.syncing {
+            return;
+        }
+        self.syncing = true;
+        self.synced_at = Some(Instant::now());
+        let (jobs, database, server) = (self.jobs.clone(), self.database.clone(), self.config.sync_url.clone());
+        let settings = self.sync_settings();
+        std::thread::spawn(move || {
+            let result = sync::run(&database, &server, &token, &settings);
+            let _ = jobs.send(Job::Synced { manual, result });
+        });
+    }
+
+    /// One last sync on quit, so the next machine sees this session. It gives up after a few
+    /// seconds rather than hold the terminal.
+    fn sync_before_quitting(&self) {
+        let Some(token) = self.sync_token.clone() else { return };
+        let (database, server, settings) = (
+            self.database.clone(),
+            self.config.sync_url.clone(),
+            self.sync_settings(),
+        );
+        let (done, finished) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = done.send(sync::run(&database, &server, &token, &settings).is_ok());
+        });
+        let _ = finished.recv_timeout(Duration::from_secs(5));
     }
 
     fn save_config(&mut self) {
@@ -1537,6 +1712,7 @@ impl App {
         self.pending_resolve = None;
         self.save_focus_block(Instant::now());
         let _ = self.store.save_session(&self.session());
+        self.sync_before_quitting();
     }
 
     /// Everything that happens without input: finished jobs, audio events, the timer.
@@ -1549,6 +1725,9 @@ impl App {
             self.set_timer_running_at(true, now);
         }
         self.ticked_at = now;
+        if self.sync_token.is_some() && self.synced_at.is_none_or(|at| now.duration_since(at) >= SYNC_EVERY) {
+            self.start_sync(false);
+        }
         // Each resolve is a yt-dlp process, so skipping through a playlist settles first.
         if let Some((_, _, asked)) = &self.pending_resolve
             && now.duration_since(*asked) >= Duration::from_millis(300)
@@ -1775,6 +1954,7 @@ impl App {
                 );
                 self.config.catalogs.push(url.clone());
                 self.catalogs.push((url, catalog));
+                let _ = self.store.touch_setting("catalogs");
                 self.save_config();
                 self.merge_catalogs();
                 self.toast(Tone::Done, message);
@@ -1785,6 +1965,41 @@ impl App {
             } => {
                 self.adding.retain(|known| known != &url);
                 self.toast(Tone::Error, format!("Could not add that catalog: {error:#}"));
+            }
+            Job::SpaceCreated(Ok(token)) => {
+                self.toast(
+                    Tone::Done,
+                    "Sync is on. To add another machine, \"Copy sync key\" here and \"Join a sync space\" there.",
+                );
+                self.join_sync(&token);
+            }
+            Job::SpaceCreated(Err(error)) => {
+                self.toast(Tone::Error, format!("Could not turn on sync: {error:#}"));
+            }
+            Job::Synced { manual, result } => {
+                self.syncing = false;
+                match result {
+                    Ok(outcome) => {
+                        if outcome.library_changed {
+                            self.reload_library();
+                            self.refresh_stats();
+                        }
+                        self.apply_synced_settings(outcome.settings);
+                        if manual {
+                            self.toast(Tone::Done, "Synced");
+                        }
+                    }
+                    Err(error) if error.is::<sync::Rejected>() => {
+                        let _ = self.store.set_sync_token(None);
+                        self.sync_token = None;
+                        self.toast(
+                            Tone::Error,
+                            "The sync server did not accept the sync key, so sync is off",
+                        );
+                    }
+                    Err(error) if manual => self.toast(Tone::Error, format!("Could not sync: {error:#}")),
+                    Err(_) => {}
+                }
             }
             Job::Inspected { id, result } => {
                 if !self.inspection.as_ref().is_some_and(|inspection| inspection.id == id) {
@@ -2041,6 +2256,28 @@ mod tests {
         app.scenes[0].playback.legacy_item_key = Some(item.key.clone());
         app.load_scene(0);
         assert_eq!(app.current(), Some(&item));
+    }
+
+    #[test]
+    fn settings_from_another_machine_apply_here_and_every_synced_setting_is_sent() {
+        let mut app = app();
+        let url = "http://127.0.0.1:9/friends/catalog.json";
+
+        app.apply_synced_settings(vec![
+            ("chime".into(), true.into()),
+            ("catalogs".into(), serde_json::json!([url])),
+        ]);
+
+        assert!(app.config.chime);
+        assert_eq!(app.config.catalogs, [url]);
+        assert_eq!(app.added_catalogs().count(), 1);
+        assert!(config::load(app.config_file()).unwrap().chime);
+        let mut synced: Vec<&str> = sync::SETTINGS.to_vec();
+        synced.sort_unstable();
+        assert_eq!(
+            app.sync_settings().keys().map(String::as_str).collect::<Vec<_>>(),
+            synced
+        );
     }
 
     #[test]

@@ -100,6 +100,12 @@ cargo run -p chill-catalog -- --catalog ~/chill/friends.json publish
 
 The folder is hard to guess, not secret: anyone with the link can play the files, and taking access back means publishing under a new folder. Only put music there that you may share. Keep the file outside this repository, since it holds the link, and `check` flags ids that the main catalog already uses.
 
+## Sync
+
+Sync carries your library, likes, scenes, mixes, focus history, and settings between machines. It is off until you search for **Turn on sync** in the command palette, which creates a sync space on the server. To add another machine, run **Copy sync key** on the first and paste the key into **Join a sync space** on the second. The key is the only thing that opens the space, so keep it like a password.
+
+chill syncs when it starts, every hour while it runs, and when it quits, or right away with **Sync now**. Everything still lives in `chill.db` on each machine, so chill works offline and catches up on the next sync. When the same item changed on two machines, the later change wins. **Turn off sync** stops syncing and keeps everything on the machine. The server is the Worker in [`sync/`](sync/README.md).
+
 ## Configuration
 
 Press `c` for settings: timer lengths, auto-start, the chime, notifications, and reduced motion. Changes save to `config.toml` right away, keeping anything else you wrote in it. The file is optional and lives in `~/.config/chill/` on macOS and `%APPDATA%\chill\` on Windows. These are the defaults:
@@ -107,6 +113,7 @@ Press `c` for settings: timer lengths, auto-start, the chime, notifications, and
 ```toml
 catalog_url = "https://chill-data.aquitano.me/catalog.json"
 catalogs = []           # more catalog.json links, added with "Add a catalog"
+sync_url = "https://chill-sync.aquitano.me"
 reduce_motion = false   # true turns off transitions and the visualizer
 chime = true            # a soft bell when a focus block or break ends
 notifications = true    # an OS notification at the same moments

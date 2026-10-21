@@ -4,7 +4,7 @@ use ratatui::layout::Rect;
 use super::overlay;
 use super::{Drag, Hit, Overlay, Slider, Ui};
 use crate::action::{Action, Panel, Prompt, Removal, Setting, Tab};
-use crate::app::App;
+use crate::app::{App, Tone};
 use crate::youtube;
 
 /// Folds a burst of plain characters into one paste. Windows consoles deliver a paste as
@@ -83,6 +83,21 @@ pub fn apply(app: &mut App, ui: &mut Ui, action: Action) {
                     message,
                     action: Action::Remove(removal),
                 });
+            }
+        }
+        Action::TurnOffSync => ui.open(Overlay::Confirm {
+            message: "Turn off sync? This machine keeps its library and stops syncing.".into(),
+            action: Action::LeaveSync,
+        }),
+        Action::CopySyncKey => {
+            if let Some(key) = app.sync_key().map(str::to_string) {
+                // OSC 52 reaches the system clipboard in Ghostty and Windows Terminal; the toast
+                // shows the key too, for terminals that ignore it.
+                let _ = crossterm::execute!(
+                    std::io::stdout(),
+                    crossterm::clipboard::CopyToClipboard::to_clipboard_from(&key)
+                );
+                app.toast(Tone::Done, format!("Copied the sync key: {key}"));
             }
         }
         Action::Remove(Removal::Catalog(url)) => {
