@@ -211,6 +211,9 @@ fn answer(response: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Re
         _ => {}
     }
     let status = response.status().as_u16();
+    if status == 204 {
+        return Ok(String::new());
+    }
     let text = response
         .body_mut()
         .with_config()
