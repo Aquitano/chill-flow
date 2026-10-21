@@ -207,6 +207,9 @@ pub enum Action {
     /// Asks before leaving; `LeaveSync` is what the confirmation sends.
     TurnOffSync,
     LeaveSync,
+    /// Asks before deleting; `EraseSyncData` is what the confirmation sends.
+    DeleteSyncData,
+    EraseSyncData,
     CopySyncKey,
     Quit,
 }

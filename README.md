@@ -104,7 +104,9 @@ The folder is hard to guess, not secret: anyone with the link can play the files
 
 Sync carries your library, likes, scenes, mixes, focus history, and settings between machines. It is off until you search for **Turn on sync** in the command palette, which creates a sync space on the server. To add another machine, run **Copy sync key** on the first and paste the key into **Join a sync space** on the second. The key is the only thing that opens the space, so keep it like a password.
 
-chill syncs when it starts, every hour while it runs, and when it quits, or right away with **Sync now**. Everything still lives in `chill.db` on each machine, so chill works offline and catches up on the next sync. When the same item changed on two machines, the later change wins. **Turn off sync** stops syncing and keeps everything on the machine. The server is the Worker in [`sync/`](sync/README.md).
+chill syncs when it starts, every hour while it runs, and when it quits, or right away with **Sync now**. Everything still lives in `chill.db` on each machine, so chill works offline and catches up on the next sync. When the same item changed on two machines, the later change wins. **Turn off sync** stops syncing and keeps everything on the machine. **Delete sync data** removes everything the space holds from the server and closes it, so every machine stops syncing and keeps its own library.
+
+The server is the Worker in [`sync/`](sync/README.md). It stores what syncs as it is, readable by whoever runs it, but nothing that names you: no account, email, or IP address. The key only travels over https.
 
 ## Configuration
 

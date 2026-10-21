@@ -89,6 +89,12 @@ pub fn apply(app: &mut App, ui: &mut Ui, action: Action) {
             message: "Turn off sync? This machine keeps its library and stops syncing.".into(),
             action: Action::LeaveSync,
         }),
+        Action::DeleteSyncData => ui.open(Overlay::Confirm {
+            message:
+                "Delete everything sync keeps on the server? Every machine stops syncing; each keeps its own library."
+                    .into(),
+            action: Action::EraseSyncData,
+        }),
         Action::CopySyncKey => {
             if let Some(key) = app.sync_key().map(str::to_string) {
                 // OSC 52 reaches the system clipboard in Ghostty and Windows Terminal; the toast

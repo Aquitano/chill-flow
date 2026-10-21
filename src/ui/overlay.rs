@@ -95,6 +95,7 @@ pub fn commands(app: &App) -> Vec<Command> {
         list.push(command("Sync now", "", Action::SyncNow));
         list.push(command("Copy sync key", "", Action::CopySyncKey));
         list.push(command("Turn off sync", "", Action::TurnOffSync));
+        list.push(command("Delete sync data…", "", Action::DeleteSyncData));
     } else {
         list.push(command("Turn on sync", "", Action::TurnOnSync));
         list.push(command("Join a sync space…", "", Action::OpenPrompt(Prompt::JoinSync)));

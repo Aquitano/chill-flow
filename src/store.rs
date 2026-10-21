@@ -612,9 +612,17 @@ fn apply_one(db: &Connection, record: &Record) -> Result<bool> {
         (Kind::Scene, true) => db.execute("DELETE FROM scenes WHERE name = ?1", [id])?,
         (Kind::Mix, true) => db.execute("DELETE FROM mixes WHERE name = ?1", [id])?,
         (Kind::Focus, true) => db.execute("DELETE FROM focus_blocks WHERE uid = ?1", [id])?,
-        (Kind::Setting, true) => 0,
+        (Kind::Setting, true) => {
+            db.execute("DELETE FROM kv WHERE key IN ('setting:' || ?1, 'arrived:' || ?1)", [id])?
+        }
         (Kind::Setting, false) => {
-            let Some(value) = &record.body else { return Ok(false) };
+            let Some(value) = record
+                .body
+                .as_ref()
+                .filter(|value| crate::sync::readable_setting(id, value))
+            else {
+                return Ok(false);
+            };
             set_setting_value(db, id, value)?;
             db.execute(
                 "INSERT OR REPLACE INTO kv (key, value) VALUES (?1, '1')",
@@ -670,6 +678,33 @@ fn apply_one(db: &Connection, record: &Record) -> Result<bool> {
         }
     };
     Ok(true)
+}
+
+#[cfg(test)]
+impl Store {
+    /// The whole library and the synced settings as text, to compare two machines.
+    pub fn snapshot(&self) -> String {
+        let rows = |sql: &str| -> Vec<String> {
+            let mut statement = self.db.prepare(sql).unwrap();
+            statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        };
+        [
+            "SELECT key || ' ' || item FROM likes ORDER BY key",
+            "SELECT id || ' ' || body FROM saved ORDER BY id",
+            "SELECT name || ' ' || body FROM scenes ORDER BY name",
+            "SELECT name || ' ' || levels FROM mixes ORDER BY name",
+            "SELECT uid || ' ' || started_at || ' ' || focused_sec || ' ' || completed FROM focus_blocks ORDER BY uid",
+            "SELECT key || ' ' || value FROM kv WHERE key LIKE 'setting:%' ORDER BY key",
+        ]
+        .iter()
+        .flat_map(|sql| rows(sql))
+        .collect::<Vec<_>>()
+        .join("\n")
+    }
 }
 
 #[cfg(test)]

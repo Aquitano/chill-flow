@@ -36,6 +36,10 @@ pub enum Job {
         space: u64,
         result: Result<String>,
     },
+    SpaceDeleted {
+        space: u64,
+        result: Result<()>,
+    },
     Synced {
         space: u64,
         manual: bool,
@@ -992,9 +996,11 @@ impl App {
             Action::AdjustSetting(setting, delta) => self.adjust_setting(setting, delta),
             Action::TurnOnSync => self.turn_on_sync(),
             Action::SyncNow => self.start_sync(true),
-            Action::LeaveSync => self.leave_sync(),
+            Action::LeaveSync => self.stop_syncing(Tone::Done, "Sync is off. This machine keeps everything it has."),
+            Action::EraseSyncData => self.erase_sync_data(),
             Action::Quit => self.quit = true,
             Action::TurnOffSync
+            | Action::DeleteSyncData
             | Action::CopySyncKey
             | Action::ShowTab(_)
             | Action::RemoveRow(_)
@@ -1608,15 +1614,34 @@ impl App {
         self.start_sync(true);
     }
 
-    fn leave_sync(&mut self) {
+    fn stop_syncing(&mut self, tone: Tone, message: &str) {
         match self.store.set_sync_token(None) {
             Ok(()) => {
                 self.sync_token = None;
                 self.sync_space += 1;
-                self.toast(Tone::Done, "Sync is off. This machine keeps everything it has.");
+                self.toast(tone, message);
             }
             Err(error) => self.toast(Tone::Error, format!("Could not turn off sync: {error}")),
         }
+    }
+
+    fn erase_sync_data(&mut self) {
+        let Some(token) = self.sync_token.clone() else { return };
+        self.toast(Tone::Info, "Deleting the sync data…");
+        let (jobs, server, space) = (self.jobs.clone(), self.config.sync_url.clone(), self.sync_space);
+        std::thread::spawn(move || {
+            let result = sync::delete_space(&server, &token);
+            let _ = jobs.send(Job::SpaceDeleted { space, result });
+        });
+    }
+
+    /// Turns sync off for a space the server will never take again, saying why.
+    fn sync_gone(&mut self, gone: sync::Gone) {
+        let message = match gone {
+            sync::Gone::Rejected => "The sync server did not accept the sync key, so sync is off",
+            sync::Gone::Deleted => "This sync space was deleted, so sync is off. This machine keeps its library.",
+        };
+        self.stop_syncing(Tone::Error, message);
     }
 
     /// The settings that follow a sync space between machines, by the name they sync under.
@@ -1662,9 +1687,19 @@ impl App {
                     }
                 }
                 ("catalogs", _) => {
-                    if let Ok(urls) = serde_json::from_value::<Vec<String>>(value)
-                        && urls != self.config.catalogs
-                    {
+                    let Ok(listed) = serde_json::from_value::<Vec<String>>(value) else {
+                        continue;
+                    };
+                    // The list comes from another machine, so it is held to what "Add a catalog"
+                    // accepts here.
+                    let mut urls: Vec<String> = Vec::new();
+                    for url in listed {
+                        let web = url.starts_with("https://") || url.starts_with("http://");
+                        if web && url != self.config.catalog_url && !urls.contains(&url) {
+                            urls.push(url);
+                        }
+                    }
+                    if urls != self.config.catalogs {
                         self.set_added_catalogs(urls);
                     }
                 }
@@ -2027,6 +2062,15 @@ impl App {
                 self.creating_space = false;
                 self.toast(Tone::Error, format!("Could not turn on sync: {error:#}"));
             }
+            Job::SpaceDeleted { space, .. } if space != self.sync_space => {}
+            Job::SpaceDeleted { result: Ok(()), .. } => self.stop_syncing(
+                Tone::Done,
+                "Deleted everything on the sync server. This machine keeps its library.",
+            ),
+            Job::SpaceDeleted { result: Err(error), .. } => match error.downcast_ref::<sync::Gone>() {
+                Some(gone) => self.sync_gone(*gone),
+                None => self.toast(Tone::Error, format!("Could not delete the sync data: {error:#}")),
+            },
             Job::Synced { space, manual, result } => {
                 self.syncing = false;
                 match result {
@@ -2040,14 +2084,10 @@ impl App {
                             self.toast(Tone::Done, "Synced");
                         }
                     }
-                    Err(error) if error.is::<sync::Rejected>() => {
-                        let _ = self.store.set_sync_token(None);
-                        self.sync_token = None;
-                        self.sync_space += 1;
-                        self.toast(
-                            Tone::Error,
-                            "The sync server did not accept the sync key, so sync is off",
-                        );
+                    Err(error) if error.is::<sync::Gone>() => {
+                        if let Some(gone) = error.downcast_ref::<sync::Gone>() {
+                            self.sync_gone(*gone);
+                        }
                     }
                     // Pages before the failure are already in chill.db.
                     Err(error) => {
@@ -2198,6 +2238,7 @@ impl TestApp {
         let cache = files.path().to_path_buf();
         let config = Config {
             catalog_url: TEST_CATALOG_URL.into(),
+            sync_url: "http://127.0.0.1:9".into(),
             chime: false,
             notifications: false,
             ..Config::default()
@@ -2321,6 +2362,31 @@ mod tests {
     }
 
     #[test]
+    fn a_deleted_space_turns_sync_off_unless_another_space_was_joined_since() {
+        let mut app = app();
+        app.join_sync("first");
+        let first = app.sync_space;
+        app.join_sync("second");
+        let deleted = || Err(sync::Gone::Deleted.into());
+
+        app.handle_job(Job::Synced {
+            space: first,
+            manual: false,
+            result: deleted(),
+        });
+        assert_eq!(app.sync_key(), Some("second"));
+
+        let space = app.sync_space;
+        app.handle_job(Job::Synced {
+            space,
+            manual: false,
+            result: deleted(),
+        });
+        assert_eq!(app.sync_key(), None);
+        assert_eq!(app.store.sync_token(), None);
+    }
+
+    #[test]
     fn settings_from_another_machine_apply_here() {
         let mut app = app();
         let url = "http://127.0.0.1:9/friends/catalog.json";
@@ -2334,6 +2400,11 @@ mod tests {
         assert_eq!(app.config.catalogs, [url]);
         assert_eq!(app.added_catalogs().count(), 1);
         assert!(config::load(app.config_file()).unwrap().chime);
+        assert!(
+            app.sync_settings()
+                .iter()
+                .all(|(name, value)| sync::readable_setting(name, value))
+        );
     }
 
     #[test]
