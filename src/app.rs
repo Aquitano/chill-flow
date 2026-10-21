@@ -32,7 +32,10 @@ pub enum Job {
         url: String,
         result: Result<Catalog>,
     },
-    SpaceCreated(Result<String>),
+    SpaceCreated {
+        space: u64,
+        result: Result<String>,
+    },
     Synced {
         space: u64,
         manual: bool,
@@ -194,6 +197,7 @@ pub struct App {
     /// Counts joins and leaves, so the end of a sync for a space this machine has left is ignored.
     sync_space: u64,
     syncing: bool,
+    creating_space: bool,
     /// A sync asked for while one ran, and whether someone asked for it by hand.
     sync_queued: Option<bool>,
     synced_at: Option<Instant>,
@@ -282,6 +286,7 @@ impl App {
             database,
             sync_space: 0,
             syncing: false,
+            creating_space: false,
             sync_queued: None,
             synced_at: None,
             quit: false,
@@ -1577,13 +1582,15 @@ impl App {
     }
 
     fn turn_on_sync(&mut self) {
-        if self.sync_token.is_some() {
+        if self.sync_token.is_some() || self.creating_space {
             return;
         }
+        self.creating_space = true;
         self.toast(Tone::Info, "Creating a sync space…");
-        let (jobs, server) = (self.jobs.clone(), self.config.sync_url.clone());
+        let (jobs, server, space) = (self.jobs.clone(), self.config.sync_url.clone(), self.sync_space);
         std::thread::spawn(move || {
-            let _ = jobs.send(Job::SpaceCreated(sync::create_space(&server)));
+            let result = sync::create_space(&server);
+            let _ = jobs.send(Job::SpaceCreated { space, result });
         });
     }
 
@@ -1627,15 +1634,21 @@ impl App {
         ])
     }
 
+    /// Applies settings that arrived from other machines, and marks them taken only once
+    /// config.toml holds them, so a failed save or a crash can't turn them into edits made here.
     fn take_arrived_settings(&mut self) {
-        if let Ok(settings) = self.store.take_arrived_settings() {
-            self.apply_settings(settings);
+        let Ok(arrived) = self.store.arrived_settings() else {
+            return;
+        };
+        if !arrived.is_empty() && self.apply_settings(arrived.clone()) {
+            let _ = self.store.settle_settings(&arrived);
         }
     }
 
-    fn apply_settings(&mut self, settings: Vec<(String, serde_json::Value)>) {
+    /// Returns whether config.toml saved.
+    fn apply_settings(&mut self, settings: Vec<(String, serde_json::Value)>) -> bool {
         if settings.is_empty() {
-            return;
+            return true;
         }
         for (name, value) in settings {
             let flag = value.as_bool();
@@ -1659,7 +1672,7 @@ impl App {
             }
         }
         self.timer.set_settings(self.config.pomodoro);
-        self.save_config();
+        self.save_config()
     }
 
     fn start_sync(&mut self, manual: bool) {
@@ -1701,10 +1714,12 @@ impl App {
         let _ = finished.recv_timeout(Duration::from_secs(5));
     }
 
-    fn save_config(&mut self) {
-        if let Err(error) = config::save(&self.config_file, &self.config) {
+    fn save_config(&mut self) -> bool {
+        let result = config::save(&self.config_file, &self.config);
+        if let Err(error) = &result {
             self.toast(Tone::Error, format!("Could not save settings: {error}"));
         }
+        result.is_ok()
     }
 
     pub fn config_file(&self) -> &std::path::Path {
@@ -1996,14 +2011,20 @@ impl App {
                 self.adding.retain(|known| known != &url);
                 self.toast(Tone::Error, format!("Could not add that catalog: {error:#}"));
             }
-            Job::SpaceCreated(Ok(token)) => {
+            // Joining another space while this one was being created makes it unwanted.
+            Job::SpaceCreated { space, .. } if space != self.sync_space || self.sync_token.is_some() => {
+                self.creating_space = false;
+            }
+            Job::SpaceCreated { result: Ok(token), .. } => {
+                self.creating_space = false;
                 self.toast(
                     Tone::Done,
                     "Sync is on. To add another machine, \"Copy sync key\" here and \"Join a sync space\" there.",
                 );
                 self.join_sync(&token);
             }
-            Job::SpaceCreated(Err(error)) => {
+            Job::SpaceCreated { result: Err(error), .. } => {
+                self.creating_space = false;
                 self.toast(Tone::Error, format!("Could not turn on sync: {error:#}"));
             }
             Job::Synced { space, manual, result } => {
@@ -2028,8 +2049,14 @@ impl App {
                             "The sync server did not accept the sync key, so sync is off",
                         );
                     }
-                    Err(error) if manual => self.toast(Tone::Error, format!("Could not sync: {error:#}")),
-                    Err(_) => {}
+                    // Pages before the failure are already in chill.db.
+                    Err(error) => {
+                        self.reload_library();
+                        self.refresh_stats();
+                        if manual {
+                            self.toast(Tone::Error, format!("Could not sync: {error:#}"));
+                        }
+                    }
                 }
                 self.take_arrived_settings();
                 if let Some(manual) = self.sync_queued.take() {

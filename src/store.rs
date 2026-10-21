@@ -144,23 +144,34 @@ impl Store {
         })
     }
 
-    /// Settings that arrived from other machines since the last call, with their values.
-    pub fn take_arrived_settings(&self) -> Result<Vec<(String, Value)>> {
+    /// Settings that arrived from other machines and aren't in config.toml yet, with their values.
+    pub fn arrived_settings(&self) -> Result<Vec<(String, Value)>> {
+        let mut statement = self.db.prepare(
+            "SELECT substr(arrived.key, 9), setting.value FROM kv AS arrived
+             JOIN kv AS setting ON setting.key = 'setting:' || substr(arrived.key, 9)
+             WHERE arrived.key LIKE 'arrived:%'",
+        )?;
+        let arrived = statement
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+            .filter_map(|row| {
+                let (name, value) = row.ok()?;
+                Some((name, serde_json::from_str(&value).ok()?))
+            })
+            .collect();
+        Ok(arrived)
+    }
+
+    /// Marks arrived settings as saved to config.toml, each only if no newer value arrived since.
+    pub fn settle_settings(&self, saved: &[(String, Value)]) -> Result<()> {
         self.transaction(|db| {
-            let mut statement = db.prepare(
-                "SELECT substr(arrived.key, 9), setting.value FROM kv AS arrived
-                 JOIN kv AS setting ON setting.key = 'setting:' || substr(arrived.key, 9)
-                 WHERE arrived.key LIKE 'arrived:%'",
-            )?;
-            let arrived = statement
-                .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
-                .filter_map(|row| {
-                    let (name, value) = row.ok()?;
-                    Some((name, serde_json::from_str(&value).ok()?))
-                })
-                .collect();
-            db.execute("DELETE FROM kv WHERE key LIKE 'arrived:%'", [])?;
-            Ok(arrived)
+            for (name, value) in saved {
+                db.execute(
+                    "DELETE FROM kv WHERE key = 'arrived:' || ?1
+                     AND (SELECT value FROM kv WHERE key = 'setting:' || ?1) = ?2",
+                    params![name, json(value)?],
+                )?;
+            }
+            Ok(())
         })
     }
 
@@ -506,27 +517,28 @@ impl Store {
         })
     }
 
-    /// Whether `record` replaces this machine's version, by the server's rule: the later change
-    /// wins, and at the same time the greater JSON body does.
+    /// Whether `record` replaces this machine's version. The later change wins. At the same time
+    /// the server's version wins, since only the server decides ties, unless this machine has a
+    /// change of its own still to send; the server sends the winner back once it has judged that.
     fn wins_here(&self, db: &Connection, record: &Record) -> Result<bool> {
-        let local: Option<(i64, bool)> = db
+        let local: Option<(i64, bool, bool)> = db
             .query_row(
-                "SELECT updated_at, deleted FROM sync_state WHERE kind = ?1 AND id = ?2",
+                "SELECT updated_at, deleted, dirty FROM sync_state WHERE kind = ?1 AND id = ?2",
                 params![record.kind.as_str(), record.id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()?;
         Ok(match local {
             None => true,
-            Some((updated_at, _)) if updated_at != record.updated_at => record.updated_at > updated_at,
-            Some((_, deleted)) => {
+            Some((updated_at, _, _)) if updated_at != record.updated_at => record.updated_at > updated_at,
+            Some((_, _, true)) => false,
+            Some((_, deleted, false)) => {
                 let local = if deleted {
                     None
                 } else {
                     self.body(record.kind, &record.id)?
                 };
-                let text = |body: Option<&Value>| serde_json::to_string(&body).unwrap_or_default();
-                text(record.body.as_ref()) > text(local.as_ref())
+                record.body != local
             }
         })
     }
@@ -684,16 +696,13 @@ mod tests {
     }
 
     #[test]
-    fn a_change_uploads_once_and_loses_only_to_a_later_or_greater_one_from_elsewhere() {
+    fn a_change_uploads_once_and_gives_way_to_a_later_one_or_the_servers_tie_decision() {
         let store = syncing();
         store.set_liked(&item("r2:home"), true).unwrap();
 
         let outgoing = store.outgoing().unwrap();
         assert_eq!(outgoing.len(), 1);
         assert_eq!(outgoing[0].body.as_ref().unwrap()["item"]["key"], "r2:home");
-        store.record_exchange("key", &outgoing, &[], 1).unwrap();
-        assert!(store.outgoing().unwrap().is_empty());
-
         let at = outgoing[0].updated_at;
         let unliked = |updated_at| Record {
             kind: Kind::Like,
@@ -702,16 +711,22 @@ mod tests {
             deleted: true,
             body: None,
         };
-        // At the same time the server keeps the greater body, and `null` sorts below an object.
-        let ignored = store.record_exchange("key", &[], &[unliked(at - 1), unliked(at)], 2);
-        assert_eq!(ignored.unwrap(), Some(false));
+
+        // Still unsent, the change here waits for the server to judge the tie.
+        assert_eq!(
+            store.record_exchange("key", &[], &[unliked(at)], 1).unwrap(),
+            Some(false)
+        );
+        store.record_exchange("key", &outgoing, &[unliked(at - 1)], 2).unwrap();
+        assert!(store.outgoing().unwrap().is_empty());
         assert_eq!(store.likes().unwrap().len(), 1);
 
         store.set_sync_token(Some("another key")).unwrap();
-        assert_eq!(store.record_exchange("key", &[], &[unliked(at + 1)], 3).unwrap(), None);
+        assert_eq!(store.record_exchange("key", &[], &[unliked(at)], 3).unwrap(), None);
         assert_eq!((store.likes().unwrap().len(), store.sync_cursor()), (1, 0));
 
-        let taken = store.record_exchange("another key", &[], &[unliked(at + 1)], 3);
+        // Once sent, it gives way to the server's version at the same time.
+        let taken = store.record_exchange("another key", &[], &[unliked(at)], 3);
         assert_eq!(taken.unwrap(), Some(true));
         assert!(store.likes().unwrap().is_empty());
         assert!(store.outgoing().unwrap().is_empty());
@@ -729,16 +744,12 @@ mod tests {
         let settings = BTreeMap::from([("chime".to_string(), Value::Bool(false))]);
         store.queue_everything_for_sync(&settings).unwrap();
 
-        let queued: Vec<(Kind, String)> = store
-            .outgoing()
-            .unwrap()
-            .into_iter()
-            .map(|record| (record.kind, record.id))
+        let outgoing = store.outgoing().unwrap();
+        let queued: Vec<(Kind, &str)> = outgoing
+            .iter()
+            .map(|record| (record.kind, record.id.as_str()))
             .collect();
-        assert_eq!(
-            queued,
-            [(Kind::Setting, "chime".into()), (Kind::Like, "r2:home".into())]
-        );
+        assert_eq!(queued, [(Kind::Setting, "chime"), (Kind::Like, "r2:home")]);
         let chime = |updated_at, on| Record {
             kind: Kind::Setting,
             id: "chime".into(),
@@ -746,19 +757,30 @@ mod tests {
             deleted: false,
             body: Some(Value::Bool(on)),
         };
-        store.record_exchange("key", &[], &[chime(0, true)], 2).unwrap();
-        assert_eq!(
-            store.take_arrived_settings().unwrap(),
-            [("chime".to_string(), Value::Bool(true))]
-        );
-        assert!(store.take_arrived_settings().unwrap().is_empty());
+        store.record_exchange("key", &outgoing, &[chime(0, true)], 2).unwrap();
+        let arrived = store.arrived_settings().unwrap();
+        assert_eq!(arrived, [("chime".to_string(), Value::Bool(true))]);
+        store.settle_settings(&arrived).unwrap();
+        assert!(store.arrived_settings().unwrap().is_empty());
 
         store.record_exchange("key", &[], &[chime(5, false)], 3).unwrap();
         store.set_synced_setting("chime", &Value::Bool(true)).unwrap();
-        assert!(store.take_arrived_settings().unwrap().is_empty());
+        assert!(store.arrived_settings().unwrap().is_empty());
         let outgoing = store.outgoing().unwrap();
-        let chime = outgoing.iter().find(|record| record.kind == Kind::Setting).unwrap();
-        assert_eq!(chime.body, Some(Value::Bool(true)));
+        let sent = outgoing.iter().find(|record| record.kind == Kind::Setting).unwrap();
+        assert_eq!(sent.body, Some(Value::Bool(true)));
+
+        store
+            .record_exchange("key", &[], &[chime(i64::MAX / 2, false)], 4)
+            .unwrap();
+        store
+            .settle_settings(&[("chime".to_string(), Value::Bool(true))])
+            .unwrap();
+        assert_eq!(
+            store.arrived_settings().unwrap().len(),
+            1,
+            "a newer arrival stays until saved"
+        );
     }
 
     #[test]
@@ -772,7 +794,7 @@ mod tests {
         assert_eq!(store.saved().unwrap()[0].channel, "Lofi Girl");
         assert_eq!(store.scenes().unwrap()[0].name, "Late night reading");
         assert_eq!(store.mixes().unwrap()[0].name, "Cafe in the rain");
-        let arrived = store.take_arrived_settings().unwrap();
+        let arrived = store.arrived_settings().unwrap();
         assert_eq!(arrived.len(), 1);
 
         let settings = BTreeMap::from([arrived[0].clone()]);
