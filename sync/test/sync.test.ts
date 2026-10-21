@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { exports } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import exchange from "../fixtures/exchange.json";
@@ -89,7 +89,7 @@ it("rejects a sync that would overfill the space and applies none of it", async 
       expect(await response.json()).toEqual({ error: "this sync space is full" });
       // Nothing of the refused batch is stored, but it still counts against the day's allowance,
       // since its rows were written before the rollback.
-      const stored = await runInDurableObject(env.SYNC_SPACE.getByName(token.split(".")[0]!), (_, state) => ({
+      const stored = await runInDurableObject(exports.SyncSpace.getByName(token.split(".")[0]!), (_, state) => ({
         ...state.storage.sql.exec<{ records: number; seq: number }>("SELECT count(*) AS records, max(seq) AS seq FROM records").one(),
         ...state.storage.sql.exec<{ changes: number }>("SELECT changes FROM budget").one(),
       }));
@@ -162,7 +162,7 @@ it("deletes a space for good, so a machine still holding the token is told it is
   expect(after.status).toBe(410);
   expect(await after.json()).toEqual({ error: "this sync space was deleted" });
   expect((await remove()).status).toBe(204);
-  const kept = await runInDurableObject(env.SYNC_SPACE.getByName(token.split(".")[0]!), (_, state) =>
+  const kept = await runInDurableObject(exports.SyncSpace.getByName(token.split(".")[0]!), (_, state) =>
     state.storage.sql.exec<{ records: number }>("SELECT count(*) AS records FROM records").one(),
   );
   expect(kept.records).toBe(0);

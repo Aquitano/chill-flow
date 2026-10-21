@@ -1,4 +1,5 @@
 import { type } from "arktype";
+import { exports } from "cloudflare:workers";
 import { limits, syncRequest, type StoredChange, type SyncRecord } from "./protocol";
 import { mintToken, verifyToken } from "./token";
 
@@ -38,7 +39,7 @@ async function createSpace(request: Request, env: Env) {
   const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
   const { success } = await env.SPACE_CREATION_LIMITER.limit({ key: ip });
   if (!success) return fail(429, "too many sync spaces were created from this address, try again in a minute");
-  const admitted = await env.ADMISSION.getByName("spaces").admit(Number(env.DAILY_NEW_SPACES));
+  const admitted = await exports.Admission.getByName("spaces").admit(Number(env.DAILY_NEW_SPACES));
   if (!admitted) return fail(503, "sync is not taking new spaces today, try again tomorrow");
   return Response.json({ token: await mintToken(env.SYNC_SECRET) }, { status: 201 });
 }
@@ -82,7 +83,7 @@ async function openSpace(request: Request, env: Env) {
   const { success } = await env.SYNC_LIMITER.limit({ key: spaceId });
   if (!success) return fail(429, "this sync space is syncing too often, try again in a minute");
 
-  return env.SYNC_SPACE.getByName(spaceId);
+  return exports.SyncSpace.getByName(spaceId);
 }
 
 async function readBody(request: Request): Promise<unknown> {

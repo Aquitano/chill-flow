@@ -1,4 +1,4 @@
 node_modules
 .wrangler
 .dev.vars
-src/worker-configuration.d.ts
+.cloudflare
