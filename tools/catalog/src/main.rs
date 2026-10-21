@@ -102,7 +102,7 @@ fn main() -> Result<()> {
         Command::AddSound(args) => add_sound(&file, args, cli.dry_run),
         Command::Check => check(&file),
         Command::Publish => publish(&file, cli.dry_run),
-        Command::New(args) => new_catalog(args),
+        Command::New(args) => new_catalog(args, cli.dry_run),
     }
 }
 
@@ -236,7 +236,7 @@ fn publish(path: &Path, dry_run: bool) -> Result<()> {
     Ok(())
 }
 
-fn new_catalog(args: NewArgs) -> Result<()> {
+fn new_catalog(args: NewArgs, dry_run: bool) -> Result<()> {
     ensure!(!args.file.exists(), "{} already exists", args.file.display());
     let mut secret = [0u8; 16];
     getrandom::fill(&mut secret).map_err(|error| anyhow::anyhow!("could not pick a random folder: {error}"))?;
@@ -247,8 +247,12 @@ fn new_catalog(args: NewArgs) -> Result<()> {
         url: Some(url.clone()),
         ..Catalog::default()
     };
-    std::fs::write(&args.file, catalog.to_json()).with_context(|| format!("writing {}", args.file.display()))?;
     let file = args.file.display();
+    if dry_run {
+        println!("would create {file}, to be published at\n  {url}");
+        return Ok(());
+    }
+    std::fs::write(&args.file, catalog.to_json()).with_context(|| format!("writing {file}"))?;
     println!(
         "Created {file}, to be published at\n  {url}\nAdd to it with `chill-catalog --catalog {file} add-track …`, then run \
          `chill-catalog --catalog {file} publish`. Keep {file} out of this repository: anyone who reads the URL in it \
@@ -296,14 +300,25 @@ fn validate(catalog: &Catalog) -> Result<()> {
     Ok(())
 }
 
+/// Reads a catalog file. Only the main catalog may leave out `url`: any other file without one
+/// would upload to the bucket root and replace the main catalog's files.
 fn load(path: &Path) -> Result<Catalog> {
     let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let malformed = || format!("{} is malformed", path.display());
     let catalog = Catalog::parse(&text, catalog_schema::DEFAULT_URL).with_context(malformed)?;
     match &catalog.url {
         Some(url) => Catalog::parse(&text, url).with_context(malformed),
-        None => Ok(catalog),
+        None if is_main(path) => Ok(catalog),
+        None => bail!(
+            "{} has no url, so it would replace the main catalog; start it with `chill-catalog new`",
+            path.display()
+        ),
     }
+}
+
+fn is_main(path: &Path) -> bool {
+    let canonical = |path: &Path| std::fs::canonicalize(path).ok();
+    canonical(path).is_some_and(|path| Some(path) == canonical(Path::new(CATALOG_PATH)))
 }
 
 /// The bucket to upload to, or `None` on a dry run. Refuses keys the bucket already holds
@@ -439,7 +454,7 @@ mod tests {
     }
 
     #[test]
-    fn an_added_catalog_uploads_beside_its_url_and_flags_ids_the_main_catalog_shadows() {
+    fn an_added_catalog_needs_a_url_uploads_beside_it_and_flags_ids_the_main_catalog_shadows() {
         let folder = tempfile::tempdir().unwrap();
         let path = folder.path().join("friends.json");
         let main = repo_catalog();
@@ -448,6 +463,11 @@ mod tests {
             ambient: vec![main.ambient[0].clone()],
             ..Catalog::default()
         };
+        std::fs::write(&path, Catalog::default().to_json()).unwrap();
+        assert!(
+            load(&path).is_err(),
+            "a file without a url would publish over the main catalog"
+        );
         std::fs::write(&path, catalog.to_json()).unwrap();
         catalog = load(&path).unwrap();
 

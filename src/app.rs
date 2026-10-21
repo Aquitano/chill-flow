@@ -132,6 +132,8 @@ pub struct App {
     store: Store,
     /// Every catalog in use, main first, as last loaded. `catalog` is their merge.
     catalogs: Vec<(String, Catalog)>,
+    /// Catalogs asked for with "Add a catalog" whose first fetch hasn't come back.
+    adding: Vec<String>,
     pub catalog: Catalog,
     pub engine: Engine,
     pub queue: Queue,
@@ -217,6 +219,7 @@ impl App {
             config_file,
             store,
             catalogs,
+            adding: Vec::new(),
             catalog,
             engine,
             queue: Queue::new(session.shuffle, session.repeat),
@@ -346,10 +349,11 @@ impl App {
     }
 
     fn add_catalog(&mut self, url: &str) {
-        if self.catalogs.iter().any(|(known, _)| known == url) {
+        if self.catalogs.iter().any(|(known, _)| known == url) || self.adding.iter().any(|known| known == url) {
             self.toast(Tone::Info, "That catalog is already added");
             return;
         }
+        self.adding.push(url.to_string());
         self.toast(Tone::Info, "Loading the catalog…");
         let jobs = self.jobs.clone();
         let (cache, url) = (self.cache_dir.clone(), url.to_string());
@@ -374,6 +378,7 @@ impl App {
         self.refresh_mixes();
         self.load_likes();
         self.refresh_ambience();
+        self.mix_name = self.matching_mix_name();
         self.reconcile_queue(&previous);
     }
 
@@ -1749,6 +1754,7 @@ impl App {
                 url,
                 result: Ok(catalog),
             } => {
+                self.adding.retain(|known| known != &url);
                 if self.catalogs.iter().any(|(known, _)| known == &url) {
                     return;
                 }
@@ -1764,7 +1770,11 @@ impl App {
                 self.merge_catalogs();
                 self.toast(Tone::Done, message);
             }
-            Job::CatalogAdded { result: Err(error), .. } => {
+            Job::CatalogAdded {
+                url,
+                result: Err(error),
+            } => {
+                self.adding.retain(|known| known != &url);
                 self.toast(Tone::Error, format!("Could not add that catalog: {error:#}"));
             }
             Job::Inspected { id, result } => {

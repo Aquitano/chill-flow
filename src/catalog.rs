@@ -10,11 +10,16 @@ pub use catalog_schema::{AmbientSound, Catalog, CatalogTrack, Levels, Mix};
 const EMBEDDED: &str = include_str!("../catalog.json");
 
 /// The last copy of the catalog at `catalog_url` that loaded, or for the main catalog the copy
-/// compiled into the binary.
+/// compiled into the binary. The main catalog also reads `catalog.json`, where chill kept it
+/// before there could be more than one.
 pub fn offline(cache_dir: &Path, catalog_url: &str, main: bool) -> Catalog {
-    std::fs::read_to_string(cache_file(cache_dir, catalog_url))
-        .ok()
-        .and_then(|text| Catalog::parse(&text, catalog_url).ok())
+    let cached = |file: PathBuf| {
+        std::fs::read_to_string(file)
+            .ok()
+            .and_then(|text| Catalog::parse(&text, catalog_url).ok())
+    };
+    cached(cache_file(cache_dir, catalog_url))
+        .or_else(|| main.then(|| cached(cache_dir.join("catalog.json"))).flatten())
         .or_else(|| main.then(|| Catalog::parse(EMBEDDED, catalog_url).ok()).flatten())
         .unwrap_or_default()
 }
