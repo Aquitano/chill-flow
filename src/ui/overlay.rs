@@ -135,6 +135,7 @@ pub fn commands(app: &App) -> Vec<Command> {
         list.push(command("Turn on sync", "", Action::TurnOnSync));
         list.push(command("Join a sync space…", "", Action::OpenPrompt(Prompt::JoinSync)));
     }
+    list.push(command("Recent errors and diagnostics", "D", Action::OpenDiagnostics));
     list.push(command("Focus stats", "i", Action::OpenStats));
     list.push(command("Settings", "c", Action::OpenSettings));
     list.push(command("Keyboard shortcuts", "?", Action::OpenHelp));
@@ -243,7 +244,7 @@ fn key_hints(buf: &mut Buffer, x: u16, y: u16, hints: &[(&str, &str)], ui: &Ui) 
 }
 
 pub fn draw(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant) {
-    let Some(overlay) = ui.overlay.take() else { return };
+    let Some(mut overlay) = ui.overlay.take() else { return };
     // The page dims in one frame: fading it recolors every cell on every frame. Art drawn by a
     // graphics protocol can't be recolored like cells, and swapping in a darkened copy re-sends
     // the whole image, which flickers, so it stays as it is.
@@ -258,11 +259,12 @@ pub fn draw(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant
     // a short terminal can't fit is cut at the panel's edge instead of spilling over the page.
     let mut layer = Buffer::empty(buf.area);
     let first_hit = ui.hits.len();
-    match &overlay {
+    match &mut overlay {
         Overlay::Palette { query, selected } => palette(&mut layer, screen, app, ui, query, *selected),
         Overlay::Prompt { kind, input } => prompt(&mut layer, screen, ui, *kind, input),
         Overlay::Confirm { message, .. } => confirm(&mut layer, screen, ui, message),
         Overlay::Help => help(&mut layer, screen, app, ui),
+        Overlay::Diagnostics { selected, scroll } => diagnostics(&mut layer, screen, app, ui, *selected, scroll),
         Overlay::Stats => stats(&mut layer, screen, app, ui, now),
         Overlay::Settings { selected } => settings(&mut layer, screen, app, ui, *selected),
     }
@@ -633,7 +635,7 @@ pub fn toasts(buf: &mut Buffer, footer: Rect, ui: &mut Ui, now: Instant) {
         let color = match toast.tone {
             Tone::Info => theme.calm,
             Tone::Done => theme.rest,
-            Tone::Error => theme.alert,
+            Tone::Error | Tone::Warning => theme.alert,
         };
         fill(buf, area, Style::new().bg(theme.raised()));
         if !theme.has_rgb() {
@@ -655,5 +657,111 @@ pub fn toasts(buf: &mut Buffer, footer: Rect, ui: &mut Ui, now: Instant) {
         widgets::dim(buf, area, fade, &theme, None);
         ui.hits.push((area, Hit::Toast(index)));
         bottom = y;
+    }
+}
+
+pub fn diagnostic_notice(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
+    let theme = ui.theme;
+    fill(buf, area, Style::new().bg(theme.raised()));
+    let pending = app.diagnostics.pending();
+    let heading = format!("D diagnostics ({pending})");
+    put(
+        buf,
+        area.x + 1,
+        area.y,
+        &fit(&heading, usize::from(area.width.saturating_sub(2))),
+        Style::new().fg(theme.alert),
+    );
+    ui.hit(area, Hit::Act(Action::OpenDiagnostics));
+    let message = app
+        .diagnostics
+        .first_pending()
+        .map(|index| app.diagnostics.entries()[index].message.as_str())
+        .unwrap_or("More failures occurred while the history was full. Open diagnostics for the count.");
+    put(
+        buf,
+        area.x + 1,
+        area.y + 1,
+        &fit(message, usize::from(area.width.saturating_sub(2))),
+        Style::new().fg(theme.text()),
+    );
+}
+
+fn diagnostics(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, selected: usize, scroll: &mut usize) {
+    let theme = ui.theme;
+    let content = dialog(buf, screen, 88, 23, None, "Recent errors and diagnostics", ui);
+    let entries = app.diagnostics.entries();
+    let selected = selected.min(entries.len().saturating_sub(1));
+    let mut lines = Vec::new();
+    if let Some(entry) = entries.get(selected) {
+        lines.push(format!(
+            "{} of {} · {} · seen {} times",
+            selected + 1,
+            entries.len(),
+            if entry.dismissed { "dismissed" } else { "unresolved" },
+            entry.occurrences
+        ));
+        lines.push(format!("Last seen: {}", entry.last_seen));
+        lines.push(String::new());
+        lines.push(entry.message.clone());
+    } else {
+        lines.push("No recent errors or dependency notices.".into());
+    }
+    if app.diagnostics.omitted() > 0 {
+        lines.push(format!(
+            "{} additional failures omitted while all 100 entries were unresolved. Press x to dismiss this count.",
+            app.diagnostics.omitted()
+        ));
+    }
+    if let Some(error) = &app.diagnostics.log_error {
+        lines.push(error.clone());
+    }
+    lines.push(String::new());
+    lines.push(format!("Log: {}", crate::config::display_path(&app.diagnostics.path)));
+    lines.push("URLs and sync keys are redacted. Run chill doctor for dependency details.".into());
+    let lines: Vec<String> = lines
+        .into_iter()
+        .flat_map(|line| {
+            if line.is_empty() {
+                vec![line]
+            } else {
+                wrap(&line, usize::from(content.width), crate::diagnostics::MESSAGE_LIMIT)
+            }
+        })
+        .collect();
+    let height = usize::from(content.height.saturating_sub(2));
+    *scroll = (*scroll).min(lines.len().saturating_sub(height));
+    for (offset, line) in lines.iter().skip(*scroll).take(height).enumerate() {
+        put(
+            buf,
+            content.x,
+            content.y + offset as u16,
+            line,
+            Style::new().fg(theme.text()),
+        );
+    }
+    let controls = [
+        ("←", Hit::DiagnosticEntry(-1)),
+        ("→", Hit::DiagnosticEntry(1)),
+        ("↑", Hit::DiagnosticScroll(-1)),
+        ("↓", Hit::DiagnosticScroll(1)),
+        ("enter dismiss", Hit::Act(Action::DismissDiagnostic(selected))),
+    ];
+    let y = content.bottom().saturating_sub(1);
+    let mut x = content.x;
+    for (label, hit) in controls {
+        let width = label.width() as u16;
+        put(buf, x, y, label, Style::new().fg(theme.muted()));
+        ui.hit(Rect::new(x, y, width, 1), hit);
+        x += width + 2;
+    }
+    if app.diagnostics.omitted() > 0 && content.height >= 2 {
+        let label = "x dismiss overflow count";
+        let y = y.saturating_sub(1);
+        put(buf, content.x, y, label, Style::new().fg(theme.muted()));
+        ui.hit(
+            Rect::new(content.x, y, content.width, 1),
+            Hit::Act(Action::DismissDiagnosticOverflow),
+        );
     }
 }
