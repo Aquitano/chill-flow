@@ -132,11 +132,11 @@ impl Inspection {
     pub fn notice(&self, today: Date) -> Option<String> {
         let tool = self.tool;
         let detail = match &self.state {
-            State::Missing => format!("{} is missing. {}.", tool.name(), tool.install()),
-            State::Broken(error) => format!("{} is broken: {error}. Repair it with {}.", tool.name(), tool.install()),
+            State::Missing => format!("{} is missing.", tool.name()),
+            State::Broken(error) => format!("{} is broken: {error}.", tool.name()),
             State::Installed(version) => {
-                let days = tool.stale_days(version, today)?;
-                format!("{} is {days} days old and may fail. {}.", tool.name(), tool.upgrade())
+                tool.stale_days(version, today)?;
+                format!("{} is out of date and may fail.", tool.name())
             }
         };
         Some(format!("{detail} It {}. Run chill doctor for details.", tool.purpose()))
@@ -224,6 +224,45 @@ mod tests {
         .unwrap_err();
         assert!(format!("{error:#}").contains("timed out"));
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn dependency_notices_are_stable_and_leave_install_guidance_to_doctor() {
+        let today = Date::new(2026, 10, 19).unwrap();
+        let stale = Inspection {
+            tool: Tool::YtDlp,
+            path: None,
+            state: State::Installed("2026.06.01".into()),
+        };
+        assert_eq!(stale.notice(today), stale.notice(Date::new(2026, 10, 20).unwrap()));
+        assert_eq!(
+            stale.notice(today).unwrap(),
+            "yt-dlp is out of date and may fail. It resolves YouTube links. Run chill doctor for details."
+        );
+        for tool in Tool::ALL {
+            let mut inspection = Inspection {
+                tool,
+                path: None,
+                state: State::Missing,
+            };
+            assert_eq!(
+                inspection.notice(today).unwrap(),
+                format!(
+                    "{} is missing. It {}. Run chill doctor for details.",
+                    tool.name(),
+                    tool.purpose()
+                )
+            );
+            inspection.state = State::Broken("loader failed".into());
+            assert_eq!(
+                inspection.notice(today).unwrap(),
+                format!(
+                    "{} is broken: loader failed. It {}. Run chill doctor for details.",
+                    tool.name(),
+                    tool.purpose()
+                )
+            );
+        }
     }
 
     #[test]

@@ -99,7 +99,8 @@ pub fn apply(app: &mut App, ui: &mut Ui, action: Action) {
             selected: app
                 .diagnostics
                 .first_pending()
-                .unwrap_or_else(|| app.diagnostics.entries().len().saturating_sub(1)),
+                .or_else(|| app.diagnostics.entries().last())
+                .map_or(0, |entry| entry.id),
             scroll: 0,
         }),
         Action::OpenStats => ui.open(Overlay::Stats),
@@ -425,25 +426,22 @@ fn overlay_key(app: &mut App, ui: &mut Ui, key: KeyEvent) {
                 ui.close();
             }
         }
-        Overlay::Diagnostics { selected, scroll } => {
-            let len = app.diagnostics.entries().len();
-            match key.code {
-                KeyCode::Esc | KeyCode::Char('q' | 'D') => ui.close(),
-                KeyCode::Enter | KeyCode::Char('d') => app.dispatch(Action::DismissDiagnostic(*selected)),
-                KeyCode::Char('x') => app.dispatch(Action::DismissDiagnosticOverflow),
-                KeyCode::Left | KeyCode::Char('h') => {
-                    *selected = selected.saturating_sub(1);
-                    *scroll = 0;
-                }
-                KeyCode::Right | KeyCode::Char('l') => {
-                    *selected = (*selected + 1).min(len.saturating_sub(1));
-                    *scroll = 0;
-                }
-                KeyCode::Up | KeyCode::Char('k') => *scroll = scroll.saturating_sub(1),
-                KeyCode::Down | KeyCode::Char('j') => *scroll = (*scroll + 1).min(crate::diagnostics::MESSAGE_LIMIT),
-                _ => {}
+        Overlay::Diagnostics { selected, scroll } => match key.code {
+            KeyCode::Esc | KeyCode::Char('q' | 'D') => ui.close(),
+            KeyCode::Enter | KeyCode::Char('d') => app.dispatch(Action::DismissDiagnostic(*selected)),
+            KeyCode::Char('x') => app.dispatch(Action::DismissDiagnosticOverflow),
+            KeyCode::Left | KeyCode::Char('h') => {
+                *selected = app.diagnostics.adjacent_entry(*selected, -1).unwrap_or(*selected);
+                *scroll = 0;
             }
-        }
+            KeyCode::Right | KeyCode::Char('l') => {
+                *selected = app.diagnostics.adjacent_entry(*selected, 1).unwrap_or(*selected);
+                *scroll = 0;
+            }
+            KeyCode::Up | KeyCode::Char('k') => *scroll = scroll.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => *scroll = (*scroll + 1).min(crate::diagnostics::MESSAGE_LIMIT),
+            _ => {}
+        },
         Overlay::Settings { selected } => {
             let setting = Setting::ALL[(*selected).min(Setting::ALL.len() - 1)];
             match key.code {
@@ -585,9 +583,7 @@ fn click(app: &mut App, ui: &mut Ui, rect: Rect, hit: Hit, x: u16) {
         Hit::Toast(index) => ui.dismiss_toast(index),
         Hit::DiagnosticEntry(step) => {
             if let Some(Overlay::Diagnostics { selected, scroll }) = &mut ui.overlay {
-                *selected = selected
-                    .saturating_add_signed(step)
-                    .min(app.diagnostics.entries().len().saturating_sub(1));
+                *selected = app.diagnostics.adjacent_entry(*selected, step).unwrap_or(*selected);
                 *scroll = 0;
             }
         }

@@ -332,7 +332,7 @@ impl App {
         {
             self.load_scene(index);
         } else {
-            self.toast(Tone::Error, format!("No scene called \"{target}\""));
+            self.toast(Tone::Info, format!("No scene called \"{target}\""));
         }
     }
 
@@ -1013,7 +1013,7 @@ impl App {
             Action::SyncNow => self.start_sync(true),
             Action::LeaveSync => self.stop_syncing(Tone::Done, "Sync is off. This machine keeps everything it has."),
             Action::EraseSyncData => self.erase_sync_data(),
-            Action::DismissDiagnostic(index) => self.diagnostics.dismiss(index),
+            Action::DismissDiagnostic(id) => self.diagnostics.dismiss(id),
             Action::DismissDiagnosticOverflow => self.diagnostics.dismiss_overflow(),
             Action::Quit => self.quit = true,
             Action::TurnOffSync
@@ -1331,14 +1331,14 @@ impl App {
         }
         match prompt {
             Prompt::OpenUrl if youtube::looks_like_url(text) => self.open_url(text),
-            Prompt::OpenUrl => self.toast(Tone::Error, "That doesn't look like a link"),
+            Prompt::OpenUrl => self.toast(Tone::Info, "That doesn't look like a link"),
             Prompt::AddCatalog if text.starts_with("https://") || text.starts_with("http://") => self.add_catalog(text),
-            Prompt::AddCatalog => self.toast(Tone::Error, "A catalog is a link to its catalog.json"),
+            Prompt::AddCatalog => self.toast(Tone::Info, "A catalog is a link to its catalog.json"),
             Prompt::JoinSync if self.sync_token.is_some() => {
-                self.toast(Tone::Error, "This machine already syncs. Turn off sync first.");
+                self.toast(Tone::Info, "This machine already syncs. Turn off sync first.");
             }
             Prompt::JoinSync if text.contains('.') && !text.contains(char::is_whitespace) => self.join_sync(text),
-            Prompt::JoinSync => self.toast(Tone::Error, "That doesn't look like a sync key"),
+            Prompt::JoinSync => self.toast(Tone::Info, "That doesn't look like a sync key"),
             Prompt::SaveScene => {
                 let scene = Scene {
                     name: text.to_string(),
@@ -1905,10 +1905,17 @@ impl App {
                 let label = self.catalog.sound(&id).map_or(id.clone(), |sound| sound.label.clone());
                 self.toast(Tone::Error, format!("{label}: {message}"));
             }
-            EngineEvent::NoDevice(reason) => self.toast(
-                Tone::Error,
-                format!("No audio output: {reason}. Playback is silent. Select an output device in system sound settings, then restart chill."),
-            ),
+            EngineEvent::NoDevice(reason) => {
+                let recovery = if cfg!(target_os = "linux") {
+                    "If no device was available at startup, restart chill after selecting one."
+                } else {
+                    "chill will retry the connection."
+                };
+                self.toast(
+                    Tone::Error,
+                    format!("No audio output: {reason}. Playback is silent. Select an output device in system sound settings. {recovery}"),
+                );
+            }
         }
     }
 
@@ -2359,6 +2366,25 @@ mod tests {
     }
 
     #[test]
+    fn invalid_user_input_stays_transient() {
+        let mut app = app();
+        app.events.clear();
+        app.launch("unknown scene");
+        app.submit(Prompt::OpenUrl, "not a link");
+        app.submit(Prompt::AddCatalog, "not a link");
+        app.submit(Prompt::JoinSync, "not a key");
+        app.sync_token = Some("existing".into());
+        app.submit(Prompt::JoinSync, "another.key");
+        assert!(app.diagnostics.entries().is_empty());
+        assert_eq!(app.events.len(), 5);
+        assert!(
+            app.events
+                .iter()
+                .all(|event| matches!(event, Event::Toast(Tone::Info, _)))
+        );
+    }
+
+    #[test]
     fn dependency_notices_and_audio_device_reasons_remain_actionable() {
         let mut app = app();
         app.tools_checked(vec![ToolInspection {
@@ -2367,13 +2393,19 @@ mod tests {
             state: crate::tools::State::Missing,
         }]);
         assert!(app.diagnostics.entries()[0].message.contains("deno is missing"));
+        assert!(matches!(app.events.last(), Some(Event::Toast(Tone::Warning, _))));
         app.handle_engine(EngineEvent::NoDevice("device disconnected".into()));
         assert!(
             app.diagnostics
                 .entries()
                 .iter()
                 .any(|entry| entry.message.contains("device disconnected")
-                    && entry.message.contains("system sound settings"))
+                    && entry.message.contains("system sound settings")
+                    && entry.message.contains(if cfg!(target_os = "linux") {
+                        "restart chill"
+                    } else {
+                        "retry the connection"
+                    }))
         );
     }
 

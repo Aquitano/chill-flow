@@ -193,10 +193,10 @@ fn doctor(paths: &config::Paths) -> bool {
                 if let Some(days) = tool.stale_days(version, today) {
                     println!("  {days} days old; YouTube links may fail.");
                 }
+                println!("  update: {}", tool.upgrade());
             }
             _ => println!("  install: {}", tool.install()),
         }
-        println!("  update: {}", tool.upgrade());
     }
     println!();
     let config = match config::load(&paths.config_file) {

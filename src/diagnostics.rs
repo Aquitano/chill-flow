@@ -1,4 +1,4 @@
-use std::io::{Read, Write};
+use std::io::{BufWriter, Read, Write};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -9,6 +9,8 @@ const FILE_LIMIT: u64 = 2 * 1024 * 1024;
 
 #[derive(Deserialize, Serialize)]
 pub struct Diagnostic {
+    #[serde(skip)]
+    pub id: usize,
     pub message: String,
     pub last_seen: String,
     pub occurrences: u64,
@@ -26,6 +28,7 @@ struct History {
 pub struct Diagnostics {
     history: History,
     history_loaded: bool,
+    next_id: usize,
     pub path: PathBuf,
     pub log_error: Option<String>,
 }
@@ -42,7 +45,8 @@ impl Diagnostics {
             file.take(FILE_LIMIT).read_to_string(&mut text)?;
             let mut history: History = serde_json::from_str(&text)?;
             history.entries.truncate(CAPACITY);
-            for entry in &mut history.entries {
+            for (id, entry) in history.entries.iter_mut().enumerate() {
+                entry.id = id;
                 entry.message = redact(&entry.message, None);
                 entry.last_seen.truncate(entry.last_seen.floor_char_boundary(64));
             }
@@ -50,6 +54,7 @@ impl Diagnostics {
         })();
         match loaded {
             Ok(history) => Self {
+                next_id: history.entries.len(),
                 history,
                 history_loaded: true,
                 path,
@@ -58,6 +63,7 @@ impl Diagnostics {
             Err(error) => Self {
                 history: History::default(),
                 history_loaded: false,
+                next_id: 0,
                 path,
                 log_error: Some(format!(
                     "Could not read diagnostic log: {error}. New entries stay in memory. Restore access to the log and restart chill to resume saving."
@@ -79,8 +85,18 @@ impl Diagnostics {
             + usize::from(self.history.omitted > 0 && !self.history.overflow_dismissed)
     }
 
-    pub fn first_pending(&self) -> Option<usize> {
-        self.history.entries.iter().position(|entry| !entry.dismissed)
+    pub fn first_pending(&self) -> Option<&Diagnostic> {
+        self.history.entries.iter().find(|entry| !entry.dismissed)
+    }
+
+    pub fn adjacent_entry(&self, id: usize, step: isize) -> Option<usize> {
+        let entries = self.entries();
+        let index = entries
+            .iter()
+            .position(|entry| entry.id == id)
+            .map(|index| index.saturating_add_signed(step).min(entries.len().saturating_sub(1)))
+            .unwrap_or(0);
+        entries.get(index).map(|entry| entry.id)
     }
 
     pub fn record(&mut self, message: &str, secret: Option<&str>) {
@@ -102,17 +118,19 @@ impl Diagnostics {
                 }
             }
             self.history.entries.push(Diagnostic {
+                id: self.next_id,
                 message,
                 last_seen: now,
                 occurrences: 1,
                 dismissed: false,
             });
+            self.next_id += 1;
         }
         self.save();
     }
 
-    pub fn dismiss(&mut self, index: usize) {
-        if let Some(entry) = self.history.entries.get_mut(index) {
+    pub fn dismiss(&mut self, id: usize) {
+        if let Some(entry) = self.history.entries.iter_mut().find(|entry| entry.id == id) {
             entry.dismissed = true;
             self.save();
         }
@@ -130,14 +148,16 @@ impl Diagnostics {
         let result = (|| -> anyhow::Result<()> {
             let mut file =
                 tempfile::NamedTempFile::new_in(self.path.parent().unwrap_or_else(|| std::path::Path::new(".")))?;
-            serde_json::to_writer(&mut file, &self.history)?;
-            file.flush()?;
+            let mut writer = BufWriter::new(&mut file);
+            serde_json::to_writer(&mut writer, &self.history)?;
+            writer.flush()?;
+            drop(writer);
             file.persist(&self.path)?;
             Ok(())
         })();
-        if let Err(error) = result {
-            self.log_error = Some(format!("Could not save diagnostic log: {error}"));
-        }
+        self.log_error = result
+            .err()
+            .map(|error| format!("Could not save diagnostic log: {error}"));
     }
 }
 
@@ -215,6 +235,7 @@ mod tests {
 
         std::fs::write(&path, &valid).unwrap();
         failed.record("another failure", None);
+        assert!(failed.log_error.is_some());
         assert_eq!(std::fs::read(&path).unwrap(), valid);
         let mut recovered = Diagnostics::new(path.clone());
         assert!(recovered.log_error.is_none());
@@ -240,6 +261,14 @@ mod tests {
         diagnostics.record("new failure", None);
         assert_eq!(diagnostics.entries()[0].message, "failure 1");
         assert_eq!(diagnostics.entries().last().unwrap().message, "new failure");
+        assert_eq!(diagnostics.entries().last().unwrap().id, CAPACITY);
+        let log = std::fs::read_to_string(&diagnostics.path).unwrap();
+        assert!(!log.contains("\"id\""));
+        let mut restored = Diagnostics::new(diagnostics.path.clone());
+        assert!(restored.entries().iter().enumerate().all(|(id, entry)| entry.id == id));
+        restored.dismiss(restored.entries()[0].id);
+        restored.record("failure after reload", None);
+        assert_eq!(restored.entries().last().unwrap().id, CAPACITY);
     }
 
     #[test]

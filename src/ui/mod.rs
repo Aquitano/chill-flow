@@ -383,11 +383,12 @@ impl Ui {
         self.cover_rect = None;
 
         let area = frame.area();
-        let notice_height = if app.diagnostics.pending() > 0 && area.height >= 6 {
-            2
-        } else {
-            0
-        };
+        let notice_height =
+            if (app.diagnostics.pending() > 0 || app.diagnostics.log_error.is_some()) && area.height >= 6 {
+                2
+            } else {
+                0
+            };
         let [header, body, notice, footer] = Layout::vertical([
             Constraint::Length(1),
             Constraint::Fill(1),
@@ -762,6 +763,134 @@ mod tests {
         );
         assert_eq!(app.diagnostics.pending(), 1);
         assert_eq!(app.diagnostics.entries().len(), 2);
+    }
+
+    #[test]
+    fn diagnostic_log_failures_stay_visible_without_pending_entries_until_save_recovers() {
+        let mut app = offline_app();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), true);
+        let mut terminal = Terminal::new(TestBackend::new(90, 24)).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("diagnostics.json");
+        std::fs::write(&path, "invalid json").unwrap();
+        app.diagnostics = crate::diagnostics::Diagnostics::new(path);
+        for operation in ["read", "save"] {
+            if operation == "save" {
+                app.diagnostics = crate::diagnostics::Diagnostics::new(dir.path().join("missing/log.json"));
+                app.diagnostics.record("failure", None);
+                let id = app.diagnostics.entries()[0].id;
+                app.diagnostics.dismiss(id);
+            }
+            assert_eq!(app.diagnostics.pending(), 0);
+            terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+            let notice = ui
+                .hits
+                .iter()
+                .find(|(rect, hit)| rect.height == 2 && *hit == Hit::Act(Action::OpenDiagnostics))
+                .unwrap()
+                .0;
+            let row = |y| {
+                (notice.x..notice.right())
+                    .map(|x| terminal.backend().buffer()[(x, y)].symbol())
+                    .collect::<String>()
+            };
+            assert!(row(notice.y).contains("diagnostics: log unavailable"));
+            assert!(row(notice.y + 1).contains(&format!("Could not {operation} diagnostic log")));
+        }
+        std::fs::create_dir(dir.path().join("missing")).unwrap();
+        app.diagnostics.dismiss_overflow();
+        assert!(app.diagnostics.log_error.is_none());
+        assert!(app.diagnostics.path.is_file());
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        assert!(
+            !ui.hits
+                .iter()
+                .any(|(rect, hit)| { rect.height == 2 && *hit == Hit::Act(Action::OpenDiagnostics) })
+        );
+    }
+
+    #[test]
+    fn diagnostic_selection_and_stale_mouse_dismissals_follow_entry_identity() {
+        let mut app = offline_app();
+        for index in 0..100 {
+            app.diagnostics.record(&format!("failure {index}"), None);
+        }
+        let selected = app.diagnostics.entries()[50].id;
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), true);
+        let mut terminal = Terminal::new(TestBackend::new(90, 24)).unwrap();
+        ui.open(Overlay::Diagnostics { selected, scroll: 0 });
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        let dismiss = ui
+            .hits
+            .iter()
+            .find(|(_, hit)| *hit == Hit::Act(Action::DismissDiagnostic(selected)))
+            .unwrap()
+            .0;
+        let click = Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: dismiss.x,
+            row: dismiss.y,
+            modifiers: KeyModifiers::NONE,
+        });
+        let first = app.diagnostics.entries()[0].id;
+        app.diagnostics.dismiss(first);
+        app.diagnostics.record("replacement for first entry", None);
+        input::handle(&mut app, &mut ui, click.clone());
+        assert!(app.diagnostics.entries()[49].dismissed);
+        assert!(!app.diagnostics.entries()[50].dismissed);
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("50 of 100 · dismissed"));
+        assert!(rendered.contains("failure 50"));
+        input::handle(
+            &mut app,
+            &mut ui,
+            Event::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)),
+        );
+        assert!(matches!(ui.overlay, Some(Overlay::Diagnostics { selected: id, .. }) if id == selected - 1));
+        input::handle(
+            &mut app,
+            &mut ui,
+            Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)),
+        );
+        assert!(matches!(ui.overlay, Some(Overlay::Diagnostics { selected: id, .. }) if id == selected));
+
+        app.diagnostics.record("replacement for selected entry", None);
+        input::handle(&mut app, &mut ui, click);
+        input::handle(
+            &mut app,
+            &mut ui,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert_eq!(app.diagnostics.pending(), 100);
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("This entry is no longer in the history."));
+        assert!(
+            !ui.hits
+                .iter()
+                .any(|(_, hit)| matches!(hit, Hit::Act(Action::DismissDiagnostic(_))))
+        );
+        input::handle(
+            &mut app,
+            &mut ui,
+            Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)),
+        );
+        assert!(
+            matches!(ui.overlay, Some(Overlay::Diagnostics { selected: id, .. }) if id == app.diagnostics.entries()[0].id)
+        );
     }
 
     #[test]

@@ -664,7 +664,11 @@ pub fn diagnostic_notice(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
     let theme = ui.theme;
     fill(buf, area, Style::new().bg(theme.raised()));
     let pending = app.diagnostics.pending();
-    let heading = format!("D diagnostics ({pending})");
+    let heading = if app.diagnostics.log_error.is_some() {
+        "D diagnostics: log unavailable".to_owned()
+    } else {
+        format!("D diagnostics ({pending})")
+    };
     put(
         buf,
         area.x + 1,
@@ -675,8 +679,9 @@ pub fn diagnostic_notice(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
     ui.hit(area, Hit::Act(Action::OpenDiagnostics));
     let message = app
         .diagnostics
-        .first_pending()
-        .map(|index| app.diagnostics.entries()[index].message.as_str())
+        .log_error
+        .as_deref()
+        .or_else(|| app.diagnostics.first_pending().map(|entry| entry.message.as_str()))
         .unwrap_or("More failures occurred while the history was full. Open diagnostics for the count.");
     put(
         buf,
@@ -691,12 +696,12 @@ fn diagnostics(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, selected:
     let theme = ui.theme;
     let content = dialog(buf, screen, 88, 23, None, "Recent errors and diagnostics", ui);
     let entries = app.diagnostics.entries();
-    let selected = selected.min(entries.len().saturating_sub(1));
+    let selected_entry = entries.iter().enumerate().find(|(_, entry)| entry.id == selected);
     let mut lines = Vec::new();
-    if let Some(entry) = entries.get(selected) {
+    if let Some((index, entry)) = selected_entry {
         lines.push(format!(
             "{} of {} · {} · seen {} times",
-            selected + 1,
+            index + 1,
             entries.len(),
             if entry.dismissed { "dismissed" } else { "unresolved" },
             entry.occurrences
@@ -704,8 +709,10 @@ fn diagnostics(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, selected:
         lines.push(format!("Last seen: {}", entry.last_seen));
         lines.push(String::new());
         lines.push(entry.message.clone());
-    } else {
+    } else if entries.is_empty() {
         lines.push("No recent errors or dependency notices.".into());
+    } else {
+        lines.push("This entry is no longer in the history. Use left or right to select another.".into());
     }
     if app.diagnostics.omitted() > 0 {
         lines.push(format!(
@@ -737,6 +744,9 @@ fn diagnostics(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, selected:
     let y = content.bottom().saturating_sub(1);
     let mut x = content.x;
     for (label, hit) in controls {
+        if selected_entry.is_none() && matches!(hit, Hit::Act(Action::DismissDiagnostic(_))) {
+            continue;
+        }
         let width = label.width() as u16;
         put(buf, x, y, label, Style::new().fg(theme.muted()));
         ui.hit(Rect::new(x, y, width, 1), hit);
