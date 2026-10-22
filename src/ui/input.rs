@@ -193,6 +193,7 @@ fn key_pressed(app: &mut App, ui: &mut Ui, key: KeyEvent) {
         KeyCode::Char('F') => Some(Action::ToggleTimerPanel),
         KeyCode::Char('H') => Some(Action::ToggleLibraryPanel),
         KeyCode::Char('L') => Some(Action::ToggleSidePanel),
+        KeyCode::Char('v') => Some(Action::AdjustSetting(Setting::Picture, 1)),
         KeyCode::Char('o') => Some(Action::OpenPrompt(Prompt::OpenUrl)),
         KeyCode::Char(':') => Some(Action::OpenPalette),
         KeyCode::Char('?') => Some(Action::OpenHelp),

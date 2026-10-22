@@ -55,6 +55,7 @@ Paste a YouTube link anywhere in the app to add it to the library and play it. E
 | `t` / `T` | start or pause the timer / reset it |
 | `F` | hide the timer until you use it again |
 | `H` / `L` | hide or show the left / right side |
+| `v` | next picture in the player |
 | `o` | open a YouTube link |
 | `c` | settings |
 | `tab` | move between library, queue, and ambience |
@@ -65,6 +66,8 @@ The library has five tabs. Tracks come from the catalog. Liked holds what you li
 To update a saved playlist, select it in YouTube and press `R`, click **R refresh**, or search for **Refresh playlist** in the command palette.
 
 The slider between music and ambience at the top of the Ambience panel turns one down against the other, for a loud stream or quiet rain, without touching the volume. A soundscape has no music, so the balance leaves it alone. White, pink, and brown noise sit below the recordings; chill generates them, so they need no download and play offline.
+
+The player shows the cover of what's playing, or `v` swaps it for a moving picture drawn in text: Night lake, Fuji at dawn, or Autumn pagoda. A picture moves while something plays and shows the ambience you hear: rain falls while a rain sound plays, thunder lights up the sky, wind sways trees and water, and crickets bring out fireflies. Night lake uses your terminal's colors; the other two bring their own. **Settings** chooses the picture and what draws it: braille dots, pixels, or blocks with two colors per cell. Pixels are octant characters from Unicode 16, which Ghostty draws itself; other terminals need a font that has them.
 
 Focus stats count every minute a focus block ran, including blocks you stopped early. Breaks never count. The header shows today's total and a seven-day sparkline; press `i` for the chart.
 
@@ -114,13 +117,15 @@ The server is the Worker in [`sync/`](sync/README.md). It stores what syncs as i
 
 ## Configuration
 
-Press `c` for settings: timer lengths, auto-start, the chime, notifications, and reduced motion. Changes save to `config.toml` right away, keeping anything else you wrote in it. The file is optional and lives in `~/.config/chill/` on macOS and `%APPDATA%\chill\` on Windows. These are the defaults:
+Press `c` for settings: timer lengths, auto-start, the chime, notifications, the picture, and reduced motion. Changes save to `config.toml` right away, keeping anything else you wrote in it. The file is optional and lives in `~/.config/chill/` on macOS and `%APPDATA%\chill\` on Windows. These are the defaults:
 
 ```toml
 catalog_url = "https://chill-data.aquitano.me/catalog.json"
 catalogs = []           # more catalog.json links, added with "Add a catalog"
 sync_url = "https://chill-sync.aquitano.me"
-reduce_motion = false   # true turns off transitions and the visualizer
+reduce_motion = false   # true turns off transitions and the visualizer, and holds pictures still
+picture = "cover"       # or "night-lake", "fuji-dawn", "autumn-pagoda"
+look = "dots"           # how pictures are drawn: "dots", "pixels", or "blocks"
 chime = true            # a soft bell when a focus block or break ends
 notifications = true    # an OS notification at the same moments
 
@@ -159,4 +164,4 @@ On Linux the build needs `libasound2-dev`. CI runs the checks on Linux, macOS, a
 
 ## License
 
-The code is licensed under the [Apache License 2.0](LICENSE). The audio in the catalog is not part of this repository and keeps the licenses listed above.
+The code is licensed under the [Apache License 2.0](LICENSE). The Fuji at dawn and Autumn pagoda pictures are ported from [ascii-magic-art](https://github.com/kailashsr38/ascii-magic-art) and keep its [MIT license](licenses/ascii-magic-art.txt). The audio in the catalog is not part of this repository and keeps the licenses listed above.

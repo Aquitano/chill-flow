@@ -1,4 +1,5 @@
 use crate::timer::TimerMode;
+use crate::ui::picture::Picture;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -94,11 +95,13 @@ pub enum Setting {
     AutoStartFocus,
     Chime,
     Notifications,
+    Picture,
+    Look,
     ReduceMotion,
 }
 
 impl Setting {
-    pub const ALL: [Setting; 9] = [
+    pub const ALL: [Setting; 11] = [
         Setting::FocusMinutes,
         Setting::BreakMinutes,
         Setting::LongBreakMinutes,
@@ -107,6 +110,8 @@ impl Setting {
         Setting::AutoStartFocus,
         Setting::Chime,
         Setting::Notifications,
+        Setting::Picture,
+        Setting::Look,
         Setting::ReduceMotion,
     ];
 
@@ -120,6 +125,8 @@ impl Setting {
             Setting::AutoStartFocus => "Start focus on its own",
             Setting::Chime => "Chime between phases",
             Setting::Notifications => "Notify between phases",
+            Setting::Picture => "Picture",
+            Setting::Look => "Picture drawn with",
             Setting::ReduceMotion => "Reduce motion",
         }
     }
@@ -128,7 +135,7 @@ impl Setting {
     pub fn group(self) -> &'static str {
         match self {
             Setting::Chime | Setting::Notifications => "Sound",
-            Setting::ReduceMotion => "Display",
+            Setting::Picture | Setting::Look | Setting::ReduceMotion => "Display",
             _ => "Timer",
         }
     }
@@ -191,6 +198,7 @@ pub enum Action {
     ToggleLibraryPanel,
     /// The ambience panel and the timer beside it.
     ToggleSidePanel,
+    SetPicture(Picture),
     SetLevel(String, u8),
     LevelBy(String, i16),
     ApplyMix(usize),

@@ -973,6 +973,10 @@ impl App {
             Action::ToggleTimerPanel => self.timer_hidden = !self.timer_hidden,
             Action::ToggleLibraryPanel => self.library_hidden = !self.library_hidden,
             Action::ToggleSidePanel => self.side_hidden = !self.side_hidden,
+            Action::SetPicture(picture) => {
+                self.config.picture = picture;
+                self.save_config();
+            }
             Action::SetLevel(id, level) => {
                 self.set_level(&id, level);
                 self.mix_name = self.matching_mix_name();
@@ -1553,6 +1557,8 @@ impl App {
             Setting::AutoStartFocus => toggle(pomodoro.auto_start_focus),
             Setting::Chime => toggle(self.config.chime),
             Setting::Notifications => toggle(self.config.notifications),
+            Setting::Picture => self.config.picture.label().to_string(),
+            Setting::Look => self.config.look.label().to_string(),
             Setting::ReduceMotion => toggle(self.config.reduce_motion),
         }
     }
@@ -1575,16 +1581,22 @@ impl App {
             Setting::AutoStartFocus => pomodoro.auto_start_focus = !pomodoro.auto_start_focus,
             Setting::Chime => self.config.chime = !self.config.chime,
             Setting::Notifications => self.config.notifications = !self.config.notifications,
+            Setting::Picture => self.config.picture = self.config.picture.step(delta),
+            Setting::Look => self.config.look = self.config.look.step(delta),
             Setting::ReduceMotion => self.config.reduce_motion = !self.config.reduce_motion,
         }
         self.timer.set_settings(self.config.pomodoro);
+        // How a picture looks depends on each terminal's font, so pictures stay on this machine.
         let synced_as = match setting {
-            Setting::Chime => "chime",
-            Setting::Notifications => "notifications",
-            Setting::ReduceMotion => "reduce_motion",
-            _ => "pomodoro",
+            Setting::Chime => Some("chime"),
+            Setting::Notifications => Some("notifications"),
+            Setting::ReduceMotion => Some("reduce_motion"),
+            Setting::Picture | Setting::Look => None,
+            _ => Some("pomodoro"),
         };
-        self.note_setting_changed(synced_as);
+        if let Some(name) = synced_as {
+            self.note_setting_changed(name);
+        }
         self.save_config();
     }
 

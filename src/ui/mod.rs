@@ -2,6 +2,7 @@ pub mod anim;
 pub mod input;
 mod overlay;
 mod panels;
+pub mod picture;
 pub mod theme;
 pub mod widgets;
 
@@ -17,6 +18,7 @@ use ratatui_image::{FilterType, Resize, StatefulImage};
 use crate::action::{Action, Panel, Prompt, Tab};
 use crate::app::{App, Event, Tone};
 use anim::{Bars, Tween};
+use picture::{Scene, Weather};
 use theme::Theme;
 
 pub enum Overlay {
@@ -97,6 +99,7 @@ pub struct Ui {
     cover_rect: Option<Rect>,
     dialog_area: Option<Rect>,
     bars: Bars,
+    scene: Scene,
     tab_x: Tween,
     tab_width: Tween,
     volume: Tween,
@@ -140,6 +143,7 @@ impl Ui {
             cover_rect: None,
             dialog_area: None,
             bars: Bars::default(),
+            scene: Scene::default(),
             tab_x: Tween::new(0.0),
             tab_width: Tween::new(0.0),
             volume: Tween::new(0.0),
@@ -234,6 +238,14 @@ impl Ui {
             Panel::Queue => 1,
             Panel::Ambience => 2,
         }
+    }
+
+    /// The ambience as pictures show it, eased like the sliders.
+    fn weather(&self, app: &App, now: Instant) -> Weather {
+        Weather::from_sounds(app.catalog.ambient.iter().map(|sound| {
+            let level = self.levels.get(&sound.id).map_or(0.0, |tween| tween.value(now));
+            (sound.id.as_str(), level)
+        }))
     }
 
     pub fn show_tab(&mut self, app: &mut App, tab: Tab) {
@@ -335,6 +347,9 @@ impl Ui {
         if self.motion {
             app.engine.spectrum(self.bars.raw_mut());
             self.bars.update(elapsed.as_secs_f32().min(0.1));
+            if app.is_playing() {
+                self.scene.advance(elapsed.as_secs_f32().min(0.1));
+            }
         }
         self.toasts.retain(|toast| now.duration_since(toast.born) < toast.life);
         self.hits.clear();
@@ -463,7 +478,7 @@ mod tests {
     }
 
     fn random_event(rng: &mut fastrand::Rng, width: u16, height: u16) -> Event {
-        const KEYS: &str = " npfsrtTxmFo:?ic[]12345adjkhlgG/JK0,.+-<>qyzHL";
+        const KEYS: &str = " npfsrtTxmFo:?ic[]12345adjkhlgG/JK0,.+-<>qyzvHL";
         let code = |rng: &mut fastrand::Rng| match rng.u8(..12) {
             0 => KeyCode::Enter,
             1 => KeyCode::Esc,
@@ -701,6 +716,29 @@ mod tests {
 
         assert_eq!(press(&mut app, KeyCode::Char('2')), Panel::Library);
         assert!(!app.library_hidden);
+    }
+
+    #[test]
+    fn a_picture_takes_the_place_of_the_cover_and_spectrum_below_the_title() {
+        let mut app = offline_app();
+        let mut ui = Ui::new(
+            Theme::new(Some(([205, 214, 244], [30, 30, 46]))),
+            Picker::halfblocks(),
+            false,
+        );
+        let title = app.current().map(|item| item.title.clone()).unwrap_or_default();
+        let mut terminal = Terminal::new(TestBackend::new(160, 44)).unwrap();
+        let mut draw = |app: &mut TestApp| {
+            terminal.draw(|frame| ui.draw(frame, app)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let page: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+            let dotted = page.chars().any(|ch| ('\u{2801}'..='\u{28ff}').contains(&ch));
+            (page.contains(&title), dotted)
+        };
+        assert_eq!(draw(&mut app), (true, false));
+
+        app.dispatch(Action::SetPicture(picture::Picture::NightLake));
+        assert_eq!(draw(&mut app), (true, true));
     }
 
     #[test]
