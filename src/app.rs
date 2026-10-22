@@ -1072,15 +1072,20 @@ impl App {
         self.refresh_ambience();
     }
 
-    /// Soundscapes have no music to balance against, so they keep the ambience at its levels.
-    /// The floor is inaudible but keeps the sounds loaded, since a silent lane is dropped and
-    /// would have to be decoded again.
-    fn ambience_share(&self) -> f32 {
+    /// How much of the ambience the balance lets through, from 0 to 1. Soundscapes have no music
+    /// to balance against, so they keep the ambience at its levels.
+    pub fn ambience_heard(&self) -> f32 {
         if self.source == Source::Soundscape {
             1.0
         } else {
-            (2.0 * self.balance).clamp(0.1, 1.0)
+            (2.0 * self.balance).min(1.0)
         }
+    }
+
+    /// The floor is inaudible but keeps the sounds loaded, since a silent lane is dropped and
+    /// would have to be decoded again.
+    fn ambience_share(&self) -> f32 {
+        self.ambience_heard().max(0.1)
     }
 
     fn refresh_ambience(&mut self) {

@@ -69,10 +69,12 @@ impl Picture {
     /// How the picture looks best: halftone dots for one drawn in the theme's colors, pixels for
     /// one that brings its own.
     fn look(self) -> Look {
-        match self {
-            Picture::Cover | Picture::NightLake => Look::Dots,
-            Picture::FujiDawn | Picture::AutumnPagoda => Look::Pixels,
-        }
+        if self.painted() { Look::Pixels } else { Look::Dots }
+    }
+
+    /// Whether the picture brings its own colors instead of the theme's.
+    fn painted(self) -> bool {
+        matches!(self, Picture::FujiDawn | Picture::AutumnPagoda)
     }
 }
 
@@ -156,7 +158,10 @@ impl Weather {
 
 /// Moving pictures change twelve times a second, so a terminal redrawing at thirty only receives
 /// the cells that changed on those frames.
-const FPS: f32 = 12.0;
+const FPS: f64 = 12.0;
+/// Pictures start their day over after a day of playing, so the time they're drawn at never
+/// grows past what an `f32` keeps exact.
+const FRAMES_A_DAY: u64 = 12 * 60 * 60 * 24;
 
 enum Art {
     NightLake,
@@ -197,7 +202,7 @@ struct Shown {
     look: Look,
     columns: u16,
     rows: u16,
-    frame: f32,
+    frame: u64,
     weather: Weather,
 }
 
@@ -205,7 +210,7 @@ struct Shown {
 /// weather changes; in between, the same glyphs are copied into each redraw.
 #[derive(Default)]
 pub struct Scene {
-    clock: f32,
+    clock: f64,
     art: Option<Art>,
     canvas: Canvas,
     glyphs: Vec<Option<Glyph>>,
@@ -215,7 +220,7 @@ pub struct Scene {
 impl Scene {
     /// Moves the picture on. It holds still for as long as this isn't called.
     pub fn advance(&mut self, seconds: f32) {
-        self.clock += seconds;
+        self.clock += f64::from(seconds);
     }
 
     pub fn draw(
@@ -235,7 +240,7 @@ impl Scene {
             look: look.of(picture),
             columns: area.width,
             rows: area.height,
-            frame: (self.clock * FPS).floor(),
+            frame: (self.clock * FPS) as u64,
             weather,
         };
         if self.shown.as_ref() != Some(&shown) {
@@ -243,14 +248,14 @@ impl Scene {
                 self.art = Art::new(picture);
             }
             let Some(art) = &mut self.art else { return };
-            let t = shown.frame / FPS;
+            let t = ((shown.frame % FRAMES_A_DAY) as f64 / FPS) as f32;
             self.canvas
                 .resize(usize::from(area.width) * 2, usize::from(area.height) * 4);
             art.paint(&mut self.canvas, t, &weather);
             canvas::rain(&mut self.canvas, t, weather.rain, weather.wind);
             canvas::fireflies(&mut self.canvas, t, weather.crickets, picture.fireflies());
             canvas::brighten(&mut self.canvas, canvas::lightning(t, weather.thunder));
-            self.glyphs = glyphs(&self.canvas, shown.look, theme);
+            glyphs(&mut self.glyphs, &self.canvas, shown.look, theme, picture.painted());
             self.shown = Some(shown);
         }
         let columns = usize::from(area.width);
@@ -276,12 +281,13 @@ fn threshold(x: usize, y: usize) -> f32 {
 type Glyph = (char, Color, Option<Color>);
 
 /// One glyph per cell, row by row, from the canvas's dots eight at a time.
-fn glyphs(canvas: &Canvas, look: Look, theme: &Theme) -> Vec<Option<Glyph>> {
+fn glyphs(glyphs: &mut Vec<Option<Glyph>>, canvas: &Canvas, look: Look, theme: &Theme, painted: bool) {
     let dark = !theme.is_light();
-    // Two colors to a cell need the theme's colors to blend, so without them dots stand in.
-    let look = if theme.has_rgb() { look } else { Look::Dots };
+    // Two colors to a cell paint the background too, which a picture in the theme's colors can
+    // only do knowing what the theme's colors are.
+    let look = if theme.has_rgb() || painted { look } else { Look::Dots };
     let (columns, rows) = (canvas.width / 2, canvas.height / 4);
-    let mut glyphs = Vec::with_capacity(columns * rows);
+    glyphs.clear();
     for row in 0..rows {
         for column in 0..columns {
             let (left, top) = (column * 2, row * 4);
@@ -293,7 +299,6 @@ fn glyphs(canvas: &Canvas, look: Look, theme: &Theme) -> Vec<Option<Glyph>> {
             });
         }
     }
-    glyphs
 }
 
 /// The cell's eight dots as four, two across and two down, each the blend of the two dots it
@@ -309,11 +314,12 @@ fn quarters(dots: &[Dot; 8], theme: &Theme) -> [Dot; 4] {
     })
 }
 
-/// A dot's own color, with theme shades taken at face value since the cell's background is drawn too.
+/// A dot's own color, with theme shades taken at face value since the cell's background is drawn
+/// too. Without the theme's colors, rain over a painted picture falls in plain grey.
 fn color(dot: &Dot, theme: &Theme) -> Rgb {
     match dot.ink {
         Ink::Paint(color) => color,
-        _ => rgb_of(theme.mix(dot.light)).unwrap_or([0.0; 3]),
+        _ => rgb_of(theme.mix(dot.light)).unwrap_or([dot.light * 255.0; 3]),
     }
 }
 

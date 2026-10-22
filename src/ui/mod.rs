@@ -18,7 +18,7 @@ use ratatui_image::{FilterType, Resize, StatefulImage};
 use crate::action::{Action, Panel, Prompt, Tab};
 use crate::app::{App, Event, Tone};
 use anim::{Bars, Tween};
-use picture::{Scene, Weather};
+use picture::{Picture, Scene, Weather};
 use theme::Theme;
 
 pub enum Overlay {
@@ -240,11 +240,13 @@ impl Ui {
         }
     }
 
-    /// The ambience as pictures show it, eased like the sliders.
+    /// The ambience as pictures show it: eased like the sliders, and as loud as the balance
+    /// lets it be heard over the music.
     fn weather(&self, app: &App, now: Instant) -> Weather {
+        let heard = app.ambience_heard();
         Weather::from_sounds(app.catalog.ambient.iter().map(|sound| {
             let level = self.levels.get(&sound.id).map_or(0.0, |tween| tween.value(now));
-            (sound.id.as_str(), level)
+            (sound.id.as_str(), level * heard)
         }))
     }
 
@@ -353,7 +355,12 @@ impl Ui {
         self.last_frame = now;
         self.absorb(app, now);
         if self.motion {
-            app.engine.spectrum(self.bars.raw_mut());
+            // A picture stands in for the spectrum, so its bars just fall still.
+            if app.config.picture == Picture::Cover {
+                app.engine.spectrum(self.bars.raw_mut());
+            } else {
+                self.bars.raw_mut().fill(0.0);
+            }
             self.bars.update(elapsed.as_secs_f32().min(0.1));
             if app.is_playing() {
                 self.scene.advance(elapsed.as_secs_f32().min(0.1));
