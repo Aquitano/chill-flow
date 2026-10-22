@@ -3,6 +3,8 @@ pub mod input;
 mod overlay;
 mod panels;
 pub mod picture;
+#[cfg(test)]
+mod review;
 pub mod theme;
 pub mod widgets;
 
@@ -351,7 +353,10 @@ impl Ui {
     }
 
     pub fn draw(&mut self, frame: &mut Frame, app: &mut App) {
-        let now = Instant::now();
+        self.draw_at(frame, app, Instant::now());
+    }
+
+    fn draw_at(&mut self, frame: &mut Frame, app: &mut App, now: Instant) {
         let elapsed = now.duration_since(self.last_frame);
         self.last_frame = now;
         self.absorb(app, now);
@@ -430,7 +435,7 @@ impl Ui {
             }
             panels::player(buf, player, app, self, now);
             panels::reopen_handles(buf, body, player, app, self);
-            let timer = !app.timer_hidden && !app.side_hidden;
+            let timer = app.timer_panel_visible();
             if app.side_hidden {
                 panels::queue(buf, bottom, app, self);
             } else if split && timer {
@@ -461,7 +466,8 @@ impl Ui {
                 _ => panels::queue(buf, bottom, app, self),
             }
         }
-        let show_timer = !clock_shown && (!app.timer_hidden || app.timer.is_running());
+        let show_timer =
+            !clock_shown && (!app.timer_hidden || app.timer.is_running() || !app.timer.elapsed(now).is_zero());
         panels::header(buf, header, app, self, now, show_timer);
 
         overlay::toasts(buf, footer, self, now);
@@ -706,7 +712,7 @@ mod tests {
     }
 
     #[test]
-    fn a_hidden_timer_leaves_the_page_and_shows_in_the_header_only_while_running() {
+    fn a_hidden_idle_timer_leaves_the_page_until_started() {
         let mut app = offline_app();
         let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
         let mut terminal = Terminal::new(TestBackend::new(160, 44)).unwrap();
@@ -727,8 +733,75 @@ mod tests {
         assert_eq!(draw(&mut app), (false, false));
 
         app.dispatch(Action::TimerToggle);
-        app.dispatch(Action::ToggleTimerPanel);
         assert_eq!(draw(&mut app), (true, false));
+    }
+
+    #[test]
+    fn timer_keys_header_click_and_palette_keep_visibility_separate() {
+        for width in [96, 160] {
+            let mut app = TestApp::offline();
+            let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), true);
+            let mut terminal = Terminal::new(TestBackend::new(width, 44)).unwrap();
+            ui.focus = Panel::Queue;
+            app.side_hidden = true;
+            app.timer_hidden = true;
+            let command = |app: &App| {
+                overlay::commands(app)
+                    .into_iter()
+                    .find(|command| command.action == Action::ToggleTimerPanel)
+                    .unwrap()
+            };
+            assert_eq!(command(&app).label, "Timer: show");
+            input::handle(
+                &mut app,
+                &mut ui,
+                Event::Key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE)),
+            );
+            assert!(app.timer.is_running() && app.side_hidden && app.timer_hidden);
+            app.timer.pause(Instant::now());
+            app.timer.start(Instant::now() - Duration::from_secs(60));
+            for running in [false, true] {
+                terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+                let (rect, _) = ui
+                    .hits
+                    .iter()
+                    .find(|(rect, hit)| rect.y == 0 && *hit == Hit::Act(Action::TimerToggle))
+                    .unwrap();
+                let click = MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: rect.x,
+                    row: rect.y,
+                    modifiers: KeyModifiers::NONE,
+                };
+                input::handle(&mut app, &mut ui, Event::Mouse(click));
+                assert_eq!(app.timer.is_running(), running);
+                assert!(app.side_hidden && app.timer_hidden);
+                terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+                let header: String = (0..width)
+                    .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+                    .collect();
+                assert!(header.contains("focus "));
+                assert_eq!(header.contains("paused"), !running);
+            }
+            let show = command(&app).action;
+            input::apply(&mut app, &mut ui, show);
+            assert!(app.timer_panel_visible());
+            assert_eq!(command(&app).label, "Timer: hide");
+            terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+            let page: String = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert_eq!(page.contains(" Focus "), width == 160);
+            let header: String = (0..width)
+                .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+                .collect();
+            assert_eq!(header.contains("focus "), width == 96);
+            assert_eq!(ui.focus, Panel::Queue);
+        }
     }
 
     #[test]

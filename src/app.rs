@@ -228,6 +228,18 @@ pub enum Event {
 
 impl App {
     pub fn new(config: Config, paths: Paths, store: Store, engine: Engine) -> App {
+        let session = store.session();
+        let mut app = Self::from_store(config, paths, store, engine);
+        app.engine.set_volume(app.volume);
+        app.set_balance(session.balance);
+        app.apply_levels(&session.levels);
+        app.mix_name = app.matching_mix_name();
+        app.restore_playback(&session.playback);
+        app.fetch_catalogs();
+        app
+    }
+
+    fn from_store(config: Config, paths: Paths, store: Store, engine: Engine) -> App {
         let Paths {
             config_file,
             cache: cache_dir,
@@ -302,12 +314,6 @@ impl App {
         };
         app.refresh_mixes();
         app.load_likes();
-        app.engine.set_volume(app.volume);
-        app.set_balance(session.balance);
-        app.apply_levels(&session.levels);
-        app.mix_name = app.matching_mix_name();
-        app.restore_playback(&session.playback);
-        app.fetch_catalogs();
         app
     }
 
@@ -905,17 +911,11 @@ impl App {
         }
     }
 
+    pub fn timer_panel_visible(&self) -> bool {
+        !self.timer_hidden && !self.side_hidden
+    }
+
     pub fn dispatch(&mut self, action: Action) {
-        if matches!(
-            action,
-            Action::TimerToggle
-                | Action::TimerReset
-                | Action::TimerSkip
-                | Action::SetTimerMode(_)
-                | Action::CycleTimerMode
-        ) {
-            self.timer_hidden = false;
-        }
         match action {
             Action::TogglePlay => self.toggle_play(),
             Action::Next => self.skip(true),
@@ -980,7 +980,13 @@ impl App {
                     .map_or(0, |i| i + 1);
                 self.set_timer_mode(presets[index % presets.len()]);
             }
-            Action::ToggleTimerPanel => self.timer_hidden = !self.timer_hidden,
+            Action::ToggleTimerPanel => {
+                let visible = self.timer_panel_visible();
+                self.timer_hidden = visible;
+                if !visible {
+                    self.side_hidden = false;
+                }
+            }
             Action::ToggleLibraryPanel => self.library_hidden = !self.library_hidden,
             Action::ToggleSidePanel => self.side_hidden = !self.side_hidden,
             Action::SetPicture(picture) => {
@@ -2275,6 +2281,28 @@ pub struct TestApp {
 
 #[cfg(test)]
 impl TestApp {
+    pub fn offline() -> TestApp {
+        let files = tempfile::tempdir().unwrap();
+        let cache = files.path().to_path_buf();
+        let config = Config {
+            catalog_url: TEST_CATALOG_URL.into(),
+            chime: false,
+            notifications: false,
+            reduce_motion: true,
+            ..Config::default()
+        };
+        let paths = Paths {
+            config_file: cache.join("config.toml"),
+            database: cache.join("unused.db"),
+            cache: cache.clone(),
+        };
+        let store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        TestApp {
+            app: App::from_store(config, paths, store, Engine::offline(cache)),
+            _files: files,
+        }
+    }
+
     pub fn new() -> TestApp {
         let files = tempfile::tempdir().unwrap();
         let cache = files.path().to_path_buf();
@@ -2672,14 +2700,50 @@ mod tests {
     }
 
     #[test]
-    fn a_hidden_timer_is_saved_and_comes_back_once_it_is_used() {
-        let mut app = app();
-        app.dispatch(Action::ToggleTimerPanel);
-        app.store.save_session(&app.session()).unwrap();
-        assert!(app.store.session().timer_hidden);
+    fn timer_operations_preserve_panel_visibility_and_playback() {
+        for timer_hidden in [false, true] {
+            for side_hidden in [false, true] {
+                for playing in [false, true] {
+                    let mut app = TestApp::offline();
+                    app.timer_hidden = timer_hidden;
+                    app.side_hidden = side_hidden;
+                    app.engine.set_paused(!playing);
+                    for action in [
+                        Action::TimerToggle,
+                        Action::TimerToggle,
+                        Action::TimerReset,
+                        Action::TimerSkip,
+                        Action::SetTimerMode(TimerMode::Pomodoro),
+                        Action::CycleTimerMode,
+                    ] {
+                        app.dispatch(action);
+                        assert_eq!((app.timer_hidden, app.side_hidden), (timer_hidden, side_hidden));
+                        assert_eq!(app.is_playing(), playing);
+                    }
+                    app.store.save_session(&app.session()).unwrap();
+                    let session = app.store.session();
+                    assert_eq!((session.timer_hidden, session.side_hidden), (timer_hidden, side_hidden));
+                }
+            }
+        }
+    }
 
-        app.dispatch(Action::TimerToggle);
-        assert_eq!((app.timer_hidden, app.timer.is_running()), (false, true));
+    #[test]
+    fn showing_the_timer_reveals_its_container_without_starting_it() {
+        for timer_hidden in [false, true] {
+            for side_hidden in [false, true] {
+                let mut app = TestApp::offline();
+                app.timer_hidden = timer_hidden;
+                app.side_hidden = side_hidden;
+                app.library_hidden = true;
+                let visible = app.timer_panel_visible();
+                app.dispatch(Action::ToggleTimerPanel);
+                assert_eq!(app.timer_panel_visible(), !visible);
+                assert!(!app.side_hidden);
+                assert!(app.library_hidden);
+                assert!(!app.timer.is_running());
+            }
+        }
     }
 
     #[test]

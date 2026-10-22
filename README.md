@@ -35,7 +35,11 @@ After a winget install, open a new terminal so the tools are on `PATH`. `chill d
 
 ## Use
 
-`chill` opens with your last scene loaded and paused. Space starts the music and the ambience, and `t` starts the focus timer. Each runs without the other, so you can just listen, and `F` puts the timer away until you need it. `H` and `L` put away the library on the left and the ambience and timer on the right, so the player fills the window. A side you put away leaves a thin edge with an arrow; click it, or press the same key, to bring the side back.
+`chill` opens with your last scene loaded and paused. Space starts the music and the ambience, and `t` starts the focus timer. Each runs without the other, so you can just listen.
+
+`F` hides or shows the timer panel. Starting, pausing, resetting, skipping, or changing the timer mode preserves your panel visibility. Showing the timer with `F` also reveals the right side if it was hidden. `H` and `L` put away the library on the left and the ambience and timer on the right, so the player fills the window. A side you put away leaves a thin edge with an arrow; click it, or press the same key, to bring the side back.
+
+A running or paused in-progress timer stays visible in the header when its panel is hidden. Click that clock to pause or resume. At medium widths, showing the timer while Queue or Ambience has focus can leave the timer in the header until the full panel has room. When a paused timer appears in the compact header, it is labeled **paused**.
 
 ```bash
 chill                                   # resume where you left off
@@ -53,7 +57,7 @@ Paste a YouTube link anywhere in the app to add it to the library and play it. E
 | `f` | like what's playing |
 | `<` / `>` | turn the music or the ambience up against the other |
 | `t` / `T` | start or pause the timer / reset it |
-| `F` | hide the timer until you use it again |
+| `F` | hide or show the timer panel |
 | `H` / `L` | hide or show the left / right side |
 | `v` | next picture in the player |
 | `o` | open a YouTube link |
@@ -151,6 +155,16 @@ cargo run
 cargo test --workspace
 cargo clippy --all-targets --workspace -- -D warnings
 ```
+
+To review the UI without starting audio or fetching media, render the real UI through Ratatui's `TestBackend`:
+
+```bash
+cargo test --offline -p chill ui::review::export_ui_review -- --ignored --exact --nocapture
+```
+
+Open `target/ui-review/index.html` in a browser, or open the individual SVG files in that directory. The export covers wide, split and stacked medium, and narrow layouts, hidden panels, a paused compact timer, and the Night lake picture. Artifacts stay under the ignored `target/` directory.
+
+The test-only fixture uses an in-memory library, temporary config and cache paths, seeded sample data, fixed focus dates, and a frozen render clock. It bypasses catalog fetching, playback restoration, audio output, and ambient loading. It does not read your library or config. Reduced motion holds animations still. The export preserves cell colors with a fixed ANSI palette; glyph shapes depend on your browser's monospace font. Cargo's offline mode requires the Rust dependencies to be cached already.
 
 On Linux the build needs `libasound2-dev`. CI runs the checks on Linux, macOS, and Windows. Pushing a version tag such as `v0.1.0` builds the binaries and installers and publishes them as a GitHub release; bump `version` in `Cargo.toml` to match first.
 

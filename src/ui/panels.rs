@@ -123,7 +123,13 @@ pub fn header(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant
     if show_timer {
         let timer = &app.timer;
         let remaining = timer.remaining(now).as_secs_f64().ceil() as u64;
-        let label = format!("{} {:02}:{:02}", timer.phase().label(), remaining / 60, remaining % 60);
+        let state = if timer.is_running() { "" } else { " paused" };
+        let label = format!(
+            "{} {:02}:{:02}{state}",
+            timer.phase().label(),
+            remaining / 60,
+            remaining % 60
+        );
         let timer_x = start.saturating_sub(label.width() as u16 + 4);
         let color = match (timer.is_running(), timer.phase()) {
             (false, _) => theme.muted(),
@@ -755,7 +761,7 @@ fn controls(buf: &mut Buffer, inner: Rect, y: u16, app: &App, ui: &mut Ui) {
         let volume_x = inner.right().saturating_sub(bar_width + 9);
         let label_end = put(buf, volume_x, y, "vol ", Style::new().fg(theme.faint()));
         let bar = Rect::new(label_end, y, bar_width, 1);
-        let shown = ui.volume.value(Instant::now());
+        let shown = ui.volume.value(ui.last_frame);
         let filled = if ui.hovered(bar) { theme.text() } else { theme.muted() };
         meter(
             buf,
@@ -777,7 +783,7 @@ fn controls(buf: &mut Buffer, inner: Rect, y: u16, app: &App, ui: &mut Ui) {
 
 pub fn queue(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
     let theme = ui.theme;
-    let glow = ui.panel_glow[1].value(Instant::now());
+    let glow = ui.panel_glow[1].value(ui.last_frame);
     let upcoming: Vec<_> = if app.source == Source::Soundscape {
         Vec::new()
     } else {
