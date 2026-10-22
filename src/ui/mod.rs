@@ -402,6 +402,7 @@ impl Ui {
                 panels::library(buf, library, app, self, now);
             }
             panels::player(buf, player, app, self, now);
+            panels::reopen_handles(buf, body, player, app, self);
             panels::queue(buf, queue, app, self);
             if !app.side_hidden {
                 if app.timer_hidden {
@@ -414,9 +415,13 @@ impl Ui {
             }
         } else if medium {
             let library_width = if app.library_hidden { 0 } else { 36 };
+            let content = Rect {
+                width: body.width - u16::from(app.side_hidden),
+                ..body
+            };
             let [library, center] = Layout::horizontal([Constraint::Length(library_width), Constraint::Fill(1)])
                 .spacing(1)
-                .areas(body);
+                .areas(content);
             let bottom_height = if app.side_hidden { queue_height(app, center) } else { 13 };
             let [player, bottom] =
                 Layout::vertical([Constraint::Fill(1), Constraint::Length(bottom_height)]).areas(center);
@@ -424,6 +429,7 @@ impl Ui {
                 panels::library(buf, library, app, self, now);
             }
             panels::player(buf, player, app, self, now);
+            panels::reopen_handles(buf, body, player, app, self);
             let timer = !app.timer_hidden && !app.side_hidden;
             if app.side_hidden {
                 panels::queue(buf, bottom, app, self);
@@ -749,6 +755,32 @@ mod tests {
         let mut restored = Ui::new(Theme::new(None), Picker::halfblocks(), false);
         restored.absorb(&mut app, Instant::now());
         assert_eq!(restored.focus, Panel::Queue);
+    }
+
+    #[test]
+    fn a_hidden_library_has_a_handle_that_brings_it_back() {
+        for (width, height) in [(160, 44), (100, 30)] {
+            let mut app = offline_app();
+            let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            app.library_hidden = true;
+            terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let row = (1..height - 1).find(|&y| buffer[(0, y)].symbol() == "›").unwrap();
+            assert_eq!(buffer[(0, row)].fg, ui.theme.faint());
+
+            input::handle(
+                &mut app,
+                &mut ui,
+                Event::Mouse(MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: 0,
+                    row,
+                    modifiers: KeyModifiers::NONE,
+                }),
+            );
+            assert!(!app.library_hidden);
+        }
     }
 
     #[test]

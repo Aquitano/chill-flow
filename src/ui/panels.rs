@@ -51,6 +51,27 @@ fn close_button(buf: &mut Buffer, area: Rect, action: Action, ui: &mut Ui) {
     ui.hit(close, Hit::Act(action));
 }
 
+pub fn reopen_handles(buf: &mut Buffer, body: Rect, player: Rect, app: &App, ui: &mut Ui) {
+    if player.height == 0 {
+        return;
+    }
+    for (hidden, x, glyph, action) in [
+        (app.library_hidden, body.x, "›", Action::ToggleLibraryPanel),
+        (app.side_hidden, body.right() - 1, "‹", Action::ToggleSidePanel),
+    ] {
+        if hidden {
+            let handle = Rect::new(x, player.y + player.height / 2, 1, 1);
+            let color = if ui.hovered(handle) {
+                ui.theme.text()
+            } else {
+                ui.theme.faint()
+            };
+            put(buf, handle.x, handle.y, glyph, Style::new().fg(color));
+            ui.hit(handle, Hit::Act(action));
+        }
+    }
+}
+
 fn centered(buf: &mut Buffer, area: Rect, y: u16, text: &str, style: Style) {
     let text = fit(text, usize::from(area.width));
     let x = area.x + area.width.saturating_sub(text.width() as u16) / 2;
@@ -156,6 +177,12 @@ pub fn footer(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
         ("n", "next", Some(Action::Next)),
         ("t", "timer", Some(Action::TimerToggle)),
     ];
+    if app.library_hidden {
+        hints.push(("H", "library", Some(Action::ToggleLibraryPanel)));
+    }
+    if app.side_hidden {
+        hints.push(("L", "ambience", Some(Action::ToggleSidePanel)));
+    }
     hints.extend(match ui.focus {
         Panel::Library => [("enter", "play", None), ("a", "queue", None), ("/", "filter", None)],
         Panel::Queue => [("enter", "jump", None), ("J/K", "move", None), ("d", "remove", None)],
