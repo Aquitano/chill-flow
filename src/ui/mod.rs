@@ -489,7 +489,8 @@ fn queue_height(app: &App, center: Rect) -> u16 {
     } else {
         app.queue.upcoming().count()
     };
-    (upcoming as u16 + 2).clamp(3, (center.height / 5).max(5))
+    let most = (center.height / 5).max(5);
+    u16::try_from(upcoming + 2).map_or(most, |rows| rows.clamp(3, most))
 }
 
 #[cfg(test)]
