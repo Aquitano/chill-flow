@@ -42,3 +42,58 @@ jobs:
           name: chill-${{ matrix.target }}
           path: ${{ runner.os == 'macOS' && 'chill.tar.gz' || 'target/dist/chill.exe' }}
           retention-days: 14
+
+  # Leaves one comment on the pull request with the downloads and the commands to run them, and
+  # edits it for every later build rather than adding another.
+  comment:
+    needs: build
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      pull-requests: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN: ${{ github.run_id }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          artifact() {
+            gh api "repos/$REPO/actions/runs/$RUN/artifacts" --jq ".artifacts[] | select(.name == \"$1\") | .$2"
+          }
+          url="https://github.com/$REPO/actions/runs/$RUN"
+          mac="$url/artifacts/$(artifact chill-aarch64-apple-darwin id)"
+          windows="$url/artifacts/$(artifact chill-x86_64-pc-windows-msvc id)"
+          expires=$(date -d "$(artifact chill-aarch64-apple-darwin expires_at)" +%Y-%m-%d)
+          cat > body.md <<'BODY'
+          <!-- chill-try -->
+          ### Try this build
+
+          Built from @SHA@ in [run @RUN@](@URL@). The downloads are kept until @EXPIRES@.
+
+          **macOS** (Apple Silicon), [download](@MAC@):
+
+          ```bash
+          gh run download @RUN@ -R @REPO@ -n chill-aarch64-apple-darwin -D /tmp/chill-try-@RUN@ && tar -xzf /tmp/chill-try-@RUN@/chill.tar.gz -C /tmp/chill-try-@RUN@ && XDG_CONFIG_HOME="$HOME/.config/chill-try" /tmp/chill-try-@RUN@/chill
+          ```
+
+          **Windows**, [download](@WINDOWS@), in PowerShell:
+
+          ```powershell
+          gh run download @RUN@ -R @REPO@ -n chill-x86_64-pc-windows-msvc -D "$env:TEMP\chill-try-@RUN@"; & "$env:TEMP\chill-try-@RUN@\chill.exe"
+          ```
+
+          On macOS this keeps the build's settings in `~/.config/chill-try`, since an older chill won't start with settings a newer one has written. The library and cache are shared with the installed chill. On Windows the build uses the installed chill's settings too.
+          BODY
+          sed -i -e "s|@RUN@|$RUN|g" -e "s|@REPO@|$REPO|g" -e "s|@SHA@|${SHA:0:7}|g" \
+            -e "s|@URL@|$url|g" -e "s|@MAC@|$mac|g" -e "s|@WINDOWS@|$windows|g" -e "s|@EXPIRES@|$expires|g" body.md
+          existing=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq '.[] | select(.body | startswith("<!-- chill-try -->")) | .id' | head -n 1)
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$existing" -F body=@body.md > /dev/null
+          else
+            gh api "repos/$REPO/issues/$PR/comments" -F body=@body.md > /dev/null
+          fi
