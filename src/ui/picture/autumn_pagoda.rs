@@ -4,10 +4,10 @@
 use std::f32::consts::PI;
 
 use super::Weather;
-use super::canvas::{Canvas, Painting, Rgb, fbm, lerp, mix, ramp, rgb, unit};
+use super::canvas::{Canvas, Finish, Painting, Rgb, fbm, lerp, mix, ramp, rgb, unit};
 
-const WIDTH: usize = 192;
-const HEIGHT: usize = 108;
+pub const WIDTH: usize = 192;
+pub const HEIGHT: usize = 108;
 const WATERLINE: f32 = 86.0;
 const PAGODA_X: f32 = 130.0;
 const SUN: (f32, f32) = (60.0, 50.0);
@@ -318,8 +318,8 @@ impl AutumnPagoda {
         }
     }
 
-    pub fn paint(&mut self, canvas: &mut Canvas, t: f32, weather: &Weather) {
-        let scale = Painting::scale_for(WIDTH, HEIGHT, canvas);
+    pub fn paint(&mut self, canvas: &mut Canvas, t: f32, weather: &Weather, finish: Finish) {
+        let scale = Painting::scale_for(WIDTH, HEIGHT, canvas, finish);
         if self.painting.as_ref().is_some_and(|painting| painting.scale != scale) {
             self.painting = None;
         }
@@ -400,6 +400,6 @@ impl AutumnPagoda {
         }
 
         painting.overcast(weather.rain);
-        painting.cover(canvas, FOCUS);
+        painting.cover(canvas, FOCUS, finish);
     }
 }

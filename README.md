@@ -67,7 +67,7 @@ To update a saved playlist, select it in YouTube and press `R`, click **R refres
 
 The slider between music and ambience at the top of the Ambience panel turns one down against the other, for a loud stream or quiet rain, without touching the volume. A soundscape has no music, so the balance leaves it alone. White, pink, and brown noise sit below the recordings; chill generates them, so they need no download and play offline.
 
-The player shows the cover of what's playing, or `v` swaps it for a moving picture drawn in text: Night lake, Fuji at dawn, or Autumn pagoda. A picture moves while something plays and shows the ambience you hear: rain falls while a rain sound plays, thunder lights up the sky, wind sways trees and water, and crickets bring out fireflies, each as strongly as the music and ambience balance lets you hear it. Night lake uses your terminal's colors; the other two bring their own. **Settings** chooses the picture and what draws it. Auto, the default, draws Night lake in braille dots and the other two in pixels. Pixels are eight to a cell in two colors each. They, and the solid shapes in dots such as Night lake's boat, use octant characters from Unicode 16; Ghostty draws them itself, and other terminals need a font that has them. Blocks are four to a cell and work in any font.
+The player shows the cover of what's playing, or `v` swaps it for a moving picture drawn in text: Night lake, Fuji at dawn, or Autumn pagoda. A picture moves while something plays and shows the ambience you hear: rain falls while a rain sound plays, thunder lights up the sky, wind sways trees and water, and crickets bring out fireflies, each as strongly as the music and ambience balance lets you hear it. Night lake uses your terminal's colors; the other two bring their own. **Settings** chooses the picture and what draws it. Auto, the default, draws Night lake in braille dots. Fuji at dawn and Autumn pagoda get blocks once the player has room for each of their pixels, as when both sides are put away, and crisp pixels before that. Blocks show each pixel as a solid cell with a thin seam beside it and work in any font. Pixels keep a painting crisp at eight to a cell, and Smooth paints it finer and scales it smoothly. Both, and the solid shapes among the dots such as Night lake's boat, use octant characters from Unicode 16; Ghostty draws them itself, and other terminals need a font that has them.
 
 ![Autumn pagoda in the player with the library put away, while Rainy study's rain and thunder play over it](docs/pictures.png)
 
@@ -127,7 +127,7 @@ catalogs = []           # more catalog.json links, added with "Add a catalog"
 sync_url = "https://chill-sync.aquitano.me"
 reduce_motion = false   # true turns off transitions and the visualizer, and holds pictures still
 picture = "cover"       # or "night-lake", "fuji-dawn", "autumn-pagoda"
-look = "auto"           # how pictures are drawn: "auto", "dots", "pixels", or "blocks"
+look = "auto"           # how pictures are drawn: "auto", "blocks", "pixels", "smooth", or "dots"
 chime = true            # a soft bell when a focus block or break ends
 notifications = true    # an OS notification at the same moments
 

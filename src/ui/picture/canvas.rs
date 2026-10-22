@@ -184,6 +184,15 @@ impl Canvas {
     }
 }
 
+/// How a painting meets the canvas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Finish {
+    /// Each of the painting's own pixels kept whole, like pixel art.
+    Crisp,
+    /// Painted finer and scaled with blending, so no pixel grid shows.
+    Smooth,
+}
+
 /// A picture laid out at a fixed size, the way ascii-magic pieces are, and painted with `scale`
 /// finer pixels along each side of its own so it stays sharp when the player is large. A still
 /// layer is painted once, with a layer number per pixel (0 for the sky, higher for nearer), and
@@ -211,10 +220,14 @@ impl Painting {
         }
     }
 
-    /// The finest scale worth painting a painting this size at for `canvas`.
-    pub fn scale_for(width: usize, height: usize, canvas: &Canvas) -> usize {
+    /// The scale to paint a painting this size at for `canvas`: its own pixels for a crisp
+    /// finish, and the finest worth painting for a smooth one.
+    pub fn scale_for(width: usize, height: usize, canvas: &Canvas, finish: Finish) -> usize {
         let cover = (canvas.width as f32 / width as f32).max(canvas.height as f32 / height as f32);
-        (cover.ceil() as usize).clamp(1, 3)
+        match finish {
+            Finish::Crisp => 1,
+            Finish::Smooth => (cover.ceil() as usize).clamp(1, 3),
+        }
     }
 
     fn fine(&self) -> (usize, usize) {
@@ -336,9 +349,9 @@ impl Painting {
     }
 
     /// Scales the frame to cover `canvas`, cropping whichever sides overhang as little away from
-    /// `focus` (a fraction across and down) as it can. Enlarging blends between neighbouring
-    /// pixels and shrinking averages them, so no pixel grid shows.
-    pub fn cover(&self, canvas: &mut Canvas, focus: (f32, f32)) {
+    /// `focus` (a fraction across and down) as it can. Shrinking averages pixels. Enlarging keeps
+    /// each pixel whole for a crisp finish and blends between them for a smooth one.
+    pub fn cover(&self, canvas: &mut Canvas, focus: (f32, f32), finish: Finish) {
         let (columns, rows) = self.fine();
         let (width, height) = (canvas.width as f32, canvas.height as f32);
         let scale = (width / columns as f32).max(height / rows as f32);
@@ -351,10 +364,11 @@ impl Painting {
             let from_y = (y as f32 + top) / scale;
             for x in 0..canvas.width {
                 let from_x = (x as f32 + left) / scale;
-                let color = if scale >= 1.0 {
-                    self.blend(from_x + 0.5 / scale - 0.5, from_y + 0.5 / scale - 0.5)
-                } else {
-                    self.average(from_x, from_y, 1.0 / scale)
+                let (middle_x, middle_y) = (from_x + 0.5 / scale, from_y + 0.5 / scale);
+                let color = match finish {
+                    _ if scale < 1.0 => self.average(from_x, from_y, 1.0 / scale),
+                    Finish::Crisp => self.pixel(middle_x as isize, middle_y as isize),
+                    Finish::Smooth => self.blend(middle_x - 0.5, middle_y - 0.5),
                 };
                 *canvas.at_mut(x, y) = Dot::paint(color.map(|channel| channel.clamp(0.0, 255.0)));
             }
@@ -478,7 +492,7 @@ mod tests {
         painting.begin();
         let mut canvas = Canvas::default();
         canvas.resize(3, 3);
-        painting.cover(&mut canvas, (0.5, 0.5));
+        painting.cover(&mut canvas, (0.5, 0.5), Finish::Smooth);
         let Ink::Paint([red, ..]) = canvas.at(0, 0).ink else {
             panic!("the corner should be painted");
         };

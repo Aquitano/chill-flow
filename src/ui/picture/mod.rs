@@ -7,11 +7,11 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::symbols::braille::BRAILLE;
-use ratatui::symbols::pixel::{OCTANTS, QUADRANTS};
+use ratatui::symbols::pixel::OCTANTS;
 use serde::Deserialize;
 
 use super::theme::Theme;
-use canvas::{Canvas, Dot, Ink, Rgb, unit};
+use canvas::{Canvas, Dot, Finish, Ink, Rgb, unit};
 
 /// What the player shows above the seek bar.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -66,15 +66,18 @@ impl Picture {
         }
     }
 
-    /// How the picture looks best: halftone dots for one drawn in the theme's colors, pixels for
-    /// one that brings its own.
-    fn look(self) -> Look {
-        if self.painted() { Look::Pixels } else { Look::Dots }
+    /// The size a painted picture is laid out at, in its own pixels.
+    fn painting(self) -> Option<(usize, usize)> {
+        match self {
+            Picture::FujiDawn => Some((fuji_dawn::WIDTH, fuji_dawn::HEIGHT)),
+            Picture::AutumnPagoda => Some((autumn_pagoda::WIDTH, autumn_pagoda::HEIGHT)),
+            Picture::Cover | Picture::NightLake => None,
+        }
     }
 
     /// Whether the picture brings its own colors instead of the theme's.
     fn painted(self) -> bool {
-        matches!(self, Picture::FujiDawn | Picture::AutumnPagoda)
+        self.painting().is_some()
     }
 }
 
@@ -82,40 +85,62 @@ impl Picture {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Look {
-    /// Whichever suits the picture.
+    /// Whichever suits the picture and the room it has.
     #[default]
     Auto,
+    /// A painting's pixels as whole cells with a thin dark seam beside each, like a screen up
+    /// close. One pixel to each half of a cell, so they need a wide player; any font has them.
+    Blocks,
+    /// A painting's pixels kept crisp, eight to a cell in two colors.
+    Pixels,
+    /// Painted finer and scaled smoothly, eight to a cell in two colors.
+    Smooth,
     /// Braille dots on the background, with figures in solid pixels.
     Dots,
-    /// Eight pixels to a cell, each cell in two colors.
-    Pixels,
-    /// Four pixels to a cell in two colors, for fonts without the newer pixel characters.
-    Blocks,
 }
 
 impl Look {
-    pub const ALL: [Look; 4] = [Look::Auto, Look::Dots, Look::Pixels, Look::Blocks];
+    pub const ALL: [Look; 5] = [Look::Auto, Look::Blocks, Look::Pixels, Look::Smooth, Look::Dots];
 
     pub fn label(self) -> &'static str {
         match self {
             Look::Auto => "Auto",
-            Look::Dots => "Dots",
-            Look::Pixels => "Pixels",
             Look::Blocks => "Blocks",
+            Look::Pixels => "Pixels",
+            Look::Smooth => "Smooth",
+            Look::Dots => "Dots",
         }
     }
 
     pub fn id(self) -> &'static str {
         match self {
             Look::Auto => "auto",
-            Look::Dots => "dots",
-            Look::Pixels => "pixels",
             Look::Blocks => "blocks",
+            Look::Pixels => "pixels",
+            Look::Smooth => "smooth",
+            Look::Dots => "dots",
         }
     }
 
-    fn of(self, picture: Picture) -> Look {
-        if self == Look::Auto { picture.look() } else { self }
+    /// The look to draw `picture` with in `area`. Auto gives a painting blocks once each of its
+    /// pixels can have most of a half cell, and crisp pixels before that; a picture in the
+    /// theme's colors gets dots.
+    fn of(self, picture: Picture, area: Rect, theme: &Theme) -> Look {
+        let look = match (self, picture.painting()) {
+            (Look::Auto, Some((width, height))) => {
+                let room = (f32::from(area.width) / width as f32).max(f32::from(area.height) * 2.0 / height as f32);
+                if room >= 0.75 { Look::Blocks } else { Look::Pixels }
+            }
+            (Look::Auto, None) => Look::Dots,
+            (look, _) => look,
+        };
+        // Every look but dots paints the cells' backgrounds too, which a picture in the theme's
+        // colors can only do knowing what those colors are.
+        if picture.painted() || theme.has_rgb() {
+            look
+        } else {
+            Look::Dots
+        }
     }
 
     pub fn step(self, by: i8) -> Look {
@@ -187,11 +212,11 @@ impl Art {
         }
     }
 
-    fn paint(&mut self, canvas: &mut Canvas, t: f32, weather: &Weather) {
+    fn paint(&mut self, canvas: &mut Canvas, t: f32, weather: &Weather, finish: Finish) {
         match self {
             Art::NightLake => night_lake::paint(canvas, t, weather),
-            Art::FujiDawn(art) => art.paint(canvas, t, weather),
-            Art::AutumnPagoda(art) => art.paint(canvas, t, weather),
+            Art::FujiDawn(art) => art.paint(canvas, t, weather, finish),
+            Art::AutumnPagoda(art) => art.paint(canvas, t, weather, finish),
         }
     }
 }
@@ -237,7 +262,7 @@ impl Scene {
         }
         let shown = Shown {
             picture,
-            look: look.of(picture),
+            look: look.of(picture, area, theme),
             columns: area.width,
             rows: area.height,
             frame: (self.clock * FPS) as u64,
@@ -249,9 +274,17 @@ impl Scene {
             }
             let Some(art) = &mut self.art else { return };
             let t = ((shown.frame % FRAMES_A_DAY) as f64 / FPS) as f32;
-            self.canvas
-                .resize(usize::from(area.width) * 2, usize::from(area.height) * 4);
-            art.paint(&mut self.canvas, t, &weather);
+            let (columns, rows) = (usize::from(area.width), usize::from(area.height));
+            match shown.look {
+                Look::Blocks => self.canvas.resize(columns, rows * 2),
+                _ => self.canvas.resize(columns * 2, rows * 4),
+            }
+            let finish = if shown.look == Look::Smooth {
+                Finish::Smooth
+            } else {
+                Finish::Crisp
+            };
+            art.paint(&mut self.canvas, t, &weather, finish);
             canvas::rain(&mut self.canvas, t, weather.rain, weather.wind);
             canvas::fireflies(&mut self.canvas, t, weather.crickets, picture.fireflies());
             canvas::brighten(&mut self.canvas, canvas::lightning(t, weather.thunder));
@@ -280,38 +313,56 @@ fn threshold(x: usize, y: usize) -> f32 {
 
 type Glyph = (char, Color, Option<Color>);
 
-/// One glyph per cell, row by row, from the canvas's dots eight at a time.
+/// One glyph per cell, row by row: from two of the canvas's dots each for blocks, eight for the
+/// rest.
 fn glyphs(glyphs: &mut Vec<Option<Glyph>>, canvas: &Canvas, look: Look, theme: &Theme, painted: bool) {
     let dark = !theme.is_light();
-    // Two colors to a cell paint the background too, which a picture in the theme's colors can
-    // only do knowing what the theme's colors are.
-    let look = if theme.has_rgb() || painted { look } else { Look::Dots };
-    let (columns, rows) = (canvas.width / 2, canvas.height / 4);
     glyphs.clear();
-    for row in 0..rows {
-        for column in 0..columns {
+    if look == Look::Blocks {
+        for row in 0..canvas.height / 2 {
+            for column in 0..canvas.width {
+                let (top, bottom) = (canvas.at(column, row * 2), canvas.at(column, row * 2 + 1));
+                glyphs.push(Some(block(&top, &bottom, theme, painted)));
+            }
+        }
+        return;
+    }
+    for row in 0..canvas.height / 4 {
+        for column in 0..canvas.width / 2 {
             let (left, top) = (column * 2, row * 4);
             let dots: [Dot; 8] = std::array::from_fn(|index| canvas.at(left + index % 2, top + index / 2));
             glyphs.push(match look {
-                Look::Pixels => two_colors(&dots, &OCTANTS, theme),
-                Look::Blocks => two_colors(&quarters(&dots, theme), &QUADRANTS, theme),
-                Look::Auto | Look::Dots => pattern(&dots, left, top, theme, dark),
+                Look::Pixels | Look::Smooth => two_colors(&dots, &OCTANTS, theme),
+                Look::Auto | Look::Blocks | Look::Dots => pattern(&dots, left, top, theme, dark),
             });
         }
     }
 }
 
-/// The cell's eight dots as four, two across and two down, each the blend of the two dots it
-/// covers. A figure keeps its quarter.
-fn quarters(dots: &[Dot; 8], theme: &Theme) -> [Dot; 4] {
-    std::array::from_fn(|index| {
-        let upper = dots[(index / 2) * 4 + index % 2];
-        let lower = dots[(index / 2) * 4 + index % 2 + 2];
-        match [upper, lower].into_iter().find(|dot| dot.ink.is_figure()) {
-            Some(figure) => figure,
-            None => Dot::paint(canvas::mix(color(&upper, theme), color(&lower, theme), 0.5)),
-        }
-    })
+/// A cell holding two of a painting's pixels, one above the other. Where they nearly match the
+/// cell shows one pixel with a thin seam down its right side, darker toward the background, the
+/// way pixels stand apart up close; a bright pixel fills its cell, and two that differ split it.
+fn block(top: &Dot, bottom: &Dot, theme: &Theme, painted: bool) -> Glyph {
+    let [upper, lower] = [top, bottom].map(|dot| color(dot, theme));
+    match (top.ink.is_figure(), bottom.ink.is_figure()) {
+        (true, true) => return ('█', figure_color(top.ink, theme), None),
+        (true, false) => return ('▀', figure_color(top.ink, theme), Some(to_color(lower))),
+        (false, true) => return ('▄', figure_color(bottom.ink, theme), Some(to_color(upper))),
+        (false, false) => {}
+    }
+    if distance(upper, lower) >= 900.0 {
+        return ('▀', to_color(upper), Some(to_color(lower)));
+    }
+    let pixel = canvas::mix(upper, lower, 0.5);
+    if canvas::luma(pixel) > 0.72 {
+        return ('█', to_color(pixel), Some(to_color(pixel)));
+    }
+    let behind = if painted {
+        [0.0; 3]
+    } else {
+        color(&Dot::shade(0.0), theme)
+    };
+    ('▉', to_color(pixel), Some(to_color(canvas::mix(pixel, behind, 0.45))))
 }
 
 /// A dot's own color, with theme shades taken at face value since the cell's background is drawn
@@ -489,6 +540,34 @@ mod tests {
         assert_eq!(
             two_colors(&even, &OCTANTS, &theme),
             Some(('▌', Color::Rgb(200, 40, 40), Some(Color::Rgb(40, 71, 200))))
+        );
+    }
+
+    #[test]
+    fn blocks_seam_a_calm_pixel_fill_a_bright_one_and_split_two_that_differ() {
+        let theme = Theme::new(Some(([205, 214, 244], [30, 30, 46])));
+        let (dusk, snow) = (Dot::paint([90.0, 80.0, 150.0]), Dot::paint([240.0, 235.0, 250.0]));
+        assert_eq!(
+            block(&dusk, &dusk, &theme, true),
+            ('▉', Color::Rgb(90, 80, 150), Some(Color::Rgb(50, 44, 83)))
+        );
+        assert_eq!(block(&snow, &snow, &theme, true).0, '█');
+        assert_eq!(
+            block(&snow, &dusk, &theme, true),
+            ('▀', Color::Rgb(240, 235, 250), Some(Color::Rgb(90, 80, 150)))
+        );
+    }
+
+    #[test]
+    fn auto_gives_a_painting_blocks_only_once_there_is_room_for_its_pixels() {
+        let theme = Theme::new(Some(([205, 214, 244], [30, 30, 46])));
+        let (player, window) = (Rect::new(0, 0, 63, 20), Rect::new(0, 0, 200, 27));
+        assert_eq!(Look::Auto.of(Picture::FujiDawn, player, &theme), Look::Pixels);
+        assert_eq!(Look::Auto.of(Picture::FujiDawn, window, &theme), Look::Blocks);
+        assert_eq!(Look::Auto.of(Picture::NightLake, window, &theme), Look::Dots);
+        assert_eq!(
+            Look::Blocks.of(Picture::NightLake, window, &Theme::new(None)),
+            Look::Dots
         );
     }
 

@@ -4,10 +4,10 @@
 use std::f32::consts::PI;
 
 use super::Weather;
-use super::canvas::{Canvas, Painting, Rgb, fbm, lerp, mix, noise, ramp, rgb, unit};
+use super::canvas::{Canvas, Finish, Painting, Rgb, fbm, lerp, mix, noise, ramp, rgb, unit};
 
-const WIDTH: usize = 192;
-const HEIGHT: usize = 108;
+pub const WIDTH: usize = 192;
+pub const HEIGHT: usize = 108;
 const HORIZON: f32 = 66.0;
 const SUN: (f32, f32) = (150.0, 50.0);
 const SUN_RADIUS: f32 = 7.0;
@@ -201,8 +201,8 @@ impl FujiDawn {
         }
     }
 
-    pub fn paint(&mut self, canvas: &mut Canvas, t: f32, weather: &Weather) {
-        let scale = Painting::scale_for(WIDTH, HEIGHT, canvas);
+    pub fn paint(&mut self, canvas: &mut Canvas, t: f32, weather: &Weather, finish: Finish) {
+        let scale = Painting::scale_for(WIDTH, HEIGHT, canvas, finish);
         if self.painting.as_ref().is_some_and(|painting| painting.scale != scale) {
             self.painting = None;
         }
@@ -347,6 +347,6 @@ impl FujiDawn {
         }
 
         painting.overcast(weather.rain);
-        painting.cover(canvas, FOCUS);
+        painting.cover(canvas, FOCUS, finish);
     }
 }
