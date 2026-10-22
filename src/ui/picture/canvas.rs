@@ -184,63 +184,143 @@ impl Canvas {
     }
 }
 
-/// A picture painted at a fixed size, the way ascii-magic pieces are: a still layer painted once,
-/// with a layer number per pixel (0 for the sky, higher for nearer), and a copy that each frame
-/// paints its moving parts onto.
+/// A picture laid out at a fixed size, the way ascii-magic pieces are, and painted with `scale`
+/// finer pixels along each side of its own so it stays sharp when the player is large. A still
+/// layer is painted once, with a layer number per pixel (0 for the sky, higher for nearer), and
+/// each frame paints its moving parts onto a copy of it. Positions are in the painting's own
+/// pixels, which may fall between whole numbers.
 pub struct Painting {
     pub width: usize,
     pub height: usize,
+    pub scale: usize,
     still: Vec<Rgb>,
     layers: Vec<u8>,
     frame: Vec<Rgb>,
 }
 
 impl Painting {
-    pub fn new(width: usize, height: usize) -> Painting {
+    pub fn new(width: usize, height: usize, scale: usize) -> Painting {
+        let pixels = width * scale * height * scale;
         Painting {
             width,
             height,
-            still: vec![[0.0; 3]; width * height],
-            layers: vec![0; width * height],
-            frame: vec![[0.0; 3]; width * height],
+            scale,
+            still: vec![[0.0; 3]; pixels],
+            layers: vec![0; pixels],
+            frame: vec![[0.0; 3]; pixels],
         }
     }
 
-    fn index(&self, x: f32, y: f32) -> Option<usize> {
-        let (x, y) = (x.round(), y.round());
-        let inside = x >= 0.0 && y >= 0.0 && (x as usize) < self.width && (y as usize) < self.height;
-        inside.then(|| y as usize * self.width + x as usize)
+    /// The finest scale worth painting a painting this size at for `canvas`.
+    pub fn scale_for(width: usize, height: usize, canvas: &Canvas) -> usize {
+        let cover = (canvas.width as f32 / width as f32).max(canvas.height as f32 / height as f32);
+        (cover.ceil() as usize).clamp(1, 3)
     }
 
-    pub fn put(&mut self, x: f32, y: f32, color: Rgb, layer: u8) {
-        if let Some(index) = self.index(x, y) {
+    fn fine(&self) -> (usize, usize) {
+        (self.width * self.scale, self.height * self.scale)
+    }
+
+    fn index(&self, x: f32, y: f32) -> Option<usize> {
+        let (columns, rows) = self.fine();
+        let (column, row) = ((x * self.scale as f32).floor(), (y * self.scale as f32).floor());
+        let inside = column >= 0.0 && row >= 0.0 && (column as usize) < columns && (row as usize) < rows;
+        inside.then(|| row as usize * columns + column as usize)
+    }
+
+    /// Paints `layer` wherever `color` gives one inside the box from `from` to `to`. `color` is
+    /// asked at the middle of each fine pixel and can look at what is already painted.
+    pub fn paint(
+        &mut self,
+        from: (f32, f32),
+        to: (f32, f32),
+        layer: u8,
+        color: impl Fn(&Painting, f32, f32) -> Option<Rgb>,
+    ) {
+        let scale = self.scale as f32;
+        let (columns, rows) = self.fine();
+        let span = |from: f32, to: f32, limit: usize| {
+            ((from * scale).floor().max(0.0) as usize)..((to * scale).ceil().max(0.0) as usize).min(limit)
+        };
+        let (across, down) = (span(from.0, to.0, columns), span(from.1, to.1, rows));
+        let mut painted = Vec::new();
+        for row in down {
+            for column in across.clone() {
+                let (x, y) = ((column as f32 + 0.5) / scale, (row as f32 + 0.5) / scale);
+                if let Some(color) = color(self, x, y) {
+                    painted.push((row * columns + column, color));
+                }
+            }
+        }
+        for (index, color) in painted {
             self.still[index] = color;
             self.layers[index] = layer;
         }
     }
 
-    pub fn still(&self, x: usize, y: usize) -> Rgb {
-        self.still[y * self.width + x]
+    pub fn still_at(&self, x: f32, y: f32) -> Rgb {
+        let (columns, rows) = self.fine();
+        let scale = self.scale as f32;
+        let column = ((x * scale) as usize).min(columns - 1);
+        let row = ((y.max(0.0) * scale) as usize).min(rows - 1);
+        self.still[row * columns + column]
     }
 
-    pub fn layer(&self, x: usize, y: usize) -> u8 {
-        self.layers[y * self.width + x]
+    pub fn layer_at(&self, x: f32, y: f32) -> u8 {
+        self.index(x, y).map_or(0, |index| self.layers[index])
     }
 
     pub fn begin(&mut self) {
         self.frame.copy_from_slice(&self.still);
     }
 
+    /// Blends `color` over one of the painting's own pixels at `x`, `y`.
     pub fn add(&mut self, x: f32, y: f32, color: Rgb, amount: f32) {
         self.add_behind(x, y, color, amount, u8::MAX);
     }
 
-    /// Blends `color` in only where the still layer is `layer` or farther back.
+    /// Blends `color` over one of the painting's own pixels, only where the still layer is
+    /// `layer` or farther back.
     pub fn add_behind(&mut self, x: f32, y: f32, color: Rgb, amount: f32, layer: u8) {
-        if let Some(index) = self.index(x, y)
-            && self.layers[index] <= layer
-        {
-            self.frame[index] = mix(self.frame[index], color, amount);
+        let scale = self.scale as f32;
+        let (left, top) = ((x * scale).round() / scale, (y * scale).round() / scale);
+        for row in 0..self.scale {
+            for column in 0..self.scale {
+                let step = |offset: usize| (offset as f32 + 0.5) / scale;
+                if let Some(index) = self.index(left + step(column), top + step(row))
+                    && self.layers[index] <= layer
+                {
+                    self.frame[index] = mix(self.frame[index], color, amount);
+                }
+            }
+        }
+    }
+
+    /// Blends wherever `glaze` gives a color and an amount inside the box from `from` to `to`, only
+    /// where the still layer is `layer` or farther back, for soft round things like the sun.
+    pub fn glaze(
+        &mut self,
+        from: (f32, f32),
+        to: (f32, f32),
+        layer: u8,
+        glaze: impl Fn(f32, f32) -> Option<(Rgb, f32)>,
+    ) {
+        let scale = self.scale as f32;
+        let (columns, rows) = self.fine();
+        let span = |from: f32, to: f32, limit: usize| {
+            ((from * scale).floor().max(0.0) as usize)..((to * scale).ceil().max(0.0) as usize).min(limit)
+        };
+        for row in span(from.1, to.1, rows) {
+            for column in span(from.0, to.0, columns) {
+                let index = row * columns + column;
+                if self.layers[index] > layer {
+                    continue;
+                }
+                let (x, y) = ((column as f32 + 0.5) / scale, (row as f32 + 0.5) / scale);
+                if let Some((color, amount)) = glaze(x, y) {
+                    self.frame[index] = mix(self.frame[index], color, amount);
+                }
+            }
         }
     }
 
@@ -255,20 +335,63 @@ impl Painting {
         }
     }
 
-    /// Scales the frame to cover `canvas`, cropping whichever sides overhang, like a wallpaper.
-    pub fn cover(&self, canvas: &mut Canvas) {
+    /// Scales the frame to cover `canvas`, cropping whichever sides overhang as little away from
+    /// `focus` (a fraction across and down) as it can. Enlarging blends between neighbouring
+    /// pixels and shrinking averages them, so no pixel grid shows.
+    pub fn cover(&self, canvas: &mut Canvas, focus: (f32, f32)) {
+        let (columns, rows) = self.fine();
         let (width, height) = (canvas.width as f32, canvas.height as f32);
-        let scale = (width / self.width as f32).max(height / self.height as f32);
-        let left = (self.width as f32 * scale - width) / 2.0;
-        let top = (self.height as f32 * scale - height) / 2.0;
+        let scale = (width / columns as f32).max(height / rows as f32);
+        // One side fits exactly, give or take rounding, so its spare can come out a hair below zero.
+        let spare_x = (columns as f32 * scale - width).max(0.0);
+        let spare_y = (rows as f32 * scale - height).max(0.0);
+        let left = (columns as f32 * scale * focus.0 - width / 2.0).clamp(0.0, spare_x);
+        let top = (rows as f32 * scale * focus.1 - height / 2.0).clamp(0.0, spare_y);
         for y in 0..canvas.height {
-            let source_y = (((y as f32 + 0.5 + top) / scale) as usize).min(self.height - 1);
+            let from_y = (y as f32 + top) / scale;
             for x in 0..canvas.width {
-                let source_x = (((x as f32 + 0.5 + left) / scale) as usize).min(self.width - 1);
-                let color = self.frame[source_y * self.width + source_x].map(|channel| channel.clamp(0.0, 255.0));
-                *canvas.at_mut(x, y) = Dot::paint(color);
+                let from_x = (x as f32 + left) / scale;
+                let color = if scale >= 1.0 {
+                    self.blend(from_x + 0.5 / scale - 0.5, from_y + 0.5 / scale - 0.5)
+                } else {
+                    self.average(from_x, from_y, 1.0 / scale)
+                };
+                *canvas.at_mut(x, y) = Dot::paint(color.map(|channel| channel.clamp(0.0, 255.0)));
             }
         }
+    }
+
+    fn pixel(&self, column: isize, row: isize) -> Rgb {
+        let (columns, rows) = self.fine();
+        let column = column.clamp(0, columns as isize - 1) as usize;
+        let row = row.clamp(0, rows as isize - 1) as usize;
+        self.frame[row * columns + column]
+    }
+
+    /// The color at a point between fine pixels' middles, blended from the four around it.
+    fn blend(&self, x: f32, y: f32) -> Rgb {
+        let (left, top) = (x.floor(), y.floor());
+        let (across, down) = (x - left, y - top);
+        let (left, top) = (left as isize, top as isize);
+        let upper = mix(self.pixel(left, top), self.pixel(left + 1, top), across);
+        let lower = mix(self.pixel(left, top + 1), self.pixel(left + 1, top + 1), across);
+        mix(upper, lower, down)
+    }
+
+    /// The mean of the fine pixels under a square `size` pixels wide, starting at `x`, `y`.
+    fn average(&self, x: f32, y: f32, size: f32) -> Rgb {
+        let columns = x as isize..(x + size).ceil() as isize;
+        let rows = y as isize..(y + size).ceil() as isize;
+        let mut sum = [0.0; 3];
+        let mut count = 0.0;
+        for row in rows {
+            for column in columns.clone() {
+                let pixel = self.pixel(column, row);
+                sum = [sum[0] + pixel[0], sum[1] + pixel[1], sum[2] + pixel[2]];
+                count += 1.0;
+            }
+        }
+        sum.map(|channel| channel / f32::max(count, 1.0))
     }
 }
 
@@ -285,7 +408,7 @@ pub fn rain(canvas: &mut Canvas, t: f32, level: f32, wind: f32) {
         let mut step = 0.0;
         while step < length {
             let y = top + step;
-            canvas.set_behind(start - y * slant, y, Dot::solid(0.45));
+            canvas.set_behind(start - y * slant, y, Dot::solid(0.6));
             step += 1.0;
         }
     }

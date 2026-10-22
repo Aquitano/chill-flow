@@ -7,7 +7,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::symbols::braille::BRAILLE;
-use ratatui::symbols::pixel::OCTANTS;
+use ratatui::symbols::pixel::{OCTANTS, QUADRANTS};
 use serde::Deserialize;
 
 use super::theme::Theme;
@@ -65,26 +65,38 @@ impl Picture {
             Picture::AutumnPagoda => (0.8, 0.95),
         }
     }
+
+    /// How the picture looks best: halftone dots for one drawn in the theme's colors, pixels for
+    /// one that brings its own.
+    fn look(self) -> Look {
+        match self {
+            Picture::Cover | Picture::NightLake => Look::Dots,
+            Picture::FujiDawn | Picture::AutumnPagoda => Look::Pixels,
+        }
+    }
 }
 
 /// Which characters draw a picture.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Look {
-    /// Braille dots, with figures in solid pixels.
+    /// Whichever suits the picture.
     #[default]
+    Auto,
+    /// Braille dots on the background, with figures in solid pixels.
     Dots,
-    /// Solid pixels, eight to a cell.
+    /// Eight pixels to a cell, each cell in two colors.
     Pixels,
-    /// Two colors to a cell, one above the other: coarser, with smooth shades.
+    /// Four pixels to a cell in two colors, for fonts without the newer pixel characters.
     Blocks,
 }
 
 impl Look {
-    pub const ALL: [Look; 3] = [Look::Dots, Look::Pixels, Look::Blocks];
+    pub const ALL: [Look; 4] = [Look::Auto, Look::Dots, Look::Pixels, Look::Blocks];
 
     pub fn label(self) -> &'static str {
         match self {
+            Look::Auto => "Auto",
             Look::Dots => "Dots",
             Look::Pixels => "Pixels",
             Look::Blocks => "Blocks",
@@ -93,10 +105,15 @@ impl Look {
 
     pub fn id(self) -> &'static str {
         match self {
+            Look::Auto => "auto",
             Look::Dots => "dots",
             Look::Pixels => "pixels",
             Look::Blocks => "blocks",
         }
+    }
+
+    fn of(self, picture: Picture) -> Look {
+        if self == Look::Auto { picture.look() } else { self }
     }
 
     pub fn step(self, by: i8) -> Look {
@@ -215,7 +232,7 @@ impl Scene {
         }
         let shown = Shown {
             picture,
-            look,
+            look: look.of(picture),
             columns: area.width,
             rows: area.height,
             frame: (self.clock * FPS).floor(),
@@ -233,7 +250,7 @@ impl Scene {
             canvas::rain(&mut self.canvas, t, weather.rain, weather.wind);
             canvas::fireflies(&mut self.canvas, t, weather.crickets, picture.fireflies());
             canvas::brighten(&mut self.canvas, canvas::lightning(t, weather.thunder));
-            self.glyphs = glyphs(&self.canvas, look, theme);
+            self.glyphs = glyphs(&self.canvas, shown.look, theme);
             self.shown = Some(shown);
         }
         let columns = usize::from(area.width);
@@ -261,12 +278,8 @@ type Glyph = (char, Color, Option<Color>);
 /// One glyph per cell, row by row, from the canvas's dots eight at a time.
 fn glyphs(canvas: &Canvas, look: Look, theme: &Theme) -> Vec<Option<Glyph>> {
     let dark = !theme.is_light();
-    // Without the theme's colors there is no background to blend two colors against.
-    let look = if look == Look::Blocks && !theme.has_rgb() {
-        Look::Pixels
-    } else {
-        look
-    };
+    // Two colors to a cell need the theme's colors to blend, so without them dots stand in.
+    let look = if theme.has_rgb() { look } else { Look::Dots };
     let (columns, rows) = (canvas.width / 2, canvas.height / 4);
     let mut glyphs = Vec::with_capacity(columns * rows);
     for row in 0..rows {
@@ -274,23 +287,101 @@ fn glyphs(canvas: &Canvas, look: Look, theme: &Theme) -> Vec<Option<Glyph>> {
             let (left, top) = (column * 2, row * 4);
             let dots: [Dot; 8] = std::array::from_fn(|index| canvas.at(left + index % 2, top + index / 2));
             glyphs.push(match look {
-                Look::Blocks => halves(&dots, theme),
-                Look::Dots | Look::Pixels => pattern(&dots, left, top, look, theme, dark),
+                Look::Pixels => two_colors(&dots, &OCTANTS, theme),
+                Look::Blocks => two_colors(&quarters(&dots, theme), &QUADRANTS, theme),
+                Look::Auto | Look::Dots => pattern(&dots, left, top, theme, dark),
             });
         }
     }
     glyphs
 }
 
+/// The cell's eight dots as four, two across and two down, each the blend of the two dots it
+/// covers. A figure keeps its quarter.
+fn quarters(dots: &[Dot; 8], theme: &Theme) -> [Dot; 4] {
+    std::array::from_fn(|index| {
+        let upper = dots[(index / 2) * 4 + index % 2];
+        let lower = dots[(index / 2) * 4 + index % 2 + 2];
+        match [upper, lower].into_iter().find(|dot| dot.ink.is_figure()) {
+            Some(figure) => figure,
+            None => Dot::paint(canvas::mix(color(&upper, theme), color(&lower, theme), 0.5)),
+        }
+    })
+}
+
+/// A dot's own color, with theme shades taken at face value since the cell's background is drawn too.
+fn color(dot: &Dot, theme: &Theme) -> Rgb {
+    match dot.ink {
+        Ink::Paint(color) => color,
+        _ => rgb_of(theme.mix(dot.light)).unwrap_or([0.0; 3]),
+    }
+}
+
+/// Splits the cell's pixels into two colors, the way a photo prints best on a grid of glyphs that
+/// each have a foreground and a background: the pixels nearer one color take the glyph's shape.
+fn two_colors<const N: usize>(dots: &[Dot; N], glyphs: &[char], theme: &Theme) -> Option<Glyph> {
+    let full = (1 << N) - 1;
+    if let Some(ink) = dots.iter().map(|dot| dot.ink).find(|ink| ink.is_figure()) {
+        let figure = bits(dots, |_, dot| dot.ink == ink);
+        let rest = mean(
+            dots.iter()
+                .filter(|dot| dot.ink != ink)
+                .map(|dot| Some(color(dot, theme))),
+        );
+        return Some(match rest {
+            Some(rest) if figure != full => (glyphs[figure], figure_color(ink, theme), Some(to_color(rest))),
+            _ => (glyphs[full], figure_color(ink, theme), None),
+        });
+    }
+    let colors: [Rgb; N] = std::array::from_fn(|index| color(&dots[index], theme));
+    let lumas = colors.map(canvas::luma);
+    let (darkest, lightest) = (0..N).fold((0, 0), |(low, high), index| {
+        (
+            if lumas[index] < lumas[low] { index } else { low },
+            if lumas[index] > lumas[high] { index } else { high },
+        )
+    });
+    let flat = mean(colors.iter().copied().map(Some))?;
+    if lumas[lightest] - lumas[darkest] < 0.01 {
+        return Some((' ', to_color(flat), Some(to_color(flat))));
+    }
+    let (mut front, mut back) = (colors[lightest], colors[darkest]);
+    let mut shape = 0;
+    for _ in 0..2 {
+        shape = (0..N).fold(0, |shape, index| {
+            let nearer = distance(colors[index], front) < distance(colors[index], back);
+            if nearer { shape | 1 << index } else { shape }
+        });
+        let picked = |inside: bool| {
+            mean(
+                (0..N)
+                    .filter(|index| (shape & 1 << index != 0) == inside)
+                    .map(|index| Some(colors[index])),
+            )
+        };
+        front = picked(true).unwrap_or(front);
+        back = picked(false).unwrap_or(back);
+    }
+    Some(match shape {
+        0 => (' ', to_color(back), Some(to_color(back))),
+        shape if shape == full => (' ', to_color(front), Some(to_color(front))),
+        shape => (glyphs[shape], to_color(front), Some(to_color(back))),
+    })
+}
+
+fn distance(a: Rgb, b: Rgb) -> f32 {
+    (0..3).map(|index| (a[index] - b[index]).powi(2)).sum()
+}
+
 /// The glyph's bits, in the row-major order ratatui's braille and octant tables use.
-fn bits(dots: &[Dot; 8], mut lit: impl FnMut(usize, &Dot) -> bool) -> usize {
+fn bits<const N: usize>(dots: &[Dot; N], mut lit: impl FnMut(usize, &Dot) -> bool) -> usize {
     dots.iter()
         .enumerate()
         .filter(|(index, dot)| lit(*index, dot))
         .fold(0, |bits, (index, _)| bits | 1 << index)
 }
 
-fn pattern(dots: &[Dot; 8], left: usize, top: usize, look: Look, theme: &Theme, dark: bool) -> Option<Glyph> {
+fn pattern(dots: &[Dot; 8], left: usize, top: usize, theme: &Theme, dark: bool) -> Option<Glyph> {
     if let Some(ink) = dots.iter().map(|dot| dot.ink).find(|ink| ink.is_figure()) {
         let figure = bits(dots, |_, dot| dot.ink == ink);
         return Some((OCTANTS[figure], figure_color(ink, theme), None));
@@ -301,25 +392,7 @@ fn pattern(dots: &[Dot; 8], left: usize, top: usize, look: Look, theme: &Theme, 
     if lit == 0 {
         return None;
     }
-    let glyphs = if look == Look::Pixels { &OCTANTS } else { &BRAILLE };
-    Some((glyphs[lit], average(dots, lit, theme, dark), None))
-}
-
-fn halves(dots: &[Dot; 8], theme: &Theme) -> Option<Glyph> {
-    let half = |dots: &[Dot]| -> Color {
-        if let Some(ink) = dots.iter().map(|dot| dot.ink).find(|ink| ink.is_figure())
-            && dots.iter().filter(|dot| dot.ink == ink).count() >= 2
-        {
-            return figure_color(ink, theme);
-        }
-        let colors = dots.iter().map(|dot| match dot.ink {
-            Ink::Paint(color) => Some(color),
-            _ => rgb(theme.mix(dot.light)),
-        });
-        mean(colors).map_or(theme.background(), to_color)
-    };
-    let blank = dots.iter().all(|dot| dot.ink == Ink::Theme && dot.light < 0.03);
-    (!blank).then(|| ('▀', half(&dots[..4]), Some(half(&dots[4..]))))
+    Some((BRAILLE[lit], average(dots, lit, theme, dark), None))
 }
 
 /// How much of a dot to light. Painted dots light up with their color on a dark background, and
@@ -349,7 +422,7 @@ fn average(dots: &[Dot; 8], lit: usize, theme: &Theme, dark: bool) -> Color {
     };
     let colors = shown().map(|dot| match dot.ink {
         Ink::Paint(color) => Some(color),
-        _ => rgb(theme.mix(0.3 + 0.8 * dot.light)),
+        _ => rgb_of(theme.mix(0.3 + 0.8 * dot.light)),
     });
     mean(colors).map_or_else(
         // Without the theme's colors there is nothing to average, so the shade stands for them all.
@@ -372,7 +445,7 @@ fn mean(colors: impl Iterator<Item = Option<Rgb>>) -> Option<Rgb> {
     (count > 0.0).then(|| sum.map(|channel| channel / count))
 }
 
-fn rgb(color: Color) -> Option<Rgb> {
+fn rgb_of(color: Color) -> Option<Rgb> {
     match color {
         Color::Rgb(r, g, b) => Some([f32::from(r), f32::from(g), f32::from(b)]),
         _ => None,
@@ -387,6 +460,18 @@ fn to_color(color: Rgb) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cell_of_two_colors_keeps_both_with_the_shape_between_them() {
+        let theme = Theme::new(Some(([205, 214, 244], [30, 30, 46])));
+        let (red, blue) = ([200.0, 40.0, 40.0], [40.0, 40.0, 200.0]);
+        let left_red: [Dot; 8] = std::array::from_fn(|index| Dot::paint(if index % 2 == 0 { red } else { blue }));
+        let glyph = two_colors(&left_red, &OCTANTS, &theme);
+        assert_eq!(
+            glyph,
+            Some(('▌', Color::Rgb(200, 40, 40), Some(Color::Rgb(40, 40, 200))))
+        );
+    }
 
     #[test]
     fn every_rain_sound_rains_and_generated_noise_leaves_the_weather_alone() {

@@ -14,6 +14,8 @@ const SUN: (f32, f32) = (60.0, 50.0);
 const SUN_RADIUS: f32 = 7.0;
 const BRIDGE_FROM: f32 = 22.0;
 const BRIDGE_TO: f32 = 98.0;
+/// A very wide player crops the picture; this keeps the pagoda and the bridge in view.
+const FOCUS: (f32, f32) = (0.6, 0.55);
 
 const SKY: u8 = 0;
 const HILL: u8 = 1;
@@ -36,6 +38,10 @@ const BARK: Rgb = rgb(0x2a1418);
 const LAMP: Rgb = rgb(0xf0a838);
 const LAMP_BRIGHT: Rgb = rgb(0xffd070);
 
+const EAVES: [f32; 5] = [68.0, 56.0, 45.0, 35.0, 26.0];
+const ROOFS: [f32; 5] = [23.0, 20.0, 17.0, 14.5, 12.0];
+const BODIES: [f32; 5] = [11.0, 9.5, 8.0, 6.8, 5.6];
+
 struct Leaf {
     x: f32,
     phase: f32,
@@ -48,7 +54,7 @@ struct Leaf {
 /// A five tier pagoda among red maples on an autumn evening, with lanterns on an arched bridge,
 /// a branch swaying in the wind and maple leaves drifting down.
 pub struct AutumnPagoda {
-    painting: Painting,
+    painting: Option<Painting>,
     windows: Vec<(f32, f32, f32)>,
     lanterns: Vec<(f32, f32)>,
     branch: Vec<(f32, f32, Rgb)>,
@@ -73,189 +79,180 @@ fn inside(x: f32, y: f32, polygon: &[(f32, f32)]) -> bool {
     crossed
 }
 
+/// The reds of the maples from lit to shaded, blended rather than picked so the crowns shade
+/// smoothly.
+fn red(shade: f32) -> Rgb {
+    let stops: [(f32, Rgb); 7] = std::array::from_fn(|index| (index as f32 / 6.0, REDS[index]));
+    ramp(&stops, shade)
+}
+
 /// A maple's crown: a noisy blob lit from the upper left.
 fn canopy(painting: &mut Painting, (cx, cy): (f32, f32), (rx, ry): (f32, f32), seed: i64, shade: f32) {
-    let mut y = (cy - ry - 2.0).floor();
-    while y <= cy + ry + 2.0 {
-        let mut x = (cx - rx - 2.0).floor();
-        while x <= cx + rx + 2.0 {
+    painting.paint(
+        (cx - rx - 2.0, cy - ry - 2.0),
+        (cx + rx + 3.0, cy + ry + 3.0),
+        MIDDLE,
+        |_, x, y| {
             let (dx, dy) = ((x - cx) / rx, (y - cy) / ry);
             let grain = fbm(x / 3.5, y / 3.5, 3, seed);
-            if dx.hypot(dy) + (grain - 0.5) * 0.7 <= 1.0 {
-                let light = unit(0.55 - dx * 0.35 - dy * 0.4 + (grain - 0.5) * 0.9 - shade);
-                let red = REDS[((1.0 - light) * (REDS.len() - 1) as f32).round() as usize];
-                painting.put(x, y, red, MIDDLE);
-            }
-            x += 1.0;
-        }
-        y += 1.0;
+            let light = unit(0.55 - dx * 0.35 - dy * 0.4 + (grain - 0.5) * 0.9 - shade);
+            (dx.hypot(dy) + (grain - 0.5) * 0.7 <= 1.0).then(|| red(1.0 - light))
+        },
+    );
+}
+
+/// Five tiers with upswept eaves, each a body under its roof, and a spire with rings.
+fn pagoda(painting: &mut Painting) {
+    for tier in 0..5 {
+        let (eave, roof, body) = (EAVES[tier], ROOFS[tier], BODIES[tier]);
+        let bottom = if tier == 0 { 81.0 } else { EAVES[tier - 1] - 4.0 };
+        painting.paint(
+            (PAGODA_X - body, eave),
+            (PAGODA_X + body + 1.0, bottom),
+            MIDDLE,
+            |_, x, y| {
+                Some(if (y - eave).floor() as i32 % 4 == 3 {
+                    rgb(0x3e1a1c)
+                } else if x < PAGODA_X - body + 2.0 {
+                    rgb(0x5a2420)
+                } else {
+                    BARK
+                })
+            },
+        );
+        painting.paint(
+            (PAGODA_X - roof, eave - 6.0),
+            (PAGODA_X + roof + 1.0, eave + 2.0),
+            MIDDLE,
+            |_, x, y| {
+                let across = (x - PAGODA_X - 0.5).abs() / roof;
+                let top = eave - 5.0 + 4.2 * across.powf(0.85) - 2.0 * across.powi(6);
+                let low = eave + 1.0 - 2.5 * across.powi(5);
+                let lit = y < top + 1.0 && x < PAGODA_X;
+                (across <= 1.0 && y >= top && y < low + 1.0).then_some(if lit { rgb(0x8a3a28) } else { TIMBER })
+            },
+        );
     }
+    painting.paint((PAGODA_X - 1.0, 5.0), (PAGODA_X + 2.0, 22.0), MIDDLE, |_, x, y| {
+        let ring = [9.0, 11.0, 13.0, 15.0, 17.0]
+            .iter()
+            .any(|ring| (*ring..ring + 1.0).contains(&y));
+        let spire = (PAGODA_X..PAGODA_X + 1.0).contains(&x);
+        if spire && y < 6.0 {
+            Some(rgb(0x3e1a1c))
+        } else {
+            (spire || ring).then_some(TIMBER)
+        }
+    });
+}
+
+/// The vermilion arched bridge, with its rails, posts and the piers at each end.
+fn bridge(painting: &mut Painting) {
+    painting.paint((BRIDGE_FROM, 60.0), (BRIDGE_TO + 1.0, WATERLINE), BRIDGE, |_, x, y| {
+        let offset = y - deck(x);
+        let post = (x - BRIDGE_FROM) % 6.0 < 1.0 && (-6.5..-1.5).contains(&offset);
+        match offset {
+            _ if post => Some(rgb(0xe05a34)),
+            offset if (-6.5..-5.5).contains(&offset) => Some(rgb(0xff7a40)),
+            offset if (-1.5..-0.5).contains(&offset) => Some(rgb(0xffa060)),
+            offset if (-0.5..0.5).contains(&offset) => Some(rgb(0xff7a40)),
+            offset if (0.5..1.5).contains(&offset) => Some(rgb(0xe05a34)),
+            offset if (1.5..2.5).contains(&offset) => Some(rgb(0x5a2420)),
+            _ => None,
+        }
+    });
+    for (end, inward) in [(BRIDGE_FROM, 1.0), (BRIDGE_TO, -1.0)] {
+        let (from, to) = (end.min(end + inward), end.max(end + inward) + 1.0);
+        painting.paint((from, WATERLINE - 6.0), (to, WATERLINE), BRIDGE, |_, x, _| {
+            Some(if (end..end + 1.0).contains(&x) {
+                rgb(0xe05a34)
+            } else {
+                rgb(0xb04028)
+            })
+        });
+    }
+}
+
+/// The parts that never move, painted once for each scale.
+fn still(scale: usize) -> Painting {
+    let (width, height) = (WIDTH as f32, HEIGHT as f32);
+    let mut painting = Painting::new(WIDTH, HEIGHT, scale);
+    let sky = [
+        (0.0, rgb(0xb07a8a)),
+        (0.25, rgb(0xcc8a80)),
+        (0.45, rgb(0xe49a78)),
+        (0.62, rgb(0xf4ac70)),
+        (0.78, rgb(0xffc078)),
+        (1.0, rgb(0xffd490)),
+    ];
+    painting.paint((0.0, 0.0), (width, WATERLINE), SKY, |_, x, y| {
+        let distance = (x - SUN.0).hypot((y - SUN.1) * 1.3);
+        Some(mix(
+            ramp(&sky, y / 62.0),
+            rgb(0xffe2a8),
+            unit(1.0 - distance / 46.0) * 0.45,
+        ))
+    });
+    painting.paint((0.0, 45.0), (width, WATERLINE), HILL, |_, x, y| {
+        let top = 56.0 + 4.0 * (x / 31.0 + 2.0).sin() + 3.0 * fbm(x / 14.0, 3.0, 3, 4);
+        (y >= top).then(|| mix(rgb(0x7a5470), rgb(0x3a2a44), unit((y - top) / 10.0)))
+    });
+    canopy(&mut painting, (100.0, 60.0), (14.0, 9.0), 3, 0.15);
+    canopy(&mut painting, (166.0, 58.0), (16.0, 10.0), 5, 0.15);
+    canopy(&mut painting, (186.0, 64.0), (12.0, 9.0), 7, 0.2);
+    pagoda(&mut painting);
+    painting.paint((70.0, 70.0), (width, WATERLINE), MIDDLE, |_, x, y| {
+        let top = 76.0 + 3.0 * (x / 19.0).sin() + 2.0 * fbm(x / 7.0, 9.0, 3, 2);
+        (y >= top).then(|| {
+            if fbm(x / 3.0, y / 3.0, 2, 8) > 0.55 {
+                rgb(0x3a2a2a)
+            } else {
+                rgb(0x2a2026)
+            }
+        })
+    });
+    canopy(&mut painting, (106.0, 76.0), (13.0, 7.0), 11, 0.0);
+    canopy(&mut painting, (156.0, 74.0), (15.0, 8.0), 13, 0.0);
+    canopy(&mut painting, (182.0, 78.0), (13.0, 8.0), 17, 0.0);
+    canopy(&mut painting, (84.0, 80.0), (10.0, 6.0), 19, 0.1);
+    bridge(&mut painting);
+    painting.paint((0.0, WATERLINE), (width, height), POND, |painting, x, y| {
+        let depth = (y - WATERLINE) / (height - WATERLINE);
+        let reflected = mix(
+            painting.still_at(x, WATERLINE - (y - WATERLINE) * 1.1),
+            rgb(0xc09088),
+            0.22,
+        );
+        Some(mix(reflected, rgb(0x46344a), 0.1 + 0.3 * depth))
+    });
+    let left_bank = [(0.0, 84.0), (14.0, 88.0), (24.0, 96.0), (30.0, height), (0.0, height)];
+    let right_bank = [
+        (width, 88.0),
+        (178.0, 92.0),
+        (168.0, 100.0),
+        (162.0, height),
+        (width, height),
+    ];
+    painting.paint((0.0, 80.0), (width, height), BANK, |_, x, y| {
+        (inside(x, y, &left_bank) || inside(x, y, &right_bank)).then(|| {
+            if fbm(x / 3.0, y / 3.0, 2, 41) > 0.55 {
+                rgb(0x3a2a2a)
+            } else {
+                rgb(0x261e2e)
+            }
+        })
+    });
+    painting
 }
 
 impl AutumnPagoda {
     pub fn new() -> AutumnPagoda {
-        let mut painting = Painting::new(WIDTH, HEIGHT);
-        let columns = || (0..WIDTH).map(|x| x as f32);
-        let sky = [
-            (0.0, rgb(0xb07a8a)),
-            (0.25, rgb(0xcc8a80)),
-            (0.45, rgb(0xe49a78)),
-            (0.62, rgb(0xf4ac70)),
-            (0.78, rgb(0xffc078)),
-            (1.0, rgb(0xffd490)),
-        ];
-        for row in 0..WATERLINE as usize {
-            let y = row as f32;
-            for x in columns() {
-                let distance = (x - SUN.0).hypot((y - SUN.1) * 1.3);
-                let color = mix(ramp(&sky, y / 62.0), rgb(0xffe2a8), unit(1.0 - distance / 46.0) * 0.45);
-                painting.put(x, y, color, SKY);
-            }
-        }
-        for x in columns() {
-            let top = 56.0 + 4.0 * (x / 31.0 + 2.0).sin() + 3.0 * fbm(x / 14.0, 3.0, 3, 4);
-            let mut y = top.floor();
-            while y < WATERLINE {
-                painting.put(x, y, mix(rgb(0x7a5470), rgb(0x3a2a44), unit((y - top) / 10.0)), HILL);
-                y += 1.0;
-            }
-        }
-        canopy(&mut painting, (100.0, 60.0), (14.0, 9.0), 3, 0.15);
-        canopy(&mut painting, (166.0, 58.0), (16.0, 10.0), 5, 0.15);
-        canopy(&mut painting, (186.0, 64.0), (12.0, 9.0), 7, 0.2);
-
-        // Five tiers with upswept eaves, and a spire with rings.
-        let eaves = [68.0, 56.0, 45.0, 35.0, 26.0];
-        let roofs = [23.0, 20.0, 17.0, 14.5, 12.0];
-        let bodies = [11.0, 9.5, 8.0, 6.8, 5.6];
-        let mut windows = Vec::new();
-        for tier in 0..5 {
-            let (eave, roof, body) = (eaves[tier], roofs[tier], bodies[tier]);
-            let bottom = if tier == 0 { 80.0 } else { eaves[tier - 1] - 5.0 };
-            let mut y = eave;
-            while y <= bottom {
-                let mut x = (PAGODA_X - body).round();
-                while x <= (PAGODA_X + body).round() {
-                    let color = if (y - eave) % 4.0 == 3.0 {
-                        rgb(0x3e1a1c)
-                    } else if x < PAGODA_X - body + 2.0 {
-                        rgb(0x5a2420)
-                    } else {
-                        BARK
-                    };
-                    painting.put(x, y, color, MIDDLE);
-                    x += 1.0;
-                }
-                y += 1.0;
-            }
-            windows.push((PAGODA_X - 2.0, eave + 3.0, (body * 0.5).round().max(2.0)));
-            let mut x = (PAGODA_X - roof).round();
-            while x <= (PAGODA_X + roof).round() {
-                let across = (x - PAGODA_X).abs() / roof;
-                let top = (eave - 5.0 + 4.2 * across.powf(0.85) - 2.0 * across.powi(6)).round();
-                let low = (eave + 1.0 - 2.5 * across.powi(5)).round();
-                let mut y = top;
-                while y <= low {
-                    let color = if y == top && x < PAGODA_X {
-                        rgb(0x8a3a28)
-                    } else {
-                        TIMBER
-                    };
-                    painting.put(x, y, color, MIDDLE);
-                    y += 1.0;
-                }
-                x += 1.0;
-            }
-        }
-        for y in 6..=21 {
-            painting.put(PAGODA_X, y as f32, TIMBER, MIDDLE);
-        }
-        for y in [9.0, 11.0, 13.0, 15.0, 17.0] {
-            painting.put(PAGODA_X - 1.0, y, TIMBER, MIDDLE);
-            painting.put(PAGODA_X + 1.0, y, TIMBER, MIDDLE);
-        }
-        painting.put(PAGODA_X, 5.0, rgb(0x3e1a1c), MIDDLE);
-
-        // The bank behind the pond, and the maples in front of the pagoda's base.
-        for x in (70..WIDTH).map(|x| x as f32) {
-            let mut y = (76.0 + 3.0 * (x / 19.0).sin() + 2.0 * fbm(x / 7.0, 9.0, 3, 2)).floor();
-            while y < WATERLINE {
-                let color = if fbm(x / 3.0, y / 3.0, 2, 8) > 0.55 {
-                    rgb(0x3a2a2a)
-                } else {
-                    rgb(0x2a2026)
-                };
-                painting.put(x, y, color, MIDDLE);
-                y += 1.0;
-            }
-        }
-        canopy(&mut painting, (106.0, 76.0), (13.0, 7.0), 11, 0.0);
-        canopy(&mut painting, (156.0, 74.0), (15.0, 8.0), 13, 0.0);
-        canopy(&mut painting, (182.0, 78.0), (13.0, 8.0), 17, 0.0);
-        canopy(&mut painting, (84.0, 80.0), (10.0, 6.0), 19, 0.1);
-
-        // The vermilion arched bridge, with rail posts.
-        let mut x = BRIDGE_FROM;
-        while x <= BRIDGE_TO {
-            let top = deck(x);
-            painting.put(x, top - 1.0, rgb(0xffa060), BRIDGE);
-            painting.put(x, top, rgb(0xff7a40), BRIDGE);
-            painting.put(x, top + 1.0, rgb(0xe05a34), BRIDGE);
-            painting.put(x, top + 2.0, rgb(0x5a2420), BRIDGE);
-            painting.put(x, top - 6.0, rgb(0xff7a40), BRIDGE);
-            if (x - BRIDGE_FROM) % 6.0 == 0.0 {
-                let mut y = top - 6.0;
-                while y < top - 1.0 {
-                    painting.put(x, y, rgb(0xe05a34), BRIDGE);
-                    y += 1.0;
-                }
-            }
-            x += 1.0;
-        }
-        for (end, inward) in [(BRIDGE_FROM, 1.0), (BRIDGE_TO, -1.0)] {
-            for y in (WATERLINE as usize - 6)..WATERLINE as usize {
-                painting.put(end, y as f32, rgb(0xe05a34), BRIDGE);
-                painting.put(end + inward, y as f32, rgb(0xb04028), BRIDGE);
-            }
-        }
+        let windows = (0..5)
+            .map(|tier| (PAGODA_X - 2.0, EAVES[tier] + 3.0, (BODIES[tier] * 0.5).round().max(2.0)))
+            .collect();
         let lanterns = [12.0, 38.0, 64.0]
             .map(|offset| (BRIDGE_FROM + offset, deck(BRIDGE_FROM + offset).round() - 7.0))
             .to_vec();
-
-        // The pond mirrors everything above it, a little darker with depth.
-        for row in WATERLINE as usize..HEIGHT {
-            let y = row as f32;
-            let mirrored = (WATERLINE - 1.0 - (y - WATERLINE) * 1.1).round().max(0.0) as usize;
-            let depth = (y - WATERLINE) / (HEIGHT as f32 - WATERLINE);
-            for column in 0..WIDTH {
-                let reflected = mix(painting.still(column, mirrored), rgb(0xc09088), 0.22);
-                painting.put(column as f32, y, mix(reflected, rgb(0x46344a), 0.1 + 0.3 * depth), POND);
-            }
-        }
-        let (height, width) = (HEIGHT as f32, WIDTH as f32);
-        let left_bank = [(0.0, 84.0), (14.0, 88.0), (24.0, 96.0), (30.0, height), (0.0, height)];
-        let right_bank = [
-            (width, 88.0),
-            (178.0, 92.0),
-            (168.0, 100.0),
-            (162.0, height),
-            (width, height),
-        ];
-        for row in 80..HEIGHT {
-            for column in 0..WIDTH {
-                let (x, y) = (column as f32, row as f32);
-                let centre = (x + 0.5, y + 0.5);
-                if inside(centre.0, centre.1, &left_bank) || inside(centre.0, centre.1, &right_bank) {
-                    let color = if fbm(x / 3.0, y / 3.0, 2, 41) > 0.55 {
-                        rgb(0x3a2a2a)
-                    } else {
-                        rgb(0x261e2e)
-                    };
-                    painting.put(x, y, color, BANK);
-                }
-            }
-        }
-
         // A maple branch reaching in from the top left, drawn each frame so it can sway.
         let mut branch = Vec::new();
         for (from, to) in [
@@ -312,7 +309,7 @@ impl AutumnPagoda {
             .map(|index| (((index * 59) % 83) as f32 / 83.0, ((index * 31) % 47) as f32 / 47.0))
             .collect();
         AutumnPagoda {
-            painting,
+            painting: None,
             windows,
             lanterns,
             branch,
@@ -322,35 +319,36 @@ impl AutumnPagoda {
     }
 
     pub fn paint(&mut self, canvas: &mut Canvas, t: f32, weather: &Weather) {
+        let scale = Painting::scale_for(WIDTH, HEIGHT, canvas);
+        if self.painting.as_ref().is_some_and(|painting| painting.scale != scale) {
+            self.painting = None;
+        }
+        let painting = self.painting.get_or_insert_with(|| still(scale));
         let breeze = 0.5 + 1.5 * weather.wind;
         let (width, height) = (WIDTH as f32, HEIGHT as f32);
-        let painting = &mut self.painting;
         painting.begin();
 
-        let mut y = SUN.1 - SUN_RADIUS;
-        while y <= SUN.1 + SUN_RADIUS {
-            let mut x = SUN.0 - SUN_RADIUS;
-            while x <= SUN.0 + SUN_RADIUS {
+        painting.glaze(
+            (SUN.0 - SUN_RADIUS, SUN.1 - SUN_RADIUS),
+            (SUN.0 + SUN_RADIUS, SUN.1 + SUN_RADIUS),
+            SKY,
+            |x, y| {
                 let distance = (x - SUN.0).hypot(y - SUN.1);
-                if distance < SUN_RADIUS {
-                    let color = if distance < SUN_RADIUS - 1.5 {
-                        rgb(0xfffaea)
-                    } else {
-                        rgb(0xfff0c8)
-                    };
-                    painting.add_behind(x, y, color, 1.0, SKY);
-                }
-                x += 1.0;
-            }
-            y += 1.0;
-        }
+                let color = if distance < SUN_RADIUS - 1.5 {
+                    rgb(0xfffaea)
+                } else {
+                    rgb(0xfff0c8)
+                };
+                (distance < SUN_RADIUS).then_some((color, 1.0))
+            },
+        );
 
         for &(across, phase) in &self.ripples {
             let near = (phase + t * 0.04) % 1.0;
-            let y = (WATERLINE + 2.0 + (height - WATERLINE - 3.0) * near).round();
+            let y = WATERLINE + 2.0 + (height - WATERLINE - 3.0) * near;
             let length = 4.0 + 14.0 * near;
             let middle = across * (width + 20.0) - 10.0;
-            let mut x = (middle - length / 2.0).round();
+            let mut x = middle - length / 2.0;
             while x < middle + length / 2.0 {
                 painting.add_behind(x, y, rgb(0xe0b090), 0.5, POND);
                 painting.add_behind(x, y + 1.0, rgb(0x261e2e), 0.4, POND);
@@ -402,6 +400,6 @@ impl AutumnPagoda {
         }
 
         painting.overcast(weather.rain);
-        painting.cover(canvas);
+        painting.cover(canvas, FOCUS);
     }
 }
