@@ -152,6 +152,10 @@ pub fn header(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant
         right_edge = timer_x;
     }
 
+    if right_edge.saturating_sub(area.x) < 10 {
+        return;
+    }
+
     let glyph = match (app.is_playing(), ui.motion) {
         (true, true) => ["◐", "◓", "◑", "◒"][(now.duration_since(ui.started).as_millis() / 300) as usize % 4],
         (true, false) => "●",

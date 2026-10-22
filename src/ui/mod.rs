@@ -744,21 +744,23 @@ mod tests {
         app.timer.start(start);
         let now = start + Duration::from_secs(435);
         app.timer.pause(now);
-        for width in [40, 44, 64] {
+        for width in [20, 40, 44, 64] {
             let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), true);
             let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
             terminal.draw(|frame| ui.draw_at(frame, &mut app, now)).unwrap();
             let header: String = (0..width)
                 .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
                 .collect();
-            assert!(header.contains("chill"), "{header}");
+            assert_eq!(header.contains("chill"), width >= 40, "{header}");
             assert!(header.contains("focus 17:45 paused"), "{header}");
             let (clock, _) = ui
                 .hits
                 .iter()
                 .find(|(rect, hit)| rect.y == 0 && *hit == Hit::Act(Action::TimerToggle))
                 .unwrap();
-            assert!(clock.x >= 10);
+            if width >= 40 {
+                assert!(clock.x >= 10);
+            }
             assert!(clock.right() <= width);
             for (stats, hit) in &ui.hits {
                 if *hit == Hit::Act(Action::OpenStats) {
