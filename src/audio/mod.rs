@@ -58,7 +58,7 @@ pub struct Engine {
     arrivals: Receiver<LoadedLoop>,
     stream: Option<Playing>,
     ambient: HashMap<String, AmbientSlot>,
-    _output: Output,
+    _output: Option<Output>,
 }
 
 struct Playing {
@@ -84,6 +84,17 @@ impl Engine {
     pub fn start(cache_dir: PathBuf) -> Engine {
         let device = output::device_rate();
         let rate = device.as_ref().copied().unwrap_or(FALLBACK_RATE);
+        let (mut engine, mixer) = Self::build(cache_dir, rate);
+        engine._output = Some(Output::start(mixer, rate, device.map(|_| ()), engine.events.clone()));
+        engine
+    }
+
+    #[cfg(test)]
+    pub fn offline(cache_dir: PathBuf) -> Engine {
+        Self::build(cache_dir, FALLBACK_RATE).0
+    }
+
+    fn build(cache_dir: PathBuf, rate: u32) -> (Engine, Mixer) {
         let controls = Arc::new(Controls {
             gain: AtomicF32::new(1.0),
             music_gain: AtomicF32::new(1.0),
@@ -93,8 +104,7 @@ impl Engine {
         let (events, inbox) = mpsc::channel();
         let (stream_events, stream_inbox) = mpsc::channel();
         let (loaded, arrivals) = mpsc::channel();
-        let output = Output::start(mixer, rate, device.map(|_| ()), events.clone());
-        Engine {
+        let engine = Engine {
             rate,
             cache_dir,
             controls,
@@ -110,8 +120,9 @@ impl Engine {
             arrivals,
             stream: None,
             ambient: HashMap::new(),
-            _output: output,
-        }
+            _output: None,
+        };
+        (engine, mixer)
     }
 
     pub fn play_stream(&mut self, input: StreamInput) {

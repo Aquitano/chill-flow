@@ -98,33 +98,46 @@ fn scroll(selected: usize, offset: &mut usize, height: usize) {
 
 pub fn header(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant, show_timer: bool) {
     let theme = ui.theme;
+    let timer = &app.timer;
+    let timer_label = show_timer.then(|| {
+        let remaining = timer.remaining(now).as_secs_f64().ceil() as u64;
+        let state = if timer.is_running() { "" } else { " paused" };
+        format!(
+            "{} {:02}:{:02}{state}",
+            timer.phase().label(),
+            remaining / 60,
+            remaining % 60
+        )
+    });
     let minutes: Vec<u32> = app.focus_days.days.iter().map(|(_, minutes)| *minutes).collect();
     let today = widgets::long_minutes(app.focus_days.today());
     let spark = widgets::sparkline(&minutes);
     let width = (6 + today.width() + 2 + spark.width() + 1) as u16;
-    let start = area.right().saturating_sub(width);
-    let rect = Rect::new(start, area.y, width, 1);
-    let label = if ui.hovered(rect) { theme.muted() } else { theme.faint() };
-    let mut x = put(buf, start, area.y, "today ", Style::new().fg(label));
-    x = put(buf, x, area.y, &today, Style::new().fg(theme.text()));
-    x += 2;
-    let count = spark.chars().count();
-    for (index, ch) in spark.chars().enumerate() {
-        let color = if index + 1 == count {
-            theme.accent
-        } else {
-            theme.mix(0.45)
-        };
-        x = put(buf, x, area.y, &ch.to_string(), Style::new().fg(color));
+    let timer_width = timer_label.as_ref().map_or(0, |label| label.width() + 4);
+    let show_stats = usize::from(area.width) >= 10 + timer_width + usize::from(width);
+    let start = if show_stats { area.right() - width } else { area.right() };
+    if show_stats {
+        let rect = Rect::new(start, area.y, width, 1);
+        let label = if ui.hovered(rect) { theme.muted() } else { theme.faint() };
+        let mut x = put(buf, start, area.y, "today ", Style::new().fg(label));
+        x = put(buf, x, area.y, &today, Style::new().fg(theme.text()));
+        x += 2;
+        let count = spark.chars().count();
+        for (index, ch) in spark.chars().enumerate() {
+            let color = if index + 1 == count {
+                theme.accent
+            } else {
+                theme.mix(0.45)
+            };
+            x = put(buf, x, area.y, &ch.to_string(), Style::new().fg(color));
+        }
+        ui.hit(rect, Hit::Act(Action::OpenStats));
     }
-    ui.hit(rect, Hit::Act(Action::OpenStats));
 
     let mut right_edge = start;
-    if show_timer {
-        let timer = &app.timer;
-        let remaining = timer.remaining(now).as_secs_f64().ceil() as u64;
-        let label = format!("{} {:02}:{:02}", timer.phase().label(), remaining / 60, remaining % 60);
-        let timer_x = start.saturating_sub(label.width() as u16 + 4);
+    if let Some(label) = timer_label {
+        let gap = if show_stats { 4 } else { 1 };
+        let timer_x = start.saturating_sub(label.width() as u16 + gap);
         let color = match (timer.is_running(), timer.phase()) {
             (false, _) => theme.muted(),
             (true, Phase::Focus) => theme.accent,
@@ -137,6 +150,10 @@ pub fn header(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant
             Hit::Act(Action::TimerToggle),
         );
         right_edge = timer_x;
+    }
+
+    if right_edge.saturating_sub(area.x) < 10 {
+        return;
     }
 
     let glyph = match (app.is_playing(), ui.motion) {
@@ -755,7 +772,7 @@ fn controls(buf: &mut Buffer, inner: Rect, y: u16, app: &App, ui: &mut Ui) {
         let volume_x = inner.right().saturating_sub(bar_width + 9);
         let label_end = put(buf, volume_x, y, "vol ", Style::new().fg(theme.faint()));
         let bar = Rect::new(label_end, y, bar_width, 1);
-        let shown = ui.volume.value(Instant::now());
+        let shown = ui.volume.value(ui.last_frame);
         let filled = if ui.hovered(bar) { theme.text() } else { theme.muted() };
         meter(
             buf,
@@ -777,7 +794,7 @@ fn controls(buf: &mut Buffer, inner: Rect, y: u16, app: &App, ui: &mut Ui) {
 
 pub fn queue(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
     let theme = ui.theme;
-    let glow = ui.panel_glow[1].value(Instant::now());
+    let glow = ui.panel_glow[1].value(ui.last_frame);
     let upcoming: Vec<_> = if app.source == Source::Soundscape {
         Vec::new()
     } else {

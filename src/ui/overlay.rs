@@ -46,7 +46,11 @@ pub fn commands(app: &App) -> Vec<Command> {
         command("Timer: reset", "T", Action::TimerReset),
         command("Timer: skip to the next phase", "x", Action::TimerSkip),
         command(
-            if app.timer_hidden { "Timer: show" } else { "Timer: hide" },
+            if app.timer_panel_visible() {
+                "Timer: hide"
+            } else {
+                "Timer: show"
+            },
             "F",
             Action::ToggleTimerPanel,
         ),
