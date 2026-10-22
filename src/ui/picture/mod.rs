@@ -340,18 +340,24 @@ fn two_colors<const N: usize>(dots: &[Dot; N], glyphs: &[char], theme: &Theme) -
         });
     }
     let colors: [Rgb; N] = std::array::from_fn(|index| color(&dots[index], theme));
-    let lumas = colors.map(canvas::luma);
-    let (darkest, lightest) = (0..N).fold((0, 0), |(low, high), index| {
-        (
-            if lumas[index] < lumas[low] { index } else { low },
-            if lumas[index] > lumas[high] { index } else { high },
-        )
-    });
     let flat = mean(colors.iter().copied().map(Some))?;
-    if lumas[lightest] - lumas[darkest] < 0.01 {
+    // Seeded by the pixel farthest from the cell's mean and the one farthest from that, so two
+    // colors of the same brightness still part.
+    let farthest = |from: Rgb| {
+        (0..N).fold(0, |best, index| {
+            if distance(colors[index], from) > distance(colors[best], from) {
+                index
+            } else {
+                best
+            }
+        })
+    };
+    let first = farthest(flat);
+    let second = farthest(colors[first]);
+    if distance(colors[first], colors[second]) < 9.0 {
         return Some((' ', to_color(flat), Some(to_color(flat))));
     }
-    let (mut front, mut back) = (colors[lightest], colors[darkest]);
+    let (mut front, mut back) = (colors[first], colors[second]);
     let mut shape = 0;
     for _ in 0..2 {
         shape = (0..N).fold(0, |shape, index| {
@@ -476,6 +482,13 @@ mod tests {
         assert_eq!(
             glyph,
             Some(('▌', Color::Rgb(200, 40, 40), Some(Color::Rgb(40, 40, 200))))
+        );
+
+        let as_bright_blue = [40.0, 71.0, 200.0];
+        let even: [Dot; 8] = std::array::from_fn(|index| Dot::paint(if index % 2 == 0 { red } else { as_bright_blue }));
+        assert_eq!(
+            two_colors(&even, &OCTANTS, &theme),
+            Some(('▌', Color::Rgb(200, 40, 40), Some(Color::Rgb(40, 71, 200))))
         );
     }
 

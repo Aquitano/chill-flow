@@ -378,20 +378,21 @@ impl Painting {
         mix(upper, lower, down)
     }
 
-    /// The mean of the fine pixels under a square `size` pixels wide, starting at `x`, `y`.
+    /// The mean of the fine pixels under a square `size` pixels wide, starting at `x`, `y`, each
+    /// weighed by how much of it the square covers.
     fn average(&self, x: f32, y: f32, size: f32) -> Rgb {
-        let columns = x as isize..(x + size).ceil() as isize;
-        let rows = y as isize..(y + size).ceil() as isize;
+        let overlap = |cell: isize, from: f32| (cell as f32 + 1.0).min(from + size) - (cell as f32).max(from);
         let mut sum = [0.0; 3];
-        let mut count = 0.0;
-        for row in rows {
-            for column in columns.clone() {
+        let mut total = 0.0;
+        for row in y.floor() as isize..(y + size).ceil() as isize {
+            for column in x.floor() as isize..(x + size).ceil() as isize {
+                let weight = overlap(column, x) * overlap(row, y);
                 let pixel = self.pixel(column, row);
-                sum = [sum[0] + pixel[0], sum[1] + pixel[1], sum[2] + pixel[2]];
-                count += 1.0;
+                sum = [0, 1, 2].map(|index| sum[index] + pixel[index] * weight);
+                total += weight;
             }
         }
-        sum.map(|channel| channel / f32::max(count, 1.0))
+        sum.map(|channel| channel / f32::max(total, f32::EPSILON))
     }
 }
 
@@ -461,5 +462,26 @@ pub fn brighten(canvas: &mut Canvas, amount: f32) {
             Ink::Theme => dot.light += amount * 0.25,
             Ink::Accent | Ink::Alert => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shrinking_weighs_each_pixel_by_how_much_of_it_is_covered() {
+        let mut painting = Painting::new(4, 4, 1);
+        painting.paint((0.0, 0.0), (4.0, 4.0), 0, |_, x, _| {
+            Some(if x < 1.0 { [0.0; 3] } else { [255.0; 3] })
+        });
+        painting.begin();
+        let mut canvas = Canvas::default();
+        canvas.resize(3, 3);
+        painting.cover(&mut canvas, (0.5, 0.5));
+        let Ink::Paint([red, ..]) = canvas.at(0, 0).ink else {
+            panic!("the corner should be painted");
+        };
+        assert!((red - 63.75).abs() < 0.01, "{red}");
     }
 }

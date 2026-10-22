@@ -14,7 +14,7 @@ const SUN_RADIUS: f32 = 7.0;
 const PEAK_X: f32 = 88.0;
 const PEAK_Y: f32 = 16.0;
 /// A very wide player crops the picture; this keeps the peak in view.
-const FOCUS: (f32, f32) = (0.5, 0.4);
+const FOCUS: (f32, f32) = (0.5, 0.38);
 
 const SKY: u8 = 0;
 const HILL: u8 = 1;
