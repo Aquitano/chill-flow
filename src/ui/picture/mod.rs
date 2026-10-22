@@ -1,6 +1,7 @@
 mod autumn_pagoda;
 mod canvas;
 mod fuji_dawn;
+mod journey;
 mod night_lake;
 
 use ratatui::buffer::Buffer;
@@ -20,14 +21,16 @@ pub enum Picture {
     /// The cover of what's playing, with the spectrum below it.
     #[default]
     Cover,
+    Journey,
     NightLake,
     FujiDawn,
     AutumnPagoda,
 }
 
 impl Picture {
-    pub const ALL: [Picture; 4] = [
+    pub const ALL: [Picture; 5] = [
         Picture::Cover,
+        Picture::Journey,
         Picture::NightLake,
         Picture::FujiDawn,
         Picture::AutumnPagoda,
@@ -36,6 +39,7 @@ impl Picture {
     pub fn label(self) -> &'static str {
         match self {
             Picture::Cover => "Cover",
+            Picture::Journey => "Journey",
             Picture::NightLake => "Night lake",
             Picture::FujiDawn => "Fuji at dawn",
             Picture::AutumnPagoda => "Autumn pagoda",
@@ -46,6 +50,7 @@ impl Picture {
     pub fn id(self) -> &'static str {
         match self {
             Picture::Cover => "cover",
+            Picture::Journey => "journey",
             Picture::NightLake => "night-lake",
             Picture::FujiDawn => "fuji-dawn",
             Picture::AutumnPagoda => "autumn-pagoda",
@@ -59,7 +64,7 @@ impl Picture {
     /// Where fireflies hover, from the top to the bottom of the picture.
     fn fireflies(self) -> (f32, f32) {
         match self {
-            Picture::Cover => (0.0, 0.0),
+            Picture::Cover | Picture::Journey => (0.0, 0.0),
             Picture::NightLake => (0.46, 0.68),
             Picture::FujiDawn => (0.78, 0.94),
             Picture::AutumnPagoda => (0.8, 0.95),
@@ -71,7 +76,7 @@ impl Picture {
         match self {
             Picture::FujiDawn => Some((fuji_dawn::WIDTH, fuji_dawn::HEIGHT)),
             Picture::AutumnPagoda => Some((autumn_pagoda::WIDTH, autumn_pagoda::HEIGHT)),
-            Picture::Cover | Picture::NightLake => None,
+            Picture::Cover | Picture::Journey | Picture::NightLake => None,
         }
     }
 
@@ -160,6 +165,11 @@ pub struct Weather {
     pub thunder: f32,
     pub wind: f32,
     pub crickets: f32,
+    pub birds: f32,
+    pub stream: f32,
+    pub waves: f32,
+    pub fire: f32,
+    pub cafe: f32,
 }
 
 impl Weather {
@@ -173,6 +183,11 @@ impl Weather {
                 Some("thunder") => &mut weather.thunder,
                 Some("wind") => &mut weather.wind,
                 Some("crickets") => &mut weather.crickets,
+                Some("birds") => &mut weather.birds,
+                Some("stream") => &mut weather.stream,
+                Some("waves") => &mut weather.waves,
+                Some("fire") => &mut weather.fire,
+                Some("cafe") => &mut weather.cafe,
                 _ => continue,
             };
             *slot = slot.max(level);
@@ -197,7 +212,7 @@ enum Art {
 impl Art {
     fn new(picture: Picture) -> Option<Art> {
         match picture {
-            Picture::Cover => None,
+            Picture::Cover | Picture::Journey => None,
             Picture::NightLake => Some(Art::NightLake),
             Picture::FujiDawn => Some(Art::FujiDawn(Box::new(fuji_dawn::FujiDawn::new()))),
             Picture::AutumnPagoda => Some(Art::AutumnPagoda(Box::new(autumn_pagoda::AutumnPagoda::new()))),
@@ -229,6 +244,7 @@ struct Shown {
     rows: u16,
     frame: u64,
     weather: Weather,
+    night: bool,
 }
 
 /// The picture on show. It is painted and turned into glyphs only when its frame, size, look, or
@@ -267,14 +283,20 @@ impl Scene {
             rows: area.height,
             frame: (self.clock * FPS) as u64,
             weather,
+            night: is_night(),
         };
         if self.shown.as_ref() != Some(&shown) {
+            let t = ((shown.frame % FRAMES_A_DAY) as f64 / FPS) as f32;
+            let (columns, rows) = (usize::from(area.width), usize::from(area.height));
+            if picture == Picture::Journey {
+                journey::draw(&mut self.glyphs, columns, rows, t, &weather, shown.night, theme);
+                self.shown = Some(shown);
+                return self.blit(buf, area);
+            }
             if self.art.as_ref().map(Art::picture) != Some(picture) {
                 self.art = Art::new(picture);
             }
             let Some(art) = &mut self.art else { return };
-            let t = ((shown.frame % FRAMES_A_DAY) as f64 / FPS) as f32;
-            let (columns, rows) = (usize::from(area.width), usize::from(area.height));
             match shown.look {
                 Look::Blocks => self.canvas.resize(columns, rows * 2),
                 _ => self.canvas.resize(columns * 2, rows * 4),
@@ -291,6 +313,10 @@ impl Scene {
             glyphs(&mut self.glyphs, &self.canvas, shown.look, theme, picture.painted());
             self.shown = Some(shown);
         }
+        self.blit(buf, area);
+    }
+
+    fn blit(&self, buf: &mut Buffer, area: Rect) {
         let columns = usize::from(area.width);
         for (index, glyph) in self.glyphs.iter().enumerate() {
             let Some((symbol, fg, bg)) = *glyph else { continue };
@@ -303,6 +329,12 @@ impl Scene {
             }
         }
     }
+}
+
+/// Night by the clock on the wall, from eight in the evening to six in the morning.
+fn is_night() -> bool {
+    let hour = jiff::Zoned::now().hour();
+    !(6..20).contains(&hour)
 }
 
 const BAYER: [u8; 16] = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
