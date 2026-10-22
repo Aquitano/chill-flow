@@ -19,6 +19,7 @@ use crate::store::{FocusDays, Store};
 use crate::sync;
 use crate::timer::{Phase, PhaseEnded, Timer, TimerMode};
 use crate::tools::Tool;
+use crate::ui::picture::Picture;
 use crate::youtube;
 
 pub enum Job {
@@ -820,6 +821,9 @@ impl App {
     }
 
     fn load_cover(&mut self) {
+        if self.config.picture != Picture::Cover {
+            return;
+        }
         let Some(url) = self.current().and_then(|item| item.cover.clone()) else {
             return;
         };
@@ -975,6 +979,7 @@ impl App {
             Action::ToggleSidePanel => self.side_hidden = !self.side_hidden,
             Action::SetPicture(picture) => {
                 self.config.picture = picture;
+                self.load_cover();
                 self.save_config();
             }
             Action::SetLevel(id, level) => {
@@ -1581,7 +1586,10 @@ impl App {
             Setting::AutoStartFocus => pomodoro.auto_start_focus = !pomodoro.auto_start_focus,
             Setting::Chime => self.config.chime = !self.config.chime,
             Setting::Notifications => self.config.notifications = !self.config.notifications,
-            Setting::Picture => self.config.picture = self.config.picture.step(delta),
+            Setting::Picture => {
+                self.config.picture = self.config.picture.step(delta);
+                self.load_cover();
+            }
             Setting::Look => self.config.look = self.config.look.step(delta),
             Setting::ReduceMotion => self.config.reduce_motion = !self.config.reduce_motion,
         }
@@ -2635,6 +2643,21 @@ mod tests {
             app.dispatch(Action::TogglePlay);
             assert_eq!((app.is_playing(), app.timer.is_running()), (false, timing));
         }
+    }
+
+    #[test]
+    fn a_picture_in_the_player_leaves_the_cover_until_the_cover_is_shown_again() {
+        let mut app = app();
+        let cover = app.current().and_then(|item| item.cover.clone());
+        assert!(cover.is_some());
+        app.config.picture = Picture::NightLake;
+        app.cover_requested = None;
+
+        app.load_cover();
+        assert_eq!(app.cover_requested, None);
+
+        app.dispatch(Action::SetPicture(Picture::Cover));
+        assert_eq!(app.cover_requested, cover);
     }
 
     #[test]
