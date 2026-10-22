@@ -152,6 +152,18 @@ cargo clippy --all-targets --workspace -- -D warnings
 
 On Linux the build needs `libasound2-dev`. CI runs the checks on Linux, macOS, and Windows. Pushing a version tag such as `v0.1.0` builds the binaries and installers and publishes them as a GitHub release; bump `version` in `Cargo.toml` to match first.
 
+To try a change on a Mac or Windows machine without a release, build it with the Try workflow. Add the `try` label to a pull request, which also rebuilds it on every push, or start a build of any branch, such as main after a merge, then download and run it:
+
+```bash
+gh workflow run try.yml -R Aquitano/chill-flow -r main && sleep 5
+run=$(gh run list -R Aquitano/chill-flow -w try.yml -b main -L 1 --json databaseId -q '.[0].databaseId')
+gh run watch "$run" -R Aquitano/chill-flow
+gh run download "$run" -R Aquitano/chill-flow -n chill-aarch64-apple-darwin -D /tmp/chill-try
+tar -xzf /tmp/chill-try/chill.tar.gz -C /tmp/chill-try && /tmp/chill-try/chill
+```
+
+For a pull request, use its branch for `-b` and skip the first line. On Windows the artifact is `chill-x86_64-pc-windows-msvc` and holds `chill.exe`. Builds are kept for 14 days and use the same config, library, and cache as the installed chill.
+
 ## Ambient recordings
 
 | Sound | Source | License |

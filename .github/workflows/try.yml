@@ -1,0 +1,44 @@
+name: Try
+
+# Builds chill the way a release does, without publishing anything, so a change can be tried on a
+# Mac or a Windows machine first. It runs on demand only: for a pull request labeled "try" (again on
+# each push while the label stays), or for any branch with `gh workflow run try.yml -r <branch>`.
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
+
+concurrency:
+  group: try-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'try')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --profile dist --locked
+      # A tarball keeps the binary executable, which an artifact's zip would not.
+      - if: runner.os == 'macOS'
+        run: tar -czf chill.tar.gz -C target/dist chill
+      - uses: actions/upload-artifact@v7
+        with:
+          name: chill-${{ matrix.target }}
+          path: ${{ runner.os == 'macOS' && 'chill.tar.gz' || 'target/dist/chill.exe' }}
+          retention-days: 14
