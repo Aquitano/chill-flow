@@ -184,65 +184,43 @@ impl Canvas {
     }
 }
 
-/// How a painting meets the canvas.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Finish {
-    /// Each of the painting's own pixels kept whole, like pixel art.
-    Crisp,
-    /// Painted finer and scaled with blending, so no pixel grid shows.
-    Smooth,
+/// The whole pixels a run from `from` to `to` touches, short of `limit`.
+fn span(from: f32, to: f32, limit: usize) -> std::ops::Range<usize> {
+    (from.floor().max(0.0) as usize)..(to.ceil().max(0.0) as usize).min(limit)
 }
 
-/// A picture laid out at a fixed size, the way ascii-magic pieces are, and painted with `scale`
-/// finer pixels along each side of its own so it stays sharp when the player is large. A still
+/// A picture laid out at a fixed size in its own pixels, the way ascii-magic pieces are. A still
 /// layer is painted once, with a layer number per pixel (0 for the sky, higher for nearer), and
-/// each frame paints its moving parts onto a copy of it. Positions are in the painting's own
-/// pixels, which may fall between whole numbers.
+/// each frame paints its moving parts onto a copy of it. Positions are in the painting's pixels,
+/// which may fall between whole numbers.
 pub struct Painting {
     pub width: usize,
     pub height: usize,
-    pub scale: usize,
     still: Vec<Rgb>,
     layers: Vec<u8>,
     frame: Vec<Rgb>,
 }
 
 impl Painting {
-    pub fn new(width: usize, height: usize, scale: usize) -> Painting {
-        let pixels = width * scale * height * scale;
+    pub fn new(width: usize, height: usize) -> Painting {
+        let pixels = width * height;
         Painting {
             width,
             height,
-            scale,
             still: vec![[0.0; 3]; pixels],
             layers: vec![0; pixels],
             frame: vec![[0.0; 3]; pixels],
         }
     }
 
-    /// The scale to paint a painting this size at for `canvas`: its own pixels for a crisp
-    /// finish, and the finest worth painting for a smooth one.
-    pub fn scale_for(width: usize, height: usize, canvas: &Canvas, finish: Finish) -> usize {
-        let cover = (canvas.width as f32 / width as f32).max(canvas.height as f32 / height as f32);
-        match finish {
-            Finish::Crisp => 1,
-            Finish::Smooth => (cover.ceil() as usize).clamp(1, 3),
-        }
-    }
-
-    fn fine(&self) -> (usize, usize) {
-        (self.width * self.scale, self.height * self.scale)
-    }
-
     fn index(&self, x: f32, y: f32) -> Option<usize> {
-        let (columns, rows) = self.fine();
-        let (column, row) = ((x * self.scale as f32).floor(), (y * self.scale as f32).floor());
-        let inside = column >= 0.0 && row >= 0.0 && (column as usize) < columns && (row as usize) < rows;
-        inside.then(|| row as usize * columns + column as usize)
+        let (column, row) = (x.floor(), y.floor());
+        let inside = column >= 0.0 && row >= 0.0 && (column as usize) < self.width && (row as usize) < self.height;
+        inside.then(|| row as usize * self.width + column as usize)
     }
 
     /// Paints `layer` wherever `color` gives one inside the box from `from` to `to`. `color` is
-    /// asked at the middle of each fine pixel and can look at what is already painted.
+    /// asked at the middle of each pixel and can look at what is already painted.
     pub fn paint(
         &mut self,
         from: (f32, f32),
@@ -250,18 +228,12 @@ impl Painting {
         layer: u8,
         color: impl Fn(&Painting, f32, f32) -> Option<Rgb>,
     ) {
-        let scale = self.scale as f32;
-        let (columns, rows) = self.fine();
-        let span = |from: f32, to: f32, limit: usize| {
-            ((from * scale).floor().max(0.0) as usize)..((to * scale).ceil().max(0.0) as usize).min(limit)
-        };
-        let (across, down) = (span(from.0, to.0, columns), span(from.1, to.1, rows));
+        let (across, down) = (span(from.0, to.0, self.width), span(from.1, to.1, self.height));
         let mut painted = Vec::new();
         for row in down {
             for column in across.clone() {
-                let (x, y) = ((column as f32 + 0.5) / scale, (row as f32 + 0.5) / scale);
-                if let Some(color) = color(self, x, y) {
-                    painted.push((row * columns + column, color));
+                if let Some(color) = color(self, column as f32 + 0.5, row as f32 + 0.5) {
+                    painted.push((row * self.width + column, color));
                 }
             }
         }
@@ -272,11 +244,9 @@ impl Painting {
     }
 
     pub fn still_at(&self, x: f32, y: f32) -> Rgb {
-        let (columns, rows) = self.fine();
-        let scale = self.scale as f32;
-        let column = ((x * scale) as usize).min(columns - 1);
-        let row = ((y.max(0.0) * scale) as usize).min(rows - 1);
-        self.still[row * columns + column]
+        let column = (x as usize).min(self.width - 1);
+        let row = (y.max(0.0) as usize).min(self.height - 1);
+        self.still[row * self.width + column]
     }
 
     pub fn layer_at(&self, x: f32, y: f32) -> u8 {
@@ -295,17 +265,10 @@ impl Painting {
     /// Blends `color` over one of the painting's own pixels, only where the still layer is
     /// `layer` or farther back.
     pub fn add_behind(&mut self, x: f32, y: f32, color: Rgb, amount: f32, layer: u8) {
-        let scale = self.scale as f32;
-        let (left, top) = ((x * scale).round() / scale, (y * scale).round() / scale);
-        for row in 0..self.scale {
-            for column in 0..self.scale {
-                let step = |offset: usize| (offset as f32 + 0.5) / scale;
-                if let Some(index) = self.index(left + step(column), top + step(row))
-                    && self.layers[index] <= layer
-                {
-                    self.frame[index] = mix(self.frame[index], color, amount);
-                }
-            }
+        if let Some(index) = self.index(x.round(), y.round())
+            && self.layers[index] <= layer
+        {
+            self.frame[index] = mix(self.frame[index], color, amount);
         }
     }
 
@@ -318,19 +281,13 @@ impl Painting {
         layer: u8,
         glaze: impl Fn(f32, f32) -> Option<(Rgb, f32)>,
     ) {
-        let scale = self.scale as f32;
-        let (columns, rows) = self.fine();
-        let span = |from: f32, to: f32, limit: usize| {
-            ((from * scale).floor().max(0.0) as usize)..((to * scale).ceil().max(0.0) as usize).min(limit)
-        };
-        for row in span(from.1, to.1, rows) {
-            for column in span(from.0, to.0, columns) {
-                let index = row * columns + column;
+        for row in span(from.1, to.1, self.height) {
+            for column in span(from.0, to.0, self.width) {
+                let index = row * self.width + column;
                 if self.layers[index] > layer {
                     continue;
                 }
-                let (x, y) = ((column as f32 + 0.5) / scale, (row as f32 + 0.5) / scale);
-                if let Some((color, amount)) = glaze(x, y) {
+                if let Some((color, amount)) = glaze(column as f32 + 0.5, row as f32 + 0.5) {
                     self.frame[index] = mix(self.frame[index], color, amount);
                 }
             }
@@ -349,10 +306,10 @@ impl Painting {
     }
 
     /// Scales the frame to cover `canvas`, cropping whichever sides overhang as little away from
-    /// `focus` (a fraction across and down) as it can. Shrinking averages pixels. Enlarging keeps
-    /// each pixel whole for a crisp finish and blends between them for a smooth one.
-    pub fn cover(&self, canvas: &mut Canvas, focus: (f32, f32), finish: Finish) {
-        let (columns, rows) = self.fine();
+    /// `focus` (a fraction across and down) as it can. Shrinking averages pixels; enlarging keeps
+    /// each pixel whole.
+    pub fn cover(&self, canvas: &mut Canvas, focus: (f32, f32)) {
+        let (columns, rows) = (self.width, self.height);
         let (width, height) = (canvas.width as f32, canvas.height as f32);
         let scale = (width / columns as f32).max(height / rows as f32);
         // One side fits exactly, give or take rounding, so its spare can come out a hair below zero.
@@ -365,10 +322,10 @@ impl Painting {
             for x in 0..canvas.width {
                 let from_x = (x as f32 + left) / scale;
                 let (middle_x, middle_y) = (from_x + 0.5 / scale, from_y + 0.5 / scale);
-                let color = match finish {
-                    _ if scale < 1.0 => self.average(from_x, from_y, 1.0 / scale),
-                    Finish::Crisp => self.pixel(middle_x as isize, middle_y as isize),
-                    Finish::Smooth => self.blend(middle_x - 0.5, middle_y - 0.5),
+                let color = if scale < 1.0 {
+                    self.average(from_x, from_y, 1.0 / scale)
+                } else {
+                    self.pixel(middle_x as isize, middle_y as isize)
                 };
                 *canvas.at_mut(x, y) = Dot::paint(color.map(|channel| channel.clamp(0.0, 255.0)));
             }
@@ -376,23 +333,12 @@ impl Painting {
     }
 
     fn pixel(&self, column: isize, row: isize) -> Rgb {
-        let (columns, rows) = self.fine();
-        let column = column.clamp(0, columns as isize - 1) as usize;
-        let row = row.clamp(0, rows as isize - 1) as usize;
-        self.frame[row * columns + column]
+        let column = column.clamp(0, self.width as isize - 1) as usize;
+        let row = row.clamp(0, self.height as isize - 1) as usize;
+        self.frame[row * self.width + column]
     }
 
-    /// The color at a point between fine pixels' middles, blended from the four around it.
-    fn blend(&self, x: f32, y: f32) -> Rgb {
-        let (left, top) = (x.floor(), y.floor());
-        let (across, down) = (x - left, y - top);
-        let (left, top) = (left as isize, top as isize);
-        let upper = mix(self.pixel(left, top), self.pixel(left + 1, top), across);
-        let lower = mix(self.pixel(left, top + 1), self.pixel(left + 1, top + 1), across);
-        mix(upper, lower, down)
-    }
-
-    /// The mean of the fine pixels under a square `size` pixels wide, starting at `x`, `y`, each
+    /// The mean of the pixels under a square `size` pixels wide, starting at `x`, `y`, each
     /// weighed by how much of it the square covers.
     fn average(&self, x: f32, y: f32, size: f32) -> Rgb {
         let overlap = |cell: isize, from: f32| (cell as f32 + 1.0).min(from + size) - (cell as f32).max(from);
@@ -485,14 +431,14 @@ mod tests {
 
     #[test]
     fn shrinking_weighs_each_pixel_by_how_much_of_it_is_covered() {
-        let mut painting = Painting::new(4, 4, 1);
+        let mut painting = Painting::new(4, 4);
         painting.paint((0.0, 0.0), (4.0, 4.0), 0, |_, x, _| {
             Some(if x < 1.0 { [0.0; 3] } else { [255.0; 3] })
         });
         painting.begin();
         let mut canvas = Canvas::default();
         canvas.resize(3, 3);
-        painting.cover(&mut canvas, (0.5, 0.5), Finish::Smooth);
+        painting.cover(&mut canvas, (0.5, 0.5));
         let Ink::Paint([red, ..]) = canvas.at(0, 0).ink else {
             panic!("the corner should be painted");
         };

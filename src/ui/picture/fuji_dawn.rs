@@ -4,7 +4,7 @@
 use std::f32::consts::PI;
 
 use super::Weather;
-use super::canvas::{Canvas, Finish, Painting, Rgb, fbm, lerp, mix, noise, ramp, rgb, unit};
+use super::canvas::{Canvas, Painting, Rgb, fbm, lerp, mix, noise, ramp, rgb, unit};
 
 pub const WIDTH: usize = 192;
 pub const HEIGHT: usize = 108;
@@ -136,10 +136,10 @@ fn pine(x: f32, y: f32) -> Option<Rgb> {
     shade
 }
 
-/// The parts that never move, painted once for each scale.
-fn still(scale: usize) -> Painting {
+/// The parts that never move, painted once.
+fn still() -> Painting {
     let (width, height) = (WIDTH as f32, HEIGHT as f32);
-    let mut painting = Painting::new(WIDTH, HEIGHT, scale);
+    let mut painting = Painting::new(WIDTH, HEIGHT);
     painting.paint((0.0, 0.0), (width, HORIZON), SKY, |_, x, y| Some(sky(x, y)));
     painting.paint((0.0, 45.0), (width, HORIZON), HILL, |_, x, y| {
         let top = 57.0 + 3.0 * (x / 13.0 + 1.0).sin() + 2.5 * fbm(x / 18.0, 2.0, 3, 4);
@@ -201,12 +201,8 @@ impl FujiDawn {
         }
     }
 
-    pub fn paint(&mut self, canvas: &mut Canvas, t: f32, weather: &Weather, finish: Finish) {
-        let scale = Painting::scale_for(WIDTH, HEIGHT, canvas, finish);
-        if self.painting.as_ref().is_some_and(|painting| painting.scale != scale) {
-            self.painting = None;
-        }
-        let painting = self.painting.get_or_insert_with(|| still(scale));
+    pub fn paint(&mut self, canvas: &mut Canvas, t: f32, weather: &Weather) {
+        let painting = self.painting.get_or_insert_with(still);
         let breeze = 0.5 + 1.5 * weather.wind;
         let width = WIDTH as f32;
         painting.begin();
@@ -347,6 +343,6 @@ impl FujiDawn {
         }
 
         painting.overcast(weather.rain);
-        painting.cover(canvas, FOCUS, finish);
+        painting.cover(canvas, FOCUS);
     }
 }
