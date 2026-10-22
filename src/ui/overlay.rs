@@ -5,7 +5,7 @@ use nucleo_matcher::{Config, Matcher, Utf32Str};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Margin, Rect};
 use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Block, BorderType, Widget};
+use ratatui::widgets::{Block, BorderType, Paragraph, Widget, Wrap};
 use ratatui_image::picker::ProtocolType;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -719,27 +719,14 @@ fn diagnostics(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, selected:
     lines.push(String::new());
     lines.push(format!("Log: {}", crate::config::display_path(&app.diagnostics.path)));
     lines.push("URLs and sync keys are redacted. Run chill doctor for dependency details.".into());
-    let lines: Vec<String> = lines
-        .into_iter()
-        .flat_map(|line| {
-            if line.is_empty() {
-                vec![line]
-            } else {
-                wrap(&line, usize::from(content.width), crate::diagnostics::MESSAGE_LIMIT)
-            }
-        })
-        .collect();
-    let height = usize::from(content.height.saturating_sub(2));
-    *scroll = (*scroll).min(lines.len().saturating_sub(height));
-    for (offset, line) in lines.iter().skip(*scroll).take(height).enumerate() {
-        put(
-            buf,
-            content.x,
-            content.y + offset as u16,
-            line,
-            Style::new().fg(theme.text()),
-        );
-    }
+    let details = Paragraph::new(lines.join("\n"))
+        .wrap(Wrap { trim: false })
+        .style(Style::new().fg(theme.text()));
+    let height = content.height.saturating_sub(2);
+    *scroll = (*scroll).min(details.line_count(content.width).saturating_sub(usize::from(height)));
+    details
+        .scroll((*scroll as u16, 0))
+        .render(Rect { height, ..content }, buf);
     let controls = [
         ("←", Hit::DiagnosticEntry(-1)),
         ("→", Hit::DiagnosticEntry(1)),
@@ -763,5 +750,43 @@ fn diagnostics(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, selected:
             Rect::new(content.x, y, content.width, 1),
             Hit::Act(Action::DismissDiagnosticOverflow),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::TestApp;
+    use crate::ui::theme::Theme;
+    use ratatui_image::picker::Picker;
+
+    #[test]
+    fn diagnostic_details_keep_long_words_and_log_paths_through_scroll() {
+        let mut app = TestApp::new();
+        let detail = format!("Could not read /{}final-error", "資料/recordings/".repeat(20));
+        app.toast(Tone::Error, &detail);
+        let log_path = format!("/{}diagnostics.json", "long-cache-directory/".repeat(20));
+        app.diagnostics.path = log_path.clone().into();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), true);
+        let screen = Rect::new(0, 0, 40, 12);
+        let mut rendered = String::new();
+        for requested in 0..crate::diagnostics::MESSAGE_LIMIT {
+            let mut buffer = Buffer::empty(screen);
+            let mut scroll = requested;
+            diagnostics(&mut buffer, screen, &app, &mut ui, 0, &mut scroll);
+            if scroll < requested {
+                break;
+            }
+            let area = ui.dialog_area.unwrap();
+            let x = area.x + 3;
+            let y = area.y + 3;
+            for column in x..area.right() - 3 {
+                rendered.push_str(buffer[(column, y)].symbol());
+            }
+        }
+        let compact = |text: &str| text.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+        assert!(compact(&rendered).contains(&compact(&detail)));
+        assert!(compact(&rendered).contains(&compact(&log_path)));
+        assert!(!rendered.contains('…'));
     }
 }
