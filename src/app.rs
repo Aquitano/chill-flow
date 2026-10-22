@@ -821,10 +821,16 @@ impl App {
     }
 
     fn load_cover(&mut self) {
+        let wanted = self.current().and_then(|item| item.cover.clone());
         if self.config.picture != Picture::Cover {
+            // A cover still downloading for an earlier track is dropped when it arrives, so it
+            // mustn't count as fetched once the cover shows again.
+            if self.cover_requested != wanted {
+                self.cover_requested = None;
+            }
             return;
         }
-        let Some(url) = self.current().and_then(|item| item.cover.clone()) else {
+        let Some(url) = wanted else {
             return;
         };
         if self.cover_requested.as_ref() == Some(&url) {
@@ -2656,7 +2662,7 @@ mod tests {
         let cover = app.current().and_then(|item| item.cover.clone());
         assert!(cover.is_some());
         app.config.picture = Picture::NightLake;
-        app.cover_requested = None;
+        app.cover_requested = Some("an earlier track's cover".into());
 
         app.load_cover();
         assert_eq!(app.cover_requested, None);
