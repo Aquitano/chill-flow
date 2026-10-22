@@ -737,6 +737,38 @@ mod tests {
     }
 
     #[test]
+    fn narrow_paused_header_keeps_the_full_clock_clear_of_the_title() {
+        let mut app = TestApp::offline();
+        app.timer_hidden = true;
+        let start = Instant::now();
+        app.timer.start(start);
+        let now = start + Duration::from_secs(435);
+        app.timer.pause(now);
+        for width in [40, 44, 64] {
+            let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), true);
+            let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
+            terminal.draw(|frame| ui.draw_at(frame, &mut app, now)).unwrap();
+            let header: String = (0..width)
+                .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+                .collect();
+            assert!(header.contains("chill"), "{header}");
+            assert!(header.contains("focus 17:45 paused"), "{header}");
+            let (clock, _) = ui
+                .hits
+                .iter()
+                .find(|(rect, hit)| rect.y == 0 && *hit == Hit::Act(Action::TimerToggle))
+                .unwrap();
+            assert!(clock.x >= 10);
+            assert!(clock.right() <= width);
+            for (stats, hit) in &ui.hits {
+                if *hit == Hit::Act(Action::OpenStats) {
+                    assert!(stats.x >= clock.right());
+                }
+            }
+        }
+    }
+
+    #[test]
     fn timer_keys_header_click_and_palette_keep_visibility_separate() {
         for width in [96, 160] {
             let mut app = TestApp::offline();

@@ -108,7 +108,7 @@ const LAYOUTS: [Layout; 10] = [
     },
     Layout {
         name: "compact-paused",
-        width: 64,
+        width: 44,
         height: 24,
         paused: true,
         timer_hidden: true,

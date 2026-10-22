@@ -98,39 +98,46 @@ fn scroll(selected: usize, offset: &mut usize, height: usize) {
 
 pub fn header(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant, show_timer: bool) {
     let theme = ui.theme;
-    let minutes: Vec<u32> = app.focus_days.days.iter().map(|(_, minutes)| *minutes).collect();
-    let today = widgets::long_minutes(app.focus_days.today());
-    let spark = widgets::sparkline(&minutes);
-    let width = (6 + today.width() + 2 + spark.width() + 1) as u16;
-    let start = area.right().saturating_sub(width);
-    let rect = Rect::new(start, area.y, width, 1);
-    let label = if ui.hovered(rect) { theme.muted() } else { theme.faint() };
-    let mut x = put(buf, start, area.y, "today ", Style::new().fg(label));
-    x = put(buf, x, area.y, &today, Style::new().fg(theme.text()));
-    x += 2;
-    let count = spark.chars().count();
-    for (index, ch) in spark.chars().enumerate() {
-        let color = if index + 1 == count {
-            theme.accent
-        } else {
-            theme.mix(0.45)
-        };
-        x = put(buf, x, area.y, &ch.to_string(), Style::new().fg(color));
-    }
-    ui.hit(rect, Hit::Act(Action::OpenStats));
-
-    let mut right_edge = start;
-    if show_timer {
-        let timer = &app.timer;
+    let timer = &app.timer;
+    let timer_label = show_timer.then(|| {
         let remaining = timer.remaining(now).as_secs_f64().ceil() as u64;
         let state = if timer.is_running() { "" } else { " paused" };
-        let label = format!(
+        format!(
             "{} {:02}:{:02}{state}",
             timer.phase().label(),
             remaining / 60,
             remaining % 60
-        );
-        let timer_x = start.saturating_sub(label.width() as u16 + 4);
+        )
+    });
+    let minutes: Vec<u32> = app.focus_days.days.iter().map(|(_, minutes)| *minutes).collect();
+    let today = widgets::long_minutes(app.focus_days.today());
+    let spark = widgets::sparkline(&minutes);
+    let width = (6 + today.width() + 2 + spark.width() + 1) as u16;
+    let timer_width = timer_label.as_ref().map_or(0, |label| label.width() + 4);
+    let show_stats = usize::from(area.width) >= 10 + timer_width + usize::from(width);
+    let start = if show_stats { area.right() - width } else { area.right() };
+    if show_stats {
+        let rect = Rect::new(start, area.y, width, 1);
+        let label = if ui.hovered(rect) { theme.muted() } else { theme.faint() };
+        let mut x = put(buf, start, area.y, "today ", Style::new().fg(label));
+        x = put(buf, x, area.y, &today, Style::new().fg(theme.text()));
+        x += 2;
+        let count = spark.chars().count();
+        for (index, ch) in spark.chars().enumerate() {
+            let color = if index + 1 == count {
+                theme.accent
+            } else {
+                theme.mix(0.45)
+            };
+            x = put(buf, x, area.y, &ch.to_string(), Style::new().fg(color));
+        }
+        ui.hit(rect, Hit::Act(Action::OpenStats));
+    }
+
+    let mut right_edge = start;
+    if let Some(label) = timer_label {
+        let gap = if show_stats { 4 } else { 1 };
+        let timer_x = start.saturating_sub(label.width() as u16 + gap);
         let color = match (timer.is_running(), timer.phase()) {
             (false, _) => theme.muted(),
             (true, Phase::Focus) => theme.accent,
