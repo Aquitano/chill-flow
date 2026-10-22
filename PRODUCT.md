@@ -10,7 +10,7 @@ The job to be done: enter and hold a flow state. Start a soundscape, run a relia
 
 chill combines lo-fi music, ambient sound, and a focus timer in one terminal app. It exists to make starting deep work a keypress or two, with no setup, and to make focus sustainable across sessions. Listening without a timer is just as valid a use.
 
-Playback, timer operation, and panel visibility are independent. Timer operations preserve hidden panels. Showing the timer explicitly also reveals its container. A running or paused in-progress timer remains visible in the compact header when its panel is hidden.
+Playback, timer operation, and panel visibility are independent.
 
 The core loop: typing `chill` loads the last scene, Space starts music and ambience, `t` starts the focus timer, focus blocks are recorded accurately, and next time everything is exactly where it was left. Success is a user who opens chill by reflex when it's time to concentrate.
 

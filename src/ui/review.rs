@@ -241,11 +241,12 @@ fn color(color: Color, default: [u8; 3]) -> String {
 }
 
 fn svg(buffer: &Buffer) -> String {
+    let background = color(Color::Reset, BACKGROUND);
     let mut svg = format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" font-family=\"monospace\" font-size=\"14\"><rect width=\"100%\" height=\"100%\" fill=\"{}\"/>",
         buffer.area.width * 9,
         buffer.area.height * 18,
-        color(Color::Reset, BACKGROUND)
+        background
     );
     for y in 0..buffer.area.height {
         let mut x = 0;
@@ -257,14 +258,16 @@ fn svg(buffer: &Buffer) -> String {
             if cell.modifier.contains(Modifier::REVERSED) {
                 std::mem::swap(&mut fg, &mut bg);
             }
-            write!(
-                svg,
-                "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"18\" fill=\"{bg}\"/>",
-                x * 9,
-                y * 18,
-                width * 9
-            )
-            .unwrap();
+            if bg != background {
+                write!(
+                    svg,
+                    "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"18\" fill=\"{bg}\"/>",
+                    x * 9,
+                    y * 18,
+                    width * 9
+                )
+                .unwrap();
+            }
             if !cell.modifier.contains(Modifier::HIDDEN) && cell.symbol() != " " {
                 let symbol = cell
                     .symbol()

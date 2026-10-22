@@ -164,7 +164,7 @@ cargo test --offline -p chill ui::review::export_ui_review -- --ignored --exact 
 
 Open `target/ui-review/index.html` in a browser, or open the individual SVG files in that directory. The export covers wide, split and stacked medium, and narrow layouts, hidden panels, a paused compact timer, and the Night lake picture. Artifacts stay under the ignored `target/` directory.
 
-The test-only fixture uses an in-memory library, temporary config and cache paths, seeded sample data, fixed focus dates, and a frozen render clock. It bypasses catalog fetching, playback restoration, audio output, and ambient loading. It does not read your library or config. Reduced motion holds animations still. The export preserves cell colors with a fixed ANSI palette; glyph shapes depend on your browser's monospace font. Cargo's offline mode requires the Rust dependencies to be cached already.
+The exporter uses fixed sample data and does not read your library or config. Colors use a fixed ANSI palette; glyphs depend on your browser's monospace font. Cargo's offline mode requires dependencies to be cached already.
 
 On Linux the build needs `libasound2-dev`. CI runs the checks on Linux, macOS, and Windows. Pushing a version tag such as `v0.1.0` builds the binaries and installers and publishes them as a GitHub release; bump `version` in `Cargo.toml` to match first.
 
