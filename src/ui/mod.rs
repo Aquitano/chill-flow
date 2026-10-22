@@ -454,6 +454,7 @@ impl Ui {
             let [player, bottom] =
                 Layout::vertical([Constraint::Fill(1), Constraint::Length(bottom_height)]).areas(body);
             panels::player(buf, player, app, self, now);
+            panels::reopen_handles(buf, body, player, app, self);
             match self.focus {
                 Panel::Library if !app.library_hidden => panels::library(buf, bottom, app, self, now),
                 Panel::Ambience if !app.side_hidden => panels::ambience(buf, bottom, app, self, now),
@@ -762,7 +763,7 @@ mod tests {
 
     #[test]
     fn a_hidden_library_has_a_handle_that_brings_it_back() {
-        for (width, height) in [(160, 44), (100, 30)] {
+        for (width, height) in [(160, 44), (100, 30), (70, 24)] {
             let mut app = offline_app();
             let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
