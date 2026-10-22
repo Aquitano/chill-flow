@@ -83,10 +83,10 @@ jobs:
           **Windows**, [download](@WINDOWS@), in PowerShell:
 
           ```powershell
-          gh run download @RUN@ -R @REPO@ -n chill-x86_64-pc-windows-msvc -D "$env:TEMP\chill-try-@RUN@"; & "$env:TEMP\chill-try-@RUN@\chill.exe"
+          gh run download @RUN@ -R @REPO@ -n chill-x86_64-pc-windows-msvc -D "$env:TEMP\chill-try-@RUN@"; $installed = $env:APPDATA; $env:APPDATA = "$env:LOCALAPPDATA\chill-try"; & "$env:TEMP\chill-try-@RUN@\chill.exe"; $env:APPDATA = $installed
           ```
 
-          On macOS this keeps the build's settings in `~/.config/chill-try`, since an older chill won't start with settings a newer one has written. The library and cache are shared with the installed chill. On Windows the build uses the installed chill's settings too.
+          Both keep the build's settings apart from the installed chill's, since an older chill won't start with settings a newer one has written. On macOS they go in `~/.config/chill-try`, and the library and cache are shared. On Windows chill keeps its settings and library in the same folder, so the build gets both of its own in `%LOCALAPPDATA%\chill-try`.
           BODY
           sed -i -e "s|@RUN@|$RUN|g" -e "s|@REPO@|$REPO|g" -e "s|@SHA@|${SHA:0:7}|g" \
             -e "s|@URL@|$url|g" -e "s|@MAC@|$mac|g" -e "s|@WINDOWS@|$windows|g" -e "s|@EXPIRES@|$expires|g" body.md
