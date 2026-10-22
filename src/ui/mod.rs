@@ -30,6 +30,7 @@ pub enum Overlay {
     Confirm { message: String, action: Action },
     Help,
     Stats,
+    Diagnostics { selected: usize, scroll: usize },
     Settings { selected: usize },
 }
 
@@ -60,6 +61,8 @@ pub enum Hit {
     Backdrop,
     Dialog,
     Toast(usize),
+    DiagnosticEntry(isize),
+    DiagnosticScroll(isize),
     Panel(Panel),
 }
 
@@ -206,7 +209,10 @@ impl Ui {
     }
 
     pub fn toast(&mut self, tone: Tone, message: String) {
-        let life = Duration::from_millis(if tone == Tone::Error { 7000 } else { 3800 });
+        if matches!(tone, Tone::Error | Tone::Warning) {
+            return;
+        }
+        let life = Duration::from_millis(3800);
         self.toasts.retain(|toast| toast.message != message);
         self.toasts.push(Toast {
             tone,
@@ -377,8 +383,19 @@ impl Ui {
         self.cover_rect = None;
 
         let area = frame.area();
-        let [header, body, footer] =
-            Layout::vertical([Constraint::Length(1), Constraint::Fill(1), Constraint::Length(1)]).areas(area);
+        let notice_height =
+            if (app.diagnostics.pending() > 0 || app.diagnostics.log_error.is_some()) && area.height >= 6 {
+                2
+            } else {
+                0
+            };
+        let [header, body, notice, footer] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Fill(1),
+            Constraint::Length(notice_height),
+            Constraint::Length(1),
+        ])
+        .areas(area);
         let buf = frame.buffer_mut();
         panels::footer(buf, footer, app, self);
 
@@ -470,7 +487,11 @@ impl Ui {
             !clock_shown && (!app.timer_hidden || app.timer.is_running() || !app.timer.elapsed(now).is_zero());
         panels::header(buf, header, app, self, now, show_timer);
 
-        overlay::toasts(buf, footer, self, now);
+        if notice.height > 0 {
+            overlay::diagnostic_notice(buf, notice, app, self);
+        }
+        let toast_footer = if notice.height > 0 { notice } else { footer };
+        overlay::toasts(buf, toast_footer, self, now);
 
         if let (Some(rect), Some(cover)) = (self.cover_rect, self.cover.as_mut()) {
             frame.render_stateful_widget(
@@ -515,7 +536,7 @@ mod tests {
     }
 
     fn random_event(rng: &mut fastrand::Rng, width: u16, height: u16) -> Event {
-        const KEYS: &str = " npfsrtTxmFo:?ic[]12345adjkhlgG/JK0,.+-<>qyzvHL";
+        const KEYS: &str = " npfsrtTxmFo:?ic[]12345adjkhlgG/JK0,.+-<>qyzvHLD";
         let code = |rng: &mut fastrand::Rng| match rng.u8(..12) {
             0 => KeyCode::Enter,
             1 => KeyCode::Esc,
@@ -676,6 +697,231 @@ mod tests {
 
         assert_ne!(dimmed, bright);
         assert_eq!(header(&terminal), bright);
+    }
+
+    #[test]
+    fn persistent_diagnostics_reserve_rows_and_support_keyboard_and_mouse() {
+        let mut app = offline_app();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), true);
+        let mut terminal = Terminal::new(TestBackend::new(50, 24)).unwrap();
+        app.toast(Tone::Error, "ffmpeg is missing");
+        app.toast(Tone::Warning, "deno is missing");
+        for index in 0..8 {
+            app.toast(Tone::Done, format!("success {index}"));
+        }
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        assert_eq!(app.diagnostics.pending(), 2);
+        assert!(
+            ui.toasts
+                .iter()
+                .all(|toast| !matches!(toast.tone, Tone::Error | Tone::Warning))
+        );
+        let notice = ui
+            .hits
+            .iter()
+            .find(|(rect, hit)| rect.height == 2 && *hit == Hit::Act(Action::OpenDiagnostics))
+            .unwrap()
+            .0;
+        assert!(
+            ui.hits
+                .iter()
+                .filter(|(_, hit)| matches!(hit, Hit::Row(_) | Hit::Panel(_) | Hit::Slider(_)))
+                .all(|(rect, _)| rect.intersection(notice).is_empty())
+        );
+        assert!(ui.hits.iter().any(|(_, hit)| *hit == Hit::Act(Action::TogglePlay)));
+        assert!(ui.hits.iter().any(|(_, hit)| *hit == Hit::Act(Action::TimerToggle)));
+        assert!(
+            overlay::commands(&app)
+                .iter()
+                .any(|command| command.action == Action::OpenDiagnostics)
+        );
+
+        input::apply(&mut app, &mut ui, Action::OpenDiagnostics);
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        let next = ui
+            .hits
+            .iter()
+            .find(|(_, hit)| *hit == Hit::DiagnosticEntry(1))
+            .unwrap()
+            .0;
+        input::handle(
+            &mut app,
+            &mut ui,
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: next.x,
+                row: next.y,
+                modifiers: KeyModifiers::NONE,
+            }),
+        );
+        assert!(matches!(ui.overlay, Some(Overlay::Diagnostics { selected: 1, .. })));
+        assert_eq!(app.diagnostics.pending(), 2);
+        input::handle(
+            &mut app,
+            &mut ui,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert_eq!(app.diagnostics.pending(), 1);
+        assert_eq!(app.diagnostics.entries().len(), 2);
+    }
+
+    #[test]
+    fn diagnostic_log_failures_stay_visible_without_pending_entries_until_save_recovers() {
+        let mut app = offline_app();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), true);
+        let mut terminal = Terminal::new(TestBackend::new(90, 24)).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("diagnostics.json");
+        std::fs::write(&path, "invalid json").unwrap();
+        app.diagnostics = crate::diagnostics::Diagnostics::new(path);
+        for operation in ["read", "save"] {
+            if operation == "save" {
+                app.diagnostics = crate::diagnostics::Diagnostics::new(dir.path().join("missing/log.json"));
+                app.diagnostics.record("failure", None);
+                let id = app.diagnostics.entries()[0].id;
+                app.diagnostics.dismiss(id);
+            }
+            assert_eq!(app.diagnostics.pending(), 0);
+            terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+            let notice = ui
+                .hits
+                .iter()
+                .find(|(rect, hit)| rect.height == 2 && *hit == Hit::Act(Action::OpenDiagnostics))
+                .unwrap()
+                .0;
+            let row = |y| {
+                (notice.x..notice.right())
+                    .map(|x| terminal.backend().buffer()[(x, y)].symbol())
+                    .collect::<String>()
+            };
+            assert!(row(notice.y).contains("diagnostics: log unavailable"));
+            assert!(row(notice.y + 1).contains(&format!("Could not {operation} diagnostic log")));
+        }
+        std::fs::create_dir(dir.path().join("missing")).unwrap();
+        app.diagnostics.dismiss_overflow();
+        assert!(app.diagnostics.log_error.is_none());
+        assert!(app.diagnostics.path.is_file());
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        assert!(
+            !ui.hits
+                .iter()
+                .any(|(rect, hit)| { rect.height == 2 && *hit == Hit::Act(Action::OpenDiagnostics) })
+        );
+    }
+
+    #[test]
+    fn diagnostic_selection_and_stale_mouse_dismissals_follow_entry_identity() {
+        let mut app = offline_app();
+        for index in 0..100 {
+            app.diagnostics.record(&format!("failure {index}"), None);
+        }
+        let selected = app.diagnostics.entries()[50].id;
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), true);
+        let mut terminal = Terminal::new(TestBackend::new(90, 24)).unwrap();
+        ui.open(Overlay::Diagnostics { selected, scroll: 0 });
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        let dismiss = ui
+            .hits
+            .iter()
+            .find(|(_, hit)| *hit == Hit::Act(Action::DismissDiagnostic(selected)))
+            .unwrap()
+            .0;
+        let click = Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: dismiss.x,
+            row: dismiss.y,
+            modifiers: KeyModifiers::NONE,
+        });
+        let first = app.diagnostics.entries()[0].id;
+        app.diagnostics.dismiss(first);
+        app.diagnostics.record("replacement for first entry", None);
+        input::handle(&mut app, &mut ui, click.clone());
+        assert!(app.diagnostics.entries()[49].dismissed);
+        assert!(!app.diagnostics.entries()[50].dismissed);
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("50 of 100 · dismissed"));
+        assert!(rendered.contains("failure 50"));
+        input::handle(
+            &mut app,
+            &mut ui,
+            Event::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)),
+        );
+        assert!(matches!(ui.overlay, Some(Overlay::Diagnostics { selected: id, .. }) if id == selected - 1));
+        input::handle(
+            &mut app,
+            &mut ui,
+            Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)),
+        );
+        assert!(matches!(ui.overlay, Some(Overlay::Diagnostics { selected: id, .. }) if id == selected));
+
+        app.diagnostics.record("replacement for selected entry", None);
+        input::handle(&mut app, &mut ui, click);
+        input::handle(
+            &mut app,
+            &mut ui,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+        assert_eq!(app.diagnostics.pending(), 100);
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("This entry is no longer in the history."));
+        assert!(
+            !ui.hits
+                .iter()
+                .any(|(_, hit)| matches!(hit, Hit::Act(Action::DismissDiagnostic(_))))
+        );
+        input::handle(
+            &mut app,
+            &mut ui,
+            Event::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)),
+        );
+        assert!(
+            matches!(ui.overlay, Some(Overlay::Diagnostics { selected: id, .. }) if id == app.diagnostics.entries()[0].id)
+        );
+    }
+
+    #[test]
+    fn diagnostic_scroll_stays_at_the_rendered_end() {
+        let mut app = offline_app();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), true);
+        let mut terminal = Terminal::new(TestBackend::new(40, 14)).unwrap();
+        app.toast(Tone::Error, "a detailed failure message ".repeat(40));
+        ui.open(Overlay::Diagnostics {
+            selected: 0,
+            scroll: crate::diagnostics::MESSAGE_LIMIT,
+        });
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        let Some(Overlay::Diagnostics { scroll: end, .. }) = ui.overlay else {
+            panic!("diagnostics closed");
+        };
+        assert!(end > 0 && end < crate::diagnostics::MESSAGE_LIMIT);
+        for _ in 0..5 {
+            input::handle(
+                &mut app,
+                &mut ui,
+                Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+            );
+            terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        }
+        input::handle(
+            &mut app,
+            &mut ui,
+            Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)),
+        );
+        assert!(matches!(ui.overlay, Some(Overlay::Diagnostics { scroll, .. }) if scroll == end - 1));
     }
 
     #[test]

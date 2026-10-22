@@ -226,9 +226,20 @@ pub fn footer(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
         ("^p", "commands", Action::OpenPalette),
         ("c", "settings", Action::OpenSettings),
         ("?", "keys", Action::OpenHelp),
+        ("D", "diagnostics", Action::OpenDiagnostics),
     ];
     if area.width < 80 {
         pinned.drain(..2);
+        if let Some((_, label, _)) = pinned.last_mut() {
+            *label = "errors";
+        }
+    }
+    if area.width < 60 {
+        pinned.remove(0);
+        hints = vec![
+            ("space", play, Some(Action::TogglePlay)),
+            ("t", "timer", Some(Action::TimerToggle)),
+        ];
     }
     // Typing goes into the filter, so the usual keys would only add letters to it.
     if ui.filtering {

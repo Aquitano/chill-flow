@@ -3,6 +3,7 @@ mod app;
 mod audio;
 mod catalog;
 mod config;
+mod diagnostics;
 mod media;
 mod model;
 mod queue;
@@ -12,6 +13,7 @@ mod sync;
 mod timer;
 mod tools;
 mod ui;
+mod update;
 mod youtube;
 
 use std::fs::{File, TryLockError};
@@ -55,10 +57,15 @@ pub fn is_command(name: &str) -> bool {
 enum CliCommand {
     /// Check that ffmpeg, yt-dlp, and deno are installed, and show where chill keeps its files.
     Doctor,
+    /// Update an official installer-managed copy of chill to the latest release.
+    Update,
 }
 
 fn main() -> Result<ExitCode> {
     let cli = Cli::parse();
+    if matches!(cli.command, Some(CliCommand::Update)) {
+        return update::run().map(|()| ExitCode::SUCCESS);
+    }
     let paths = config::Paths::resolve()?;
     if let Some(CliCommand::Doctor) = cli.command {
         return Ok(if doctor(&paths) {
@@ -163,25 +170,32 @@ fn answers_image_query() -> bool {
 fn doctor(paths: &config::Paths) -> bool {
     println!("chill {}\n", env!("CARGO_PKG_VERSION"));
     let today = jiff::Zoned::now().date();
-    let found: Vec<(Tool, Option<String>)> = Tool::ALL.into_iter().map(|tool| (tool, tool.version())).collect();
-    let width = found
-        .iter()
-        .map(|(_, version)| version.as_deref().map_or(7, str::len))
-        .max()
-        .unwrap_or(0)
-        + 2;
-    let indent = 8 + width;
-    let mut healthy = found.iter().all(|(_, version)| version.is_some());
-    for (tool, version) in found {
-        let shown = version.as_deref().unwrap_or("missing");
-        println!("{:<8}{shown:<width$}{}", tool.name(), tool.purpose());
-        match version {
-            None => println!("{:<indent$}install it with: {}", "", tool.install()),
-            Some(version) => {
-                if let Some(days) = tool.stale_days(&version, today) {
-                    println!("{:<indent$}{days} days old, update it with: {}", "", tool.upgrade());
-                }
+    let mut healthy = true;
+    for inspection in Tool::ALL.into_iter().map(Tool::inspect) {
+        let tool = inspection.tool;
+        let state = match &inspection.state {
+            tools::State::Installed(version) => format!("installed ({version})"),
+            tools::State::Missing => {
+                healthy = false;
+                "missing".into()
             }
+            tools::State::Broken(error) => {
+                healthy = false;
+                format!("broken: {error}")
+            }
+        };
+        println!("{}: {state}. {}.", tool.name(), tool.purpose());
+        if let Some(path) = &inspection.path {
+            println!("  path: {}", config::display_path(path));
+        }
+        match &inspection.state {
+            tools::State::Installed(version) => {
+                if let Some(days) = tool.stale_days(version, today) {
+                    println!("  {days} days old; YouTube links may fail.");
+                }
+                println!("  update: {}", tool.upgrade());
+            }
+            _ => println!("  install: {}", tool.install()),
         }
     }
     println!();
@@ -195,6 +209,16 @@ fn doctor(paths: &config::Paths) -> bool {
     println!("{:<9}{}{config}", "config", config::display_path(&paths.config_file));
     println!("{:<9}{}", "library", config::display_path(&paths.database));
     println!("{:<9}{}", "cache", config::display_path(&paths.cache));
+    println!(
+        "{:<9}{}",
+        "log",
+        config::display_path(&paths.cache.join("diagnostics.json"))
+    );
+    println!(
+        "{:<9}{}",
+        "crashes",
+        config::display_path(&paths.cache.join("crash.log"))
+    );
     healthy
 }
 
@@ -260,7 +284,11 @@ mod tests {
 
     #[test]
     fn scene_names_that_match_a_command_are_told_apart() {
-        assert!(is_command("doctor") && is_command("help"));
+        assert!(is_command("doctor") && is_command("update") && is_command("help"));
+        assert!(matches!(
+            Cli::try_parse_from(["chill", "update"]).unwrap().command,
+            Some(CliCommand::Update)
+        ));
         assert!(!is_command("rainy study"));
         let cli = Cli::try_parse_from(["chill", "--", "doctor"]).unwrap();
         assert_eq!((cli.command.is_none(), cli.target.as_deref()), (true, Some("doctor")));

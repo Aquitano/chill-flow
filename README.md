@@ -25,13 +25,15 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Aquitano/chill-flow/rel
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/Aquitano/chill-flow/releases/latest/download/chill-installer.ps1 | iex"
 ```
 
-Both put `chill` in `~/.cargo/bin` and add it to `PATH`. Run the same command again to update. On any other platform, build it with the Rust toolchain from [rustup.rs](https://rustup.rs) (on Windows that also needs the Visual Studio C++ build tools):
+Both put `chill` in `~/.cargo/bin` and add it to `PATH`. Run `chill update` in your terminal to install the latest stable release. It uses the installer receipt to update the same installation, including custom install locations. Older versions without this command can rerun the installer. On any other platform, build it with the Rust toolchain from [rustup.rs](https://rustup.rs) (on Windows that also needs the Visual Studio C++ build tools):
 
 ```bash
 cargo install --git https://github.com/Aquitano/chill-flow
 ```
 
-After a winget install, open a new terminal so the tools are on `PATH`. `chill doctor` checks that all three are found and prints where chill keeps its config, library, and cache. YouTube changes often enough that an old yt-dlp stops working, so chill mentions it at startup once your yt-dlp is more than 60 days old; update it with `brew upgrade yt-dlp` or `winget upgrade yt-dlp.yt-dlp`.
+After a winget install, open a new terminal so the tools are on `PATH`. `chill doctor` checks all three with a five-second limit per tool. It reports installed, missing, or broken tools, their versions and paths, and install or update commands. It also prints the config, library, cache, and diagnostic log paths, and exits unsuccessfully for missing or broken tools or an invalid config. It never installs dependencies. YouTube changes often enough that an old yt-dlp stops working, so chill mentions it at startup once your yt-dlp is more than 60 days old; update it with `brew upgrade yt-dlp` or `winget upgrade yt-dlp.yt-dlp`.
+
+`chill update` supports the official Apple Silicon macOS and x64 Windows installers. It requires their receipt to match the running executable and the official release repository. Copies and source builds without a matching installer receipt get instructions instead, as do unsupported platforms. For a Cargo installation, use `cargo install --git https://github.com/Aquitano/chill-flow --force`; for another package manager, use its update command. No update checks run at startup or in the TUI.
 
 ## Use
 
@@ -46,9 +48,12 @@ chill                                   # resume where you left off
 chill https://youtu.be/…                # play a video, playlist, or live stream
 chill "rainy study"                     # load a saved scene
 chill doctor                            # check ffmpeg, yt-dlp, and deno
+chill update                            # update an official installation
 ```
 
 Paste a YouTube link anywhere in the app to add it to the library and play it. Everything responds to the mouse: click rows and buttons, drag the sliders, scroll the lists. Press `?` for every key, or `ctrl+p` to search all commands.
+
+Errors and dependency notices stay in a compact notice until dismissed. Click the notice, press `D`, or search for **Recent errors and diagnostics** in the palette. Use left and right to choose an entry, up and down to read long messages, and Enter to dismiss it. Dismissed entries remain in the history. The cache holds up to 100 entries in `diagnostics.json`, with URLs and sync keys redacted. Repeated failures share an entry and a count. When all entries are unresolved, an explicit overflow count records further failures until you dismiss some entries. Quiet successful toasts still disappear on their own.
 
 | Key | Does |
 | --- | --- |
@@ -62,6 +67,7 @@ Paste a YouTube link anywhere in the app to add it to the library and play it. E
 | `v` | next picture in the player |
 | `o` | open a YouTube link |
 | `c` | settings |
+| `D` | recent errors and diagnostics |
 | `tab` | move between library, queue, and ambience |
 | `enter` / `a` | play the selection / add it to the queue |
 

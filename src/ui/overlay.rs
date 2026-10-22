@@ -5,7 +5,7 @@ use nucleo_matcher::{Config, Matcher, Utf32Str};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Margin, Rect};
 use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Block, BorderType, Widget};
+use ratatui::widgets::{Block, BorderType, Paragraph, Widget, Wrap};
 use ratatui_image::picker::ProtocolType;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -135,6 +135,7 @@ pub fn commands(app: &App) -> Vec<Command> {
         list.push(command("Turn on sync", "", Action::TurnOnSync));
         list.push(command("Join a sync space…", "", Action::OpenPrompt(Prompt::JoinSync)));
     }
+    list.push(command("Recent errors and diagnostics", "D", Action::OpenDiagnostics));
     list.push(command("Focus stats", "i", Action::OpenStats));
     list.push(command("Settings", "c", Action::OpenSettings));
     list.push(command("Keyboard shortcuts", "?", Action::OpenHelp));
@@ -243,7 +244,7 @@ fn key_hints(buf: &mut Buffer, x: u16, y: u16, hints: &[(&str, &str)], ui: &Ui) 
 }
 
 pub fn draw(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant) {
-    let Some(overlay) = ui.overlay.take() else { return };
+    let Some(mut overlay) = ui.overlay.take() else { return };
     // The page dims in one frame: fading it recolors every cell on every frame. Art drawn by a
     // graphics protocol can't be recolored like cells, and swapping in a darkened copy re-sends
     // the whole image, which flickers, so it stays as it is.
@@ -258,11 +259,12 @@ pub fn draw(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant
     // a short terminal can't fit is cut at the panel's edge instead of spilling over the page.
     let mut layer = Buffer::empty(buf.area);
     let first_hit = ui.hits.len();
-    match &overlay {
+    match &mut overlay {
         Overlay::Palette { query, selected } => palette(&mut layer, screen, app, ui, query, *selected),
         Overlay::Prompt { kind, input } => prompt(&mut layer, screen, ui, *kind, input),
         Overlay::Confirm { message, .. } => confirm(&mut layer, screen, ui, message),
         Overlay::Help => help(&mut layer, screen, app, ui),
+        Overlay::Diagnostics { selected, scroll } => diagnostics(&mut layer, screen, app, ui, *selected, scroll),
         Overlay::Stats => stats(&mut layer, screen, app, ui, now),
         Overlay::Settings { selected } => settings(&mut layer, screen, app, ui, *selected),
     }
@@ -633,7 +635,7 @@ pub fn toasts(buf: &mut Buffer, footer: Rect, ui: &mut Ui, now: Instant) {
         let color = match toast.tone {
             Tone::Info => theme.calm,
             Tone::Done => theme.rest,
-            Tone::Error => theme.alert,
+            Tone::Error | Tone::Warning => theme.alert,
         };
         fill(buf, area, Style::new().bg(theme.raised()));
         if !theme.has_rgb() {
@@ -655,5 +657,146 @@ pub fn toasts(buf: &mut Buffer, footer: Rect, ui: &mut Ui, now: Instant) {
         widgets::dim(buf, area, fade, &theme, None);
         ui.hits.push((area, Hit::Toast(index)));
         bottom = y;
+    }
+}
+
+pub fn diagnostic_notice(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
+    let theme = ui.theme;
+    fill(buf, area, Style::new().bg(theme.raised()));
+    let pending = app.diagnostics.pending();
+    let heading = if app.diagnostics.log_error.is_some() {
+        "D diagnostics: log unavailable".to_owned()
+    } else {
+        format!("D diagnostics ({pending})")
+    };
+    put(
+        buf,
+        area.x + 1,
+        area.y,
+        &fit(&heading, usize::from(area.width.saturating_sub(2))),
+        Style::new().fg(theme.alert),
+    );
+    ui.hit(area, Hit::Act(Action::OpenDiagnostics));
+    let message = app
+        .diagnostics
+        .log_error
+        .as_deref()
+        .or_else(|| app.diagnostics.first_pending().map(|entry| entry.message.as_str()))
+        .unwrap_or("More failures occurred while the history was full. Open diagnostics for the count.");
+    put(
+        buf,
+        area.x + 1,
+        area.y + 1,
+        &fit(message, usize::from(area.width.saturating_sub(2))),
+        Style::new().fg(theme.text()),
+    );
+}
+
+fn diagnostics(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, selected: usize, scroll: &mut usize) {
+    let theme = ui.theme;
+    let content = dialog(buf, screen, 88, 23, None, "Recent errors and diagnostics", ui);
+    let entries = app.diagnostics.entries();
+    let selected_entry = entries.iter().enumerate().find(|(_, entry)| entry.id == selected);
+    let mut lines = Vec::new();
+    if let Some((index, entry)) = selected_entry {
+        lines.push(format!(
+            "{} of {} · {} · seen {} times",
+            index + 1,
+            entries.len(),
+            if entry.dismissed { "dismissed" } else { "unresolved" },
+            entry.occurrences
+        ));
+        lines.push(format!("Last seen: {}", entry.last_seen));
+        lines.push(String::new());
+        lines.push(entry.message.clone());
+    } else if entries.is_empty() {
+        lines.push("No recent errors or dependency notices.".into());
+    } else {
+        lines.push("This entry is no longer in the history. Use left or right to select another.".into());
+    }
+    if app.diagnostics.omitted() > 0 {
+        lines.push(format!(
+            "{} additional failures omitted while all 100 entries were unresolved. Press x to dismiss this count.",
+            app.diagnostics.omitted()
+        ));
+    }
+    if let Some(error) = &app.diagnostics.log_error {
+        lines.push(error.clone());
+    }
+    lines.push(String::new());
+    lines.push(format!("Log: {}", crate::config::display_path(&app.diagnostics.path)));
+    lines.push("URLs and sync keys are redacted. Run chill doctor for dependency details.".into());
+    let details = Paragraph::new(lines.join("\n"))
+        .wrap(Wrap { trim: false })
+        .style(Style::new().fg(theme.text()));
+    let height = content.height.saturating_sub(2);
+    *scroll = (*scroll).min(details.line_count(content.width).saturating_sub(usize::from(height)));
+    details
+        .scroll((*scroll as u16, 0))
+        .render(Rect { height, ..content }, buf);
+    let controls = [
+        ("←", Hit::DiagnosticEntry(-1)),
+        ("→", Hit::DiagnosticEntry(1)),
+        ("↑", Hit::DiagnosticScroll(-1)),
+        ("↓", Hit::DiagnosticScroll(1)),
+        ("enter dismiss", Hit::Act(Action::DismissDiagnostic(selected))),
+    ];
+    let y = content.bottom().saturating_sub(1);
+    let mut x = content.x;
+    for (label, hit) in controls {
+        if selected_entry.is_none() && matches!(hit, Hit::Act(Action::DismissDiagnostic(_))) {
+            continue;
+        }
+        let width = label.width() as u16;
+        put(buf, x, y, label, Style::new().fg(theme.muted()));
+        ui.hit(Rect::new(x, y, width, 1), hit);
+        x += width + 2;
+    }
+    if app.diagnostics.omitted() > 0 && content.height >= 2 {
+        let label = "x dismiss overflow count";
+        let y = y.saturating_sub(1);
+        put(buf, content.x, y, label, Style::new().fg(theme.muted()));
+        ui.hit(
+            Rect::new(content.x, y, content.width, 1),
+            Hit::Act(Action::DismissDiagnosticOverflow),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::TestApp;
+    use crate::ui::theme::Theme;
+    use ratatui_image::picker::Picker;
+
+    #[test]
+    fn diagnostic_details_keep_long_words_and_log_paths_through_scroll() {
+        let mut app = TestApp::new();
+        let detail = format!("Could not read /{}final-error", "資料/recordings/".repeat(20));
+        app.toast(Tone::Error, &detail);
+        let log_path = format!("/{}diagnostics.json", "long-cache-directory/".repeat(20));
+        app.diagnostics.path = log_path.clone().into();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), true);
+        let screen = Rect::new(0, 0, 40, 12);
+        let mut rendered = String::new();
+        for requested in 0..crate::diagnostics::MESSAGE_LIMIT {
+            let mut buffer = Buffer::empty(screen);
+            let mut scroll = requested;
+            diagnostics(&mut buffer, screen, &app, &mut ui, 0, &mut scroll);
+            if scroll < requested {
+                break;
+            }
+            let area = ui.dialog_area.unwrap();
+            let x = area.x + 3;
+            let y = area.y + 3;
+            for column in x..area.right() - 3 {
+                rendered.push_str(buffer[(column, y)].symbol());
+            }
+        }
+        let compact = |text: &str| text.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+        assert!(compact(&rendered).contains(&compact(&detail)));
+        assert!(compact(&rendered).contains(&compact(&log_path)));
+        assert!(!rendered.contains('…'));
     }
 }
