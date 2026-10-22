@@ -51,24 +51,31 @@ fn close_button(buf: &mut Buffer, area: Rect, action: Action, ui: &mut Ui) {
     ui.hit(close, Hit::Act(action));
 }
 
+/// A closed side leaves a thin edge like a panel's border, with an arrow halfway down, and a click
+/// anywhere along it opens the side again.
 pub fn reopen_handles(buf: &mut Buffer, body: Rect, player: Rect, app: &App, ui: &mut Ui) {
     if player.height == 0 {
         return;
     }
-    for (hidden, x, glyph, action) in [
+    let theme = ui.theme;
+    for (hidden, x, arrow, action) in [
         (app.library_hidden, body.x, "›", Action::ToggleLibraryPanel),
         (app.side_hidden, body.right() - 1, "‹", Action::ToggleSidePanel),
     ] {
-        if hidden {
-            let handle = Rect::new(x, player.y + player.height / 2, 1, 1);
-            let color = if ui.hovered(handle) {
-                ui.theme.text()
-            } else {
-                ui.theme.faint()
-            };
-            put(buf, handle.x, handle.y, glyph, Style::new().fg(color));
-            ui.hit(handle, Hit::Act(action));
+        if !hidden {
+            continue;
         }
+        let edge = Rect::new(x, player.y, 1, player.height);
+        let (line, arrow_color) = if ui.hovered(edge) {
+            (theme.faint(), theme.text())
+        } else {
+            (theme.line(), theme.muted())
+        };
+        for y in edge.top()..edge.bottom() {
+            put(buf, x, y, "│", Style::new().fg(line));
+        }
+        put(buf, x, edge.y + edge.height / 2, arrow, Style::new().fg(arrow_color));
+        ui.hit(edge, Hit::Act(action));
     }
 }
 

@@ -767,7 +767,8 @@ mod tests {
             terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
             let buffer = terminal.backend().buffer();
             let row = (1..height - 1).find(|&y| buffer[(0, y)].symbol() == "›").unwrap();
-            assert_eq!(buffer[(0, row)].fg, ui.theme.faint());
+            assert_eq!(buffer[(0, row)].fg, ui.theme.muted());
+            assert_eq!(buffer[(0, row - 1)].symbol(), "│");
 
             input::handle(
                 &mut app,
