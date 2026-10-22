@@ -66,12 +66,23 @@ pub fn apply(app: &mut App, ui: &mut Ui, action: Action) {
             ui.set_focus(Panel::Library);
         }
         Action::ToggleLibraryPanel | Action::ToggleSidePanel => {
+            let panel = if action == Action::ToggleLibraryPanel {
+                Panel::Library
+            } else {
+                Panel::Ambience
+            };
             app.dispatch(action);
             if app.library_hidden && ui.filtering {
                 ui.filtering = false;
                 app.filter.clear();
             }
-            ui.keep_focus_visible(app);
+            // Where panels share one place, only the focused one shows, so a side that comes back
+            // takes the focus.
+            if app.panel_hidden(panel) {
+                ui.keep_focus_visible(app);
+            } else {
+                ui.set_focus(panel);
+            }
         }
         Action::Focus(panel) if !app.panel_hidden(panel) => ui.set_focus(panel),
         Action::Focus(_) => {}

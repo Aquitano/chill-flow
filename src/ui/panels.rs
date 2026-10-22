@@ -11,7 +11,7 @@ use super::widgets::{self, fill, fit, meter, put, wrap};
 use super::{Hit, Slider, Ui};
 use crate::action::{Action, Panel, Prompt, Setting, Tab};
 use crate::app::{App, Stream, format_clock};
-use crate::model::{Repeat, Source};
+use crate::model::{Item, Repeat, Source};
 use crate::timer::{Phase, TimerMode};
 use crate::ui::picture::Picture;
 
@@ -49,6 +49,34 @@ fn close_button(buf: &mut Buffer, area: Rect, action: Action, ui: &mut Ui) {
     };
     put(buf, close.x, close.y, " × ", Style::new().fg(color));
     ui.hit(close, Hit::Act(action));
+}
+
+/// A closed side leaves a thin edge like a panel's border, with an arrow halfway down, and a click
+/// anywhere along it opens the side again.
+pub fn reopen_handles(buf: &mut Buffer, body: Rect, player: Rect, app: &App, ui: &mut Ui) {
+    if player.height == 0 {
+        return;
+    }
+    let theme = ui.theme;
+    for (hidden, x, arrow, action) in [
+        (app.library_hidden, body.x, "›", Action::ToggleLibraryPanel),
+        (app.side_hidden, body.right() - 1, "‹", Action::ToggleSidePanel),
+    ] {
+        if !hidden {
+            continue;
+        }
+        let edge = Rect::new(x, player.y, 1, player.height);
+        let (line, arrow_color) = if ui.hovered(edge) {
+            (theme.faint(), theme.text())
+        } else {
+            (theme.line(), theme.muted())
+        };
+        for y in edge.top()..edge.bottom() {
+            put(buf, x, y, "│", Style::new().fg(line));
+        }
+        put(buf, x, edge.y + edge.height / 2, arrow, Style::new().fg(arrow_color));
+        ui.hit(edge, Hit::Act(action));
+    }
 }
 
 fn centered(buf: &mut Buffer, area: Rect, y: u16, text: &str, style: Style) {
@@ -156,6 +184,12 @@ pub fn footer(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
         ("n", "next", Some(Action::Next)),
         ("t", "timer", Some(Action::TimerToggle)),
     ];
+    if app.library_hidden {
+        hints.push(("H", "library", Some(Action::ToggleLibraryPanel)));
+    }
+    if app.side_hidden {
+        hints.push(("L", "ambience", Some(Action::ToggleSidePanel)));
+    }
     hints.extend(match ui.focus {
         Panel::Library => [("enter", "play", None), ("a", "queue", None), ("/", "filter", None)],
         Panel::Queue => [("enter", "jump", None), ("J/K", "move", None), ("d", "remove", None)],
@@ -405,42 +439,6 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
     let controls_y = inner.bottom() - 1;
     let progress_y = controls_y.saturating_sub(2);
     let picture = app.config.picture;
-    let cover = if picture == Picture::Cover {
-        let cover_height = (inner.height * 3 / 10)
-            .clamp(5, 12)
-            .min(progress_y.saturating_sub(inner.y + 1));
-        let aspect = ui.cover_for(item.as_ref().and_then(|item| item.cover.as_deref()));
-        let cover_width = ((f32::from(cover_height) * 2.0 * aspect.unwrap_or(1.0)).round() as u16).min(inner.width / 2);
-        let cover = Rect::new(inner.x, inner.y, cover_width, cover_height);
-        fill(buf, cover, Style::new().bg(theme.surface()));
-        let (glyph, glyph_color) = if soundscape {
-            ("≋", theme.calm)
-        } else {
-            ("♪", theme.faint())
-        };
-        put(
-            buf,
-            cover.x + cover.width / 2,
-            cover.y + cover.height / 2,
-            glyph,
-            Style::new().fg(glyph_color).bg(theme.surface()),
-        );
-        if aspect.is_some() {
-            ui.cover_rect = Some(cover);
-        }
-        cover
-    } else {
-        Rect::new(inner.x, inner.y, 0, 0)
-    };
-
-    let meta_x = if picture == Picture::Cover {
-        cover.right() + 3
-    } else {
-        inner.x
-    };
-    let meta_width = inner.right().saturating_sub(meta_x);
-    let meta_y = cover.y + cover.height.saturating_sub(5) / 2;
-    let width = usize::from(meta_width);
     let (title, artist, detail) = match (&item, soundscape) {
         (_, true) => {
             let sounds = app.sound_labels(&app.levels);
@@ -468,64 +466,9 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
             String::new(),
         ),
     };
-    let shown = ui.title_shown.value(now);
-    put(
-        buf,
-        meta_x,
-        meta_y,
-        &fit(&title, width),
-        Style::new().fg(theme.emphasis(shown)).add_modifier(Modifier::BOLD),
-    );
-    put(
-        buf,
-        meta_x,
-        meta_y + 1,
-        &fit(&artist, width),
-        Style::new().fg(theme.muted()),
-    );
-    put(
-        buf,
-        meta_x,
-        meta_y + 2,
-        &fit(&detail, width),
-        Style::new().fg(theme.faint()),
-    );
-
-    let status_y = meta_y + 4;
-    let mut x = meta_x;
-    if let Some(item) = item.as_ref().filter(|_| !soundscape && status_y < progress_y) {
-        let liked = app.is_liked(&item.key);
-        let pop = ui.heart.value(now);
-        let heart_rect = Rect::new(meta_x, status_y, 2, 1);
-        let (symbol, mut style) = if liked {
-            ("♥", Style::new().fg(theme.accent))
-        } else {
-            (
-                "♡",
-                Style::new().fg(if ui.hovered(heart_rect) {
-                    theme.text()
-                } else {
-                    theme.faint()
-                }),
-            )
-        };
-        if pop > 0.2 {
-            style = style.add_modifier(Modifier::BOLD);
-        }
-        x = put(buf, x, status_y, symbol, style);
-        if pop > 0.05 {
-            let sparkle = if pop > 0.6 { "✦" } else { "·" };
-            put(
-                buf,
-                x,
-                status_y.saturating_sub(1),
-                sparkle,
-                Style::new().fg(theme.accent),
-            );
-        }
-        ui.hit(heart_rect, Hit::Act(Action::ToggleLikeCurrent));
-        x += 2;
-    }
+    let title_style = Style::new()
+        .fg(theme.emphasis(ui.title_shown.value(now)))
+        .add_modifier(Modifier::BOLD);
     let spin = if ui.motion {
         widgets::spinner(ui.started, now)
     } else {
@@ -542,11 +485,56 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
         _ if !app.is_playing() => Some(("paused".into(), Style::new().fg(theme.faint()))),
         _ => None,
     };
-    if let Some((text, style)) = status.filter(|_| status_y < progress_y) {
-        put(buf, x, status_y, &text, style);
-    }
+    let likeable = item.as_ref().filter(|_| !soundscape);
 
     if picture == Picture::Cover {
+        let cover_height = (inner.height * 3 / 10)
+            .clamp(5, 12)
+            .min(progress_y.saturating_sub(inner.y + 1));
+        let aspect = ui.cover_for(item.as_ref().and_then(|item| item.cover.as_deref()));
+        let cover_width = ((f32::from(cover_height) * 2.0 * aspect.unwrap_or(1.0)).round() as u16).min(inner.width / 2);
+        let cover = Rect::new(inner.x, inner.y, cover_width, cover_height);
+        fill(buf, cover, Style::new().bg(theme.surface()));
+        let (glyph, glyph_color) = if soundscape {
+            ("≋", theme.calm)
+        } else {
+            ("♪", theme.faint())
+        };
+        put(
+            buf,
+            cover.x + cover.width / 2,
+            cover.y + cover.height / 2,
+            glyph,
+            Style::new().fg(glyph_color).bg(theme.surface()),
+        );
+        if aspect.is_some() {
+            ui.cover_rect = Some(cover);
+        }
+        let meta_x = cover.right() + 3;
+        let width = usize::from(inner.right().saturating_sub(meta_x));
+        let meta_y = cover.y + cover.height.saturating_sub(5) / 2;
+        put(buf, meta_x, meta_y, &fit(&title, width), title_style);
+        put(
+            buf,
+            meta_x,
+            meta_y + 1,
+            &fit(&artist, width),
+            Style::new().fg(theme.muted()),
+        );
+        put(
+            buf,
+            meta_x,
+            meta_y + 2,
+            &fit(&detail, width),
+            Style::new().fg(theme.faint()),
+        );
+        let status_y = meta_y + 4;
+        if status_y < progress_y {
+            let x = likeable.map_or(meta_x, |item| heart(buf, meta_x, status_y, item, app, ui, now));
+            if let Some((text, style)) = status {
+                put(buf, x, status_y, &text, style);
+            }
+        }
         let viz_top = cover.bottom() + 1;
         let viz = Rect::new(inner.x, viz_top, inner.width, progress_y.saturating_sub(viz_top + 1));
         if ui.motion && viz.height >= 2 {
@@ -555,15 +543,37 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
             widgets::spectrum(buf, viz, &ui.bars.levels, &ui.bars.peaks, &theme);
         }
     } else {
-        if inner.width >= 44 && status_y < progress_y {
-            picture_picker(buf, Rect::new(inner.x, status_y, inner.width, 1), picture, ui);
-        }
-        // The picture reaches the panel's edges; only the words keep their margin.
-        let top = status_y + 2;
-        let frame = Rect::new(area.x, top, area.width, progress_y.saturating_sub(top + 1));
+        // The picture reaches the panel's edges, with what's playing on a label over its sky.
+        let frame = Rect::new(area.x, area.y, area.width, progress_y.saturating_sub(area.y + 1));
         if frame.height >= 3 {
             let weather = ui.weather(app, now);
             ui.scene.draw(buf, frame, picture, app.config.look, weather, &theme);
+        }
+        let picker = if inner.width >= 44 {
+            picture_picker(buf, Rect::new(inner.x, inner.y, inner.width, 1), picture, ui)
+        } else {
+            0
+        };
+        let room = usize::from(inner.width.saturating_sub(picker + 4));
+        let lead = if likeable.is_some() { 2 } else { 0 };
+        let artist = fit(&artist, room.saturating_sub(lead + title.width().min(room / 2) + 2));
+        let title = fit(&title, room.saturating_sub(lead + artist.width() + 2));
+        let status = status.map(|(text, style)| (fit(&text, room.saturating_sub(lead)), style));
+        let gap = if detail.is_empty() { 0 } else { 2 };
+        let said = status.as_ref().map_or(0, |(text, _)| text.width() + gap);
+        let detail = fit(&detail, room.saturating_sub(lead + said));
+        let wide = (lead + title.width() + 2 + artist.width()).max(lead + detail.width() + said) as u16;
+        fill(
+            buf,
+            Rect::new(inner.x - 1, inner.y, wide + 2, 2),
+            Style::new().bg(theme.surface()),
+        );
+        let x = likeable.map_or(inner.x, |item| heart(buf, inner.x, inner.y, item, app, ui, now));
+        let end = put(buf, x, inner.y, &title, title_style);
+        put(buf, end + 2, inner.y, &artist, Style::new().fg(theme.muted()));
+        let end = put(buf, x, inner.y + 1, &detail, Style::new().fg(theme.faint()));
+        if let Some((text, style)) = status {
+            put(buf, end + gap as u16, inner.y + 1, &text, style);
         }
     }
 
@@ -630,12 +640,41 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
     controls(buf, inner, controls_y, app, ui);
 }
 
-/// `‹ Night lake ›` at the right end of `row`, stepping through the pictures.
-fn picture_picker(buf: &mut Buffer, row: Rect, picture: Picture, ui: &mut Ui) {
+/// The like button for `item`, returning where the text after it starts.
+fn heart(buf: &mut Buffer, x: u16, y: u16, item: &Item, app: &App, ui: &mut Ui, now: Instant) -> u16 {
+    let theme = ui.theme;
+    let pop = ui.heart.value(now);
+    let rect = Rect::new(x, y, 2, 1);
+    let (symbol, mut style) = if app.is_liked(&item.key) {
+        ("♥", Style::new().fg(theme.accent))
+    } else {
+        let color = if ui.hovered(rect) { theme.text() } else { theme.faint() };
+        ("♡", Style::new().fg(color))
+    };
+    if pop > 0.2 {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    let end = put(buf, x, y, symbol, style);
+    if pop > 0.05 {
+        let sparkle = if pop > 0.6 { "✦" } else { "·" };
+        put(buf, end, y.saturating_sub(1), sparkle, Style::new().fg(theme.accent));
+    }
+    ui.hit(rect, Hit::Act(Action::ToggleLikeCurrent));
+    end + 2
+}
+
+/// `‹ Night lake ›` on a label at the right end of `row`, stepping through the pictures. Returns
+/// how wide the label is.
+fn picture_picker(buf: &mut Buffer, row: Rect, picture: Picture, ui: &mut Ui) -> u16 {
     let theme = ui.theme;
     let label = picture.label();
     let right = row.right().saturating_sub(1);
     let left = right.saturating_sub(label.width() as u16 + 3);
+    fill(
+        buf,
+        Rect::new(left.saturating_sub(1), row.y, right - left + 3, 1),
+        Style::new().bg(theme.surface()),
+    );
     let name = Rect::new(left + 2, row.y, label.width() as u16, 1);
     let name_color = if ui.hovered(name) { theme.text() } else { theme.muted() };
     put(buf, name.x, row.y, label, Style::new().fg(name_color));
@@ -646,6 +685,7 @@ fn picture_picker(buf: &mut Buffer, row: Rect, picture: Picture, ui: &mut Ui) {
         put(buf, x, row.y, symbol, Style::new().fg(color));
         ui.hit(rect, Hit::Act(Action::AdjustSetting(Setting::Picture, step)));
     }
+    right - left + 3
 }
 
 fn controls(buf: &mut Buffer, inner: Rect, y: u16, app: &App, ui: &mut Ui) {

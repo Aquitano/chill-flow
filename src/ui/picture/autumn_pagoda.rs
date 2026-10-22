@@ -4,7 +4,7 @@
 use std::f32::consts::PI;
 
 use super::Weather;
-use super::canvas::{Canvas, Finish, Painting, Rgb, fbm, lerp, mix, ramp, rgb, unit};
+use super::canvas::{Canvas, Painting, Rgb, fbm, lerp, mix, ramp, rgb, unit};
 
 pub const WIDTH: usize = 192;
 pub const HEIGHT: usize = 108;
@@ -173,10 +173,10 @@ fn bridge(painting: &mut Painting) {
     }
 }
 
-/// The parts that never move, painted once for each scale.
-fn still(scale: usize) -> Painting {
+/// The parts that never move, painted once.
+fn still() -> Painting {
     let (width, height) = (WIDTH as f32, HEIGHT as f32);
-    let mut painting = Painting::new(WIDTH, HEIGHT, scale);
+    let mut painting = Painting::new(WIDTH, HEIGHT);
     let sky = [
         (0.0, rgb(0xb07a8a)),
         (0.25, rgb(0xcc8a80)),
@@ -318,12 +318,8 @@ impl AutumnPagoda {
         }
     }
 
-    pub fn paint(&mut self, canvas: &mut Canvas, t: f32, weather: &Weather, finish: Finish) {
-        let scale = Painting::scale_for(WIDTH, HEIGHT, canvas, finish);
-        if self.painting.as_ref().is_some_and(|painting| painting.scale != scale) {
-            self.painting = None;
-        }
-        let painting = self.painting.get_or_insert_with(|| still(scale));
+    pub fn paint(&mut self, canvas: &mut Canvas, t: f32, weather: &Weather) {
+        let painting = self.painting.get_or_insert_with(still);
         let breeze = 0.5 + 1.5 * weather.wind;
         let (width, height) = (WIDTH as f32, HEIGHT as f32);
         painting.begin();
@@ -400,6 +396,6 @@ impl AutumnPagoda {
         }
 
         painting.overcast(weather.rain);
-        painting.cover(canvas, FOCUS, finish);
+        painting.cover(canvas, FOCUS);
     }
 }

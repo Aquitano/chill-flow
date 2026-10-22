@@ -35,7 +35,7 @@ After a winget install, open a new terminal so the tools are on `PATH`. `chill d
 
 ## Use
 
-`chill` opens with your last scene loaded and paused. Space starts the music and the ambience, and `t` starts the focus timer. Each runs without the other, so you can just listen, and `F` puts the timer away until you need it. `H` and `L` put away the library on the left and the ambience and timer on the right, so the player fills the window.
+`chill` opens with your last scene loaded and paused. Space starts the music and the ambience, and `t` starts the focus timer. Each runs without the other, so you can just listen, and `F` puts the timer away until you need it. `H` and `L` put away the library on the left and the ambience and timer on the right, so the player fills the window. A side you put away leaves a thin edge with an arrow; click it, or press the same key, to bring the side back.
 
 ```bash
 chill                                   # resume where you left off
@@ -67,9 +67,11 @@ To update a saved playlist, select it in YouTube and press `R`, click **R refres
 
 The slider between music and ambience at the top of the Ambience panel turns one down against the other, for a loud stream or quiet rain, without touching the volume. A soundscape has no music, so the balance leaves it alone. White, pink, and brown noise sit below the recordings; chill generates them, so they need no download and play offline.
 
-The player shows the cover of what's playing, or `v` swaps it for a moving picture drawn in text: Night lake, Fuji at dawn, or Autumn pagoda. A picture moves while something plays and shows the ambience you hear: rain falls while a rain sound plays, thunder lights up the sky, wind sways trees and water, and crickets bring out fireflies, each as strongly as the music and ambience balance lets you hear it. Night lake uses your terminal's colors; the other two bring their own. **Settings** chooses the picture and what draws it. Auto, the default, draws Night lake in braille dots. Fuji at dawn and Autumn pagoda get blocks once the player has room for each of their pixels, as when both sides are put away, and crisp pixels before that. Blocks show each pixel as a solid cell with a thin seam beside it and work in any font. Pixels keep a painting crisp at eight to a cell, and Smooth paints it finer and scales it smoothly. Both, and the solid shapes among the dots such as Night lake's boat, use octant characters from Unicode 16; Ghostty draws them itself, and other terminals need a font that has them.
+The player shows the cover of what's playing, or `v` swaps it for a moving picture drawn in text that fills the player, with what's playing on a label over it: Journey, Night lake, Fuji at dawn, or Autumn pagoda. A picture moves while something plays and shows the ambience you hear: rain falls while a rain sound plays, thunder lights up the sky, wind sways trees and water, and crickets bring out fireflies, each as strongly as the music and ambience balance lets you hear it. Journey is a landscape in plain characters that scrolls past in layers, and shows more of the ambience: birds fly over, a stream runs through the grass, waves turn the fields to sea, a fire sends up sparks, and the café lights the windows of a village on the hills. Journey and Night lake use your terminal's colors; the other two bring their own. **Settings** chooses the picture and, for all but Journey, what draws it. Auto, the default, draws Night lake in braille dots. Fuji at dawn and Autumn pagoda get blocks once the player has room for each of their pixels, as when both sides are put away, and crisp pixels before that. Blocks show each pixel as a solid cell with a thin seam beside it and work in any font. Pixels keep a painting crisp at eight to a cell. They, and the solid shapes among the dots such as Night lake's boat, use octant characters from Unicode 16; Ghostty draws them itself, and other terminals need a font that has them.
 
 ![Fuji at dawn filling the player with both sides put away, drawn in blocks](docs/pictures.png)
+
+![Journey with a fire, crickets, and a stream playing: sparks rise, fireflies glow over the fields, and a creek runs through the grass](docs/journey.png)
 
 Focus stats count every minute a focus block ran, including blocks you stopped early. Breaks never count. The header shows today's total and a seven-day sparkline; press `i` for the chart.
 
@@ -126,8 +128,8 @@ catalog_url = "https://chill-data.aquitano.me/catalog.json"
 catalogs = []           # more catalog.json links, added with "Add a catalog"
 sync_url = "https://chill-sync.aquitano.me"
 reduce_motion = false   # true turns off transitions and the visualizer, and holds pictures still
-picture = "cover"       # or "night-lake", "fuji-dawn", "autumn-pagoda"
-look = "auto"           # how pictures are drawn: "auto", "blocks", "pixels", "smooth", or "dots"
+picture = "cover"       # or "journey", "night-lake", "fuji-dawn", "autumn-pagoda"
+look = "auto"           # how pictures are drawn: "auto", "blocks", "pixels", or "dots"
 chime = true            # a soft bell when a focus block or break ends
 notifications = true    # an OS notification at the same moments
 

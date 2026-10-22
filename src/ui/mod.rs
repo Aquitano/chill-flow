@@ -17,6 +17,7 @@ use ratatui_image::{FilterType, Resize, StatefulImage};
 
 use crate::action::{Action, Panel, Prompt, Tab};
 use crate::app::{App, Event, Tone};
+use crate::model::Source;
 use anim::{Bars, Tween};
 use picture::{Picture, Scene, Weather};
 use theme::Theme;
@@ -394,13 +395,14 @@ impl Ui {
             ])
             .spacing(1)
             .areas(body);
-            let queue_height = (center.height / 5).max(5);
+            let queue_height = queue_height(app, center);
             let [player, queue] =
                 Layout::vertical([Constraint::Fill(1), Constraint::Length(queue_height)]).areas(center);
             if !app.library_hidden {
                 panels::library(buf, library, app, self, now);
             }
             panels::player(buf, player, app, self, now);
+            panels::reopen_handles(buf, body, player, app, self);
             panels::queue(buf, queue, app, self);
             if !app.side_hidden {
                 if app.timer_hidden {
@@ -413,20 +415,21 @@ impl Ui {
             }
         } else if medium {
             let library_width = if app.library_hidden { 0 } else { 36 };
+            let content = Rect {
+                width: body.width - u16::from(app.side_hidden),
+                ..body
+            };
             let [library, center] = Layout::horizontal([Constraint::Length(library_width), Constraint::Fill(1)])
                 .spacing(1)
-                .areas(body);
-            let bottom_height = if app.side_hidden {
-                (center.height / 5).max(5)
-            } else {
-                13
-            };
+                .areas(content);
+            let bottom_height = if app.side_hidden { queue_height(app, center) } else { 13 };
             let [player, bottom] =
                 Layout::vertical([Constraint::Fill(1), Constraint::Length(bottom_height)]).areas(center);
             if !app.library_hidden {
                 panels::library(buf, library, app, self, now);
             }
             panels::player(buf, player, app, self, now);
+            panels::reopen_handles(buf, body, player, app, self);
             let timer = !app.timer_hidden && !app.side_hidden;
             if app.side_hidden {
                 panels::queue(buf, bottom, app, self);
@@ -451,6 +454,7 @@ impl Ui {
             let [player, bottom] =
                 Layout::vertical([Constraint::Fill(1), Constraint::Length(bottom_height)]).areas(body);
             panels::player(buf, player, app, self, now);
+            panels::reopen_handles(buf, body, player, app, self);
             match self.focus {
                 Panel::Library if !app.library_hidden => panels::library(buf, bottom, app, self, now),
                 Panel::Ambience if !app.side_hidden => panels::ambience(buf, bottom, app, self, now),
@@ -476,6 +480,18 @@ impl Ui {
         let cover = self.cover.as_ref()?;
         (Some(cover.url.as_str()) == url).then_some(cover.aspect)
     }
+}
+
+/// Room for what's up next and its border, up to a fifth of `center`, so a short queue leaves the
+/// rest to the player.
+fn queue_height(app: &App, center: Rect) -> u16 {
+    let upcoming = if app.source == Source::Soundscape {
+        0
+    } else {
+        app.queue.upcoming().count()
+    };
+    let most = (center.height / 5).max(5);
+    u16::try_from(upcoming + 2).map_or(most, |rows| rows.clamp(3, most))
 }
 
 #[cfg(test)]
@@ -716,7 +732,7 @@ mod tests {
     }
 
     #[test]
-    fn a_hidden_side_never_keeps_the_keys_and_a_tab_key_brings_the_library_back() {
+    fn a_hidden_side_never_keeps_the_keys_and_takes_them_when_it_comes_back() {
         let mut app = offline_app();
         let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
         let press = |app: &mut TestApp, ui: &mut Ui, code| {
@@ -736,6 +752,8 @@ mod tests {
 
         assert_eq!(press(&mut app, &mut ui, KeyCode::Char('2')), Panel::Library);
         assert!(!app.library_hidden);
+        assert_eq!(press(&mut app, &mut ui, KeyCode::Char('L')), Panel::Ambience);
+        app.side_hidden = true;
 
         app.library_hidden = true;
         let mut restored = Ui::new(Theme::new(None), Picker::halfblocks(), false);
@@ -744,7 +762,34 @@ mod tests {
     }
 
     #[test]
-    fn a_picture_takes_the_place_of_the_cover_and_spectrum_below_the_title() {
+    fn a_hidden_library_has_a_handle_that_brings_it_back() {
+        for (width, height) in [(160, 44), (100, 30), (70, 24)] {
+            let mut app = offline_app();
+            let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            app.library_hidden = true;
+            terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let row = (1..height - 1).find(|&y| buffer[(0, y)].symbol() == "›").unwrap();
+            assert_eq!(buffer[(0, row)].fg, ui.theme.muted());
+            assert_eq!(buffer[(0, row - 1)].symbol(), "│");
+
+            input::handle(
+                &mut app,
+                &mut ui,
+                Event::Mouse(MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: 0,
+                    row,
+                    modifiers: KeyModifiers::NONE,
+                }),
+            );
+            assert!(!app.library_hidden);
+        }
+    }
+
+    #[test]
+    fn a_picture_takes_the_place_of_the_cover_and_spectrum_with_the_title_over_it() {
         let mut app = offline_app();
         let mut ui = Ui::new(
             Theme::new(Some(([205, 214, 244], [30, 30, 46]))),
