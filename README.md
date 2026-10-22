@@ -152,6 +152,21 @@ cargo clippy --all-targets --workspace -- -D warnings
 
 On Linux the build needs `libasound2-dev`. CI runs the checks on Linux, macOS, and Windows. Pushing a version tag such as `v0.1.0` builds the binaries and installers and publishes them as a GitHub release; bump `version` in `Cargo.toml` to match first.
 
+To try a change on a Mac or Windows machine without a release, build it with the Try workflow. Add the `try` label to a pull request: it builds again on every push, and once both builds finish it comments with the downloads and a command to run each. To build any other branch, such as main after a merge, start the workflow yourself:
+
+```bash
+newest() { gh run list -R Aquitano/chill-flow -w try.yml -b main -L 1 --json databaseId -q '.[0].databaseId'; }
+before=$(newest)
+gh workflow run try.yml -R Aquitano/chill-flow -r main
+until run=$(newest); [ -n "$run" ] && [ "$run" != "$before" ]; do sleep 2; done
+gh run watch "$run" -R Aquitano/chill-flow
+gh run download "$run" -R Aquitano/chill-flow -n chill-aarch64-apple-darwin -D "/tmp/chill-try-$run"
+tar -xzf "/tmp/chill-try-$run/chill.tar.gz" -C "/tmp/chill-try-$run"
+XDG_CONFIG_HOME="$HOME/.config/chill-try" "/tmp/chill-try-$run/chill"
+```
+
+The last line keeps the build's settings in `~/.config/chill-try`, since an older chill won't start with settings a newer one has written. The library and cache are shared with the installed chill. On Windows the artifact is `chill-x86_64-pc-windows-msvc` and holds `chill.exe`; chill keeps its settings and library in one folder there, so point `APPDATA` at a folder of its own, as the pull request comment's command does. Builds are kept for 14 days.
+
 ## Ambient recordings
 
 | Sound | Source | License |
