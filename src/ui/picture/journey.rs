@@ -104,18 +104,14 @@ pub fn draw(
         .collect();
     let front: Vec<f32> = along(scroll(FRONT)).map(|world| grass(world, h)).collect();
 
+    let drift = scroll(CLOUDS * (1.0 + weather.wind * 2.0));
     if night {
         stars(&mut frame, &hills, t, weather, &inks);
+    }
+    clouds(&mut frame, &hills, drift, weather, flash, &inks);
+    if night {
         moon(&mut frame, &inks);
     }
-    clouds(
-        &mut frame,
-        &hills,
-        scroll(CLOUDS * (1.0 + weather.wind * 2.0)),
-        weather,
-        flash,
-        &inks,
-    );
     far_hills(&mut frame, &hills, &fields, scroll(HILLS), weather, &inks);
     if weather.waves > 0.02 {
         sea(&mut frame, &fields, &front, scroll(FIELDS), t, weather, &inks);
@@ -203,21 +199,22 @@ fn stars(frame: &mut Frame, hills: &[f32], t: f32, weather: &Weather, inks: &Ink
     }
 }
 
+/// A full moon in front of the clouds, solid, rounded to half a cell at its top and bottom.
 fn moon(frame: &mut Frame, inks: &Inks) {
     let (w, h) = (frame.columns as f32, frame.rows as f32);
     let (cx, cy) = (w * 0.8, h * 0.16);
     let ry = (h * 0.08).max(1.5);
     let rx = ry * 2.1;
+    let inside = |x: isize, y: f32| ((x as f32 + 0.5 - cx) / rx).hypot((y - cy) / ry) < 1.0;
     for y in (cy - ry - 1.0) as isize..=(cy + ry + 1.0) as isize {
         for x in (cx - rx - 1.0) as isize..=(cx + rx + 1.0) as isize {
-            let (dx, dy) = ((x as f32 + 0.5 - cx) / rx, (y as f32 + 0.5 - cy) / ry);
-            let reach = dx.hypot(dy);
-            if reach < 0.78 {
-                frame.set(x, y, (' ', inks.shade(0.0), None));
-            } else if reach < 1.12 {
-                // The rim, seen from inside the moon: denser toward its middle.
-                frame.set(x, y, (outline(-dx, -dy * 2.0), inks.shade(0.8), None));
-            }
+            let symbol = match (inside(x, y as f32 + 0.25), inside(x, y as f32 + 0.75)) {
+                (true, true) => '█',
+                (true, false) => '▀',
+                (false, true) => '▄',
+                (false, false) => continue,
+            };
+            frame.set(x, y, (symbol, inks.shade(0.6), None));
         }
     }
 }
