@@ -8,9 +8,9 @@ The job to be done: enter and hold a flow state. Start a soundscape, run a relia
 
 ## Product Purpose
 
-chill combines lo-fi music, ambient sound, and a focus timer in one terminal app. It exists to make starting deep work a single keypress and to make focus sustainable across sessions.
+chill combines lo-fi music, ambient sound, and a focus timer in one terminal app. It exists to make starting deep work a keypress or two, with no setup, and to make focus sustainable across sessions. Listening without a timer is just as valid a use.
 
-The core loop: typing `chill` loads the last scene, one Space starts music, ambience, and the timer, focus blocks are recorded accurately, and next time everything is exactly where it was left. Success is a user who opens chill by reflex when it's time to concentrate.
+The core loop: typing `chill` loads the last scene, Space starts music and ambience, `t` starts the focus timer, focus blocks are recorded accurately, and next time everything is exactly where it was left. Success is a user who opens chill by reflex when it's time to concentrate.
 
 Music comes from the owner's R2 bucket (listed by `catalog.json`) and from YouTube links, which are saved to the library on first use. Everything else lives in a local SQLite file; there are no accounts and no server.
 

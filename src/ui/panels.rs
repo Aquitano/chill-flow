@@ -597,8 +597,9 @@ fn controls(buf: &mut Buffer, inner: Rect, y: u16, app: &App, ui: &mut Ui) {
         _ => "repeat  ",
     };
     // Each pill is padded evenly around its glyph; the slot keeps the row still when the
-    // narrower play pill replaces pause.
-    let play = if app.is_playing() { " ❚❚ " } else { " ▶ " };
+    // narrower play pill replaces pause. ▸, not ▶: fonts without ▶ get it from a fallback
+    // that draws it wider than its cell, off the pill's center.
+    let play = if app.is_playing() { " ❚❚ " } else { " ▸ " };
     let play_slot = 4;
     let buttons: [(&str, Action, bool); 5] = [
         ("shuffle", Action::ToggleShuffle, app.queue.shuffle),
@@ -761,6 +762,12 @@ pub fn focus(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant)
     let timer = &app.timer;
     let glow = ui.glow.value(now).max(if timer.is_running() { 0.25 } else { 0.0 });
     let inner = panel(buf, area, "Focus", glow, ui);
+    if area.height > 0 && area.width >= 12 {
+        let close = Rect::new(area.right() - 4, area.y, 3, 1);
+        let close_color = if ui.hovered(close) { theme.text() } else { theme.faint() };
+        put(buf, close.x, close.y, " × ", Style::new().fg(close_color));
+        ui.hit(close, Hit::Act(Action::ToggleTimerPanel));
+    }
     if inner.height < 8 || inner.width < 34 {
         return false;
     }
@@ -812,7 +819,7 @@ pub fn focus(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant)
     );
 
     let buttons_y = inner.bottom().saturating_sub(3);
-    let [start, pause] = ["▶ start ", "❚❚ pause"];
+    let [start, pause] = ["▸ start ", "❚❚ pause"];
     let start_label = if timer.is_running() { pause } else { start };
     let buttons = [
         (start_label, Action::TimerToggle),

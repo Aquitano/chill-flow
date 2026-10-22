@@ -187,6 +187,7 @@ pub enum Action {
     TimerSkip,
     SetTimerMode(TimerMode),
     CycleTimerMode,
+    ToggleTimerPanel,
     SetLevel(String, u8),
     LevelBy(String, i16),
     ApplyMix(usize),

@@ -166,6 +166,7 @@ pub struct Session {
     pub balance: f32,
     pub levels: Levels,
     pub timer: TimerMode,
+    pub timer_hidden: bool,
     pub shuffle: bool,
     pub repeat: Repeat,
 }
@@ -179,6 +180,7 @@ impl Default for Session {
             balance: EVEN,
             levels: Levels::new(),
             timer: TimerMode::Pomodoro,
+            timer_hidden: false,
             shuffle: false,
             repeat: Repeat::All,
         }
