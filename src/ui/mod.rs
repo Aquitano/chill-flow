@@ -730,7 +730,7 @@ mod tests {
     }
 
     #[test]
-    fn a_hidden_side_never_keeps_the_keys_and_a_tab_key_brings_the_library_back() {
+    fn a_hidden_side_never_keeps_the_keys_and_takes_them_when_it_comes_back() {
         let mut app = offline_app();
         let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
         let press = |app: &mut TestApp, ui: &mut Ui, code| {
@@ -750,6 +750,8 @@ mod tests {
 
         assert_eq!(press(&mut app, &mut ui, KeyCode::Char('2')), Panel::Library);
         assert!(!app.library_hidden);
+        assert_eq!(press(&mut app, &mut ui, KeyCode::Char('L')), Panel::Ambience);
+        app.side_hidden = true;
 
         app.library_hidden = true;
         let mut restored = Ui::new(Theme::new(None), Picker::halfblocks(), false);
