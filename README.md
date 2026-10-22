@@ -35,7 +35,7 @@ After a winget install, open a new terminal so the tools are on `PATH`. `chill d
 
 ## Use
 
-`chill` opens with your last scene loaded and paused. Space starts the music and the ambience, and `t` starts the focus timer. Each runs without the other, so you can just listen, and `F` puts the timer away until you need it.
+`chill` opens with your last scene loaded and paused. Space starts the music and the ambience, and `t` starts the focus timer. Each runs without the other, so you can just listen, and `F` puts the timer away until you need it. `H` and `L` put away the library on the left and the ambience and timer on the right, so the player fills the window.
 
 ```bash
 chill                                   # resume where you left off
@@ -54,6 +54,7 @@ Paste a YouTube link anywhere in the app to add it to the library and play it. E
 | `<` / `>` | turn the music or the ambience up against the other |
 | `t` / `T` | start or pause the timer / reset it |
 | `F` | hide the timer until you use it again |
+| `H` / `L` | hide or show the left / right side |
 | `o` | open a YouTube link |
 | `c` | settings |
 | `tab` | move between library, queue, and ambience |

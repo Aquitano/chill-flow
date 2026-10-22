@@ -8,7 +8,7 @@ use image::DynamicImage;
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 
-use crate::action::{Action, Prompt, Removal, Setting, Tab};
+use crate::action::{Action, Panel, Prompt, Removal, Setting, Tab};
 use crate::audio::{Engine, EngineEvent, LoopSource, Noise, StreamInput};
 use crate::catalog::{self, AmbientSound, Catalog, Levels, Mix};
 use crate::config::{self, Config, Paths};
@@ -169,6 +169,8 @@ pub struct App {
     pub balance: f32,
     pub timer: Timer,
     pub timer_hidden: bool,
+    pub library_hidden: bool,
+    pub side_hidden: bool,
     pub focus_days: FocusDays,
     focus_block: Option<FocusBlock>,
     pub stream: Stream,
@@ -243,6 +245,8 @@ impl App {
         let mut app = App {
             timer: Timer::new(session.timer, config.pomodoro),
             timer_hidden: session.timer_hidden,
+            library_hidden: session.library_hidden,
+            side_hidden: session.side_hidden,
             focus_days: store.focus_days(7, &zone).unwrap_or(FocusDays { days: Vec::new() }),
             saved: store.saved().unwrap_or_default(),
             likes: Vec::new(),
@@ -457,6 +461,15 @@ impl App {
 
     pub fn is_playing(&self) -> bool {
         !self.engine.is_paused()
+    }
+
+    /// The queue sits under the player and never hides.
+    pub fn panel_hidden(&self, panel: Panel) -> bool {
+        match panel {
+            Panel::Library => self.library_hidden,
+            Panel::Queue => false,
+            Panel::Ambience => self.side_hidden,
+        }
     }
 
     pub fn current(&self) -> Option<&Item> {
@@ -958,6 +971,8 @@ impl App {
                 self.set_timer_mode(presets[index % presets.len()]);
             }
             Action::ToggleTimerPanel => self.timer_hidden = !self.timer_hidden,
+            Action::ToggleLibraryPanel => self.library_hidden = !self.library_hidden,
+            Action::ToggleSidePanel => self.side_hidden = !self.side_hidden,
             Action::SetLevel(id, level) => {
                 self.set_level(&id, level);
                 self.mix_name = self.matching_mix_name();
@@ -1770,6 +1785,8 @@ impl App {
             levels: self.levels.clone(),
             timer: self.timer.mode(),
             timer_hidden: self.timer_hidden,
+            library_hidden: self.library_hidden,
+            side_hidden: self.side_hidden,
             shuffle: self.queue.shuffle,
             repeat: self.queue.repeat,
         }

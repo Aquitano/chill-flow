@@ -188,6 +188,9 @@ pub enum Action {
     SetTimerMode(TimerMode),
     CycleTimerMode,
     ToggleTimerPanel,
+    ToggleLibraryPanel,
+    /// The ambience panel and the timer beside it.
+    ToggleSidePanel,
     SetLevel(String, u8),
     LevelBy(String, i16),
     ApplyMix(usize),

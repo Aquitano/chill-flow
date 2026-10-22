@@ -351,36 +351,56 @@ impl Ui {
         let split = medium && body.width >= 104;
         let mut clock_shown = false;
         if wide {
-            let library_width = (body.width * 30 / 100).clamp(34, 50);
+            let library_width = if app.library_hidden {
+                0
+            } else {
+                (body.width * 30 / 100).clamp(34, 50)
+            };
+            let side_width = if app.side_hidden { 0 } else { 40 };
             let [library, center, side] = Layout::horizontal([
                 Constraint::Length(library_width),
                 Constraint::Fill(1),
-                Constraint::Length(40),
+                Constraint::Length(side_width),
             ])
             .spacing(1)
             .areas(body);
             let queue_height = (center.height / 5).max(5);
             let [player, queue] =
                 Layout::vertical([Constraint::Fill(1), Constraint::Length(queue_height)]).areas(center);
-            panels::library(buf, library, app, self, now);
+            if !app.library_hidden {
+                panels::library(buf, library, app, self, now);
+            }
             panels::player(buf, player, app, self, now);
             panels::queue(buf, queue, app, self);
-            if app.timer_hidden {
-                panels::ambience(buf, side, app, self, now);
-            } else {
-                let [focus, ambience] = Layout::vertical([Constraint::Length(13), Constraint::Fill(1)]).areas(side);
-                clock_shown = panels::focus(buf, focus, app, self, now);
-                panels::ambience(buf, ambience, app, self, now);
+            if !app.side_hidden {
+                if app.timer_hidden {
+                    panels::ambience(buf, side, app, self, now);
+                } else {
+                    let [focus, ambience] = Layout::vertical([Constraint::Length(13), Constraint::Fill(1)]).areas(side);
+                    clock_shown = panels::focus(buf, focus, app, self, now);
+                    panels::ambience(buf, ambience, app, self, now);
+                }
             }
         } else if medium {
-            let [library, center] = Layout::horizontal([Constraint::Length(36), Constraint::Fill(1)])
+            let library_width = if app.library_hidden { 0 } else { 36 };
+            let [library, center] = Layout::horizontal([Constraint::Length(library_width), Constraint::Fill(1)])
                 .spacing(1)
                 .areas(body);
-            let [player, bottom] = Layout::vertical([Constraint::Fill(1), Constraint::Length(13)]).areas(center);
-            panels::library(buf, library, app, self, now);
+            let bottom_height = if app.side_hidden {
+                (center.height / 5).max(5)
+            } else {
+                13
+            };
+            let [player, bottom] =
+                Layout::vertical([Constraint::Fill(1), Constraint::Length(bottom_height)]).areas(center);
+            if !app.library_hidden {
+                panels::library(buf, library, app, self, now);
+            }
             panels::player(buf, player, app, self, now);
-            let timer = !app.timer_hidden;
-            if split && timer {
+            let timer = !app.timer_hidden && !app.side_hidden;
+            if app.side_hidden {
+                panels::queue(buf, bottom, app, self);
+            } else if split && timer {
                 let [focus, side] = Layout::horizontal([Constraint::Length(40), Constraint::Fill(1)])
                     .spacing(1)
                     .areas(bottom);
@@ -402,9 +422,9 @@ impl Ui {
                 Layout::vertical([Constraint::Fill(1), Constraint::Length(bottom_height)]).areas(body);
             panels::player(buf, player, app, self, now);
             match self.focus {
-                Panel::Library => panels::library(buf, bottom, app, self, now),
-                Panel::Queue => panels::queue(buf, bottom, app, self),
-                Panel::Ambience => panels::ambience(buf, bottom, app, self, now),
+                Panel::Library if !app.library_hidden => panels::library(buf, bottom, app, self, now),
+                Panel::Ambience if !app.side_hidden => panels::ambience(buf, bottom, app, self, now),
+                _ => panels::queue(buf, bottom, app, self),
             }
         }
         let show_timer = !clock_shown && (!app.timer_hidden || app.timer.is_running());
@@ -443,7 +463,7 @@ mod tests {
     }
 
     fn random_event(rng: &mut fastrand::Rng, width: u16, height: u16) -> Event {
-        const KEYS: &str = " npfsrtTxmFo:?ic[]12345adjkhlgG/JK0,.+-<>qyz";
+        const KEYS: &str = " npfsrtTxmFo:?ic[]12345adjkhlgG/JK0,.+-<>qyzHL";
         let code = |rng: &mut fastrand::Rng| match rng.u8(..12) {
             0 => KeyCode::Enter,
             1 => KeyCode::Esc,
@@ -663,6 +683,24 @@ mod tests {
         app.dispatch(Action::TimerToggle);
         app.dispatch(Action::ToggleTimerPanel);
         assert_eq!(draw(&mut app), (true, false));
+    }
+
+    #[test]
+    fn hidden_sides_are_kept_skipped_by_tab_and_a_tab_key_brings_the_library_back() {
+        let mut app = offline_app();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
+        let mut press = |app: &mut TestApp, code| {
+            input::handle(app, &mut ui, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+            ui.focus
+        };
+        press(&mut app, KeyCode::Char('H'));
+        assert_eq!(press(&mut app, KeyCode::Char('L')), Panel::Queue);
+        let session = app.session();
+        assert!(session.library_hidden && session.side_hidden);
+        assert_eq!(press(&mut app, KeyCode::Tab), Panel::Queue);
+
+        assert_eq!(press(&mut app, KeyCode::Char('2')), Panel::Library);
+        assert!(!app.library_hidden);
     }
 
     #[test]

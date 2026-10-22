@@ -35,6 +35,21 @@ fn panel(buf: &mut Buffer, area: Rect, title: &str, glow: f32, ui: &Ui) -> Rect 
     inner
 }
 
+/// A `×` on the panel's top border that puts the panel away.
+fn close_button(buf: &mut Buffer, area: Rect, action: Action, ui: &mut Ui) {
+    if area.height == 0 || area.width < 12 {
+        return;
+    }
+    let close = Rect::new(area.right() - 4, area.y, 3, 1);
+    let color = if ui.hovered(close) {
+        ui.theme.text()
+    } else {
+        ui.theme.faint()
+    };
+    put(buf, close.x, close.y, " × ", Style::new().fg(color));
+    ui.hit(close, Hit::Act(action));
+}
+
 fn centered(buf: &mut Buffer, area: Rect, y: u16, text: &str, style: Style) {
     let text = fit(text, usize::from(area.width));
     let x = area.x + area.width.saturating_sub(text.width() as u16) / 2;
@@ -208,6 +223,7 @@ pub fn library(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instan
     let glow = ui.panel_glow[0].value(now);
     let inner = panel(buf, area, "Library", glow, ui);
     ui.hit(area, Hit::Panel(Panel::Library));
+    close_button(buf, area, Action::ToggleLibraryPanel, ui);
     if inner.height < 4 {
         return;
     }
@@ -762,12 +778,7 @@ pub fn focus(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant)
     let timer = &app.timer;
     let glow = ui.glow.value(now).max(if timer.is_running() { 0.25 } else { 0.0 });
     let inner = panel(buf, area, "Focus", glow, ui);
-    if area.height > 0 && area.width >= 12 {
-        let close = Rect::new(area.right() - 4, area.y, 3, 1);
-        let close_color = if ui.hovered(close) { theme.text() } else { theme.faint() };
-        put(buf, close.x, close.y, " × ", Style::new().fg(close_color));
-        ui.hit(close, Hit::Act(Action::ToggleTimerPanel));
-    }
+    close_button(buf, area, Action::ToggleTimerPanel, ui);
     if inner.height < 8 || inner.width < 34 {
         return false;
     }
@@ -865,6 +876,7 @@ pub fn ambience(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Insta
     let glow = ui.panel_glow[2].value(now);
     let inner = panel(buf, area, "Ambience", glow, ui);
     ui.hit(area, Hit::Panel(Panel::Ambience));
+    close_button(buf, area, Action::ToggleSidePanel, ui);
     if inner.height < 3 || inner.width < 20 {
         return;
     }
