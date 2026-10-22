@@ -17,6 +17,7 @@ use ratatui_image::{FilterType, Resize, StatefulImage};
 
 use crate::action::{Action, Panel, Prompt, Tab};
 use crate::app::{App, Event, Tone};
+use crate::model::Source;
 use anim::{Bars, Tween};
 use picture::{Picture, Scene, Weather};
 use theme::Theme;
@@ -394,7 +395,7 @@ impl Ui {
             ])
             .spacing(1)
             .areas(body);
-            let queue_height = (center.height / 5).max(5);
+            let queue_height = queue_height(app, center);
             let [player, queue] =
                 Layout::vertical([Constraint::Fill(1), Constraint::Length(queue_height)]).areas(center);
             if !app.library_hidden {
@@ -416,11 +417,7 @@ impl Ui {
             let [library, center] = Layout::horizontal([Constraint::Length(library_width), Constraint::Fill(1)])
                 .spacing(1)
                 .areas(body);
-            let bottom_height = if app.side_hidden {
-                (center.height / 5).max(5)
-            } else {
-                13
-            };
+            let bottom_height = if app.side_hidden { queue_height(app, center) } else { 13 };
             let [player, bottom] =
                 Layout::vertical([Constraint::Fill(1), Constraint::Length(bottom_height)]).areas(center);
             if !app.library_hidden {
@@ -476,6 +473,17 @@ impl Ui {
         let cover = self.cover.as_ref()?;
         (Some(cover.url.as_str()) == url).then_some(cover.aspect)
     }
+}
+
+/// Room for what's up next and its border, up to a fifth of `center`, so a short queue leaves the
+/// rest to the player.
+fn queue_height(app: &App, center: Rect) -> u16 {
+    let upcoming = if app.source == Source::Soundscape {
+        0
+    } else {
+        app.queue.upcoming().count()
+    };
+    (upcoming as u16 + 2).clamp(3, (center.height / 5).max(5))
 }
 
 #[cfg(test)]
@@ -744,7 +752,7 @@ mod tests {
     }
 
     #[test]
-    fn a_picture_takes_the_place_of_the_cover_and_spectrum_below_the_title() {
+    fn a_picture_takes_the_place_of_the_cover_and_spectrum_with_the_title_over_it() {
         let mut app = offline_app();
         let mut ui = Ui::new(
             Theme::new(Some(([205, 214, 244], [30, 30, 46]))),
