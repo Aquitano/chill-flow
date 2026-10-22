@@ -69,7 +69,7 @@ The slider between music and ambience at the top of the Ambience panel turns one
 
 The player shows the cover of what's playing, or `v` swaps it for a moving picture drawn in text: Night lake, Fuji at dawn, or Autumn pagoda. A picture moves while something plays and shows the ambience you hear: rain falls while a rain sound plays, thunder lights up the sky, wind sways trees and water, and crickets bring out fireflies, each as strongly as the music and ambience balance lets you hear it. Night lake uses your terminal's colors; the other two bring their own. **Settings** chooses the picture and what draws it. Auto, the default, draws Night lake in braille dots. Fuji at dawn and Autumn pagoda get blocks once the player has room for each of their pixels, as when both sides are put away, and crisp pixels before that. Blocks show each pixel as a solid cell with a thin seam beside it and work in any font. Pixels keep a painting crisp at eight to a cell, and Smooth paints it finer and scales it smoothly. Both, and the solid shapes among the dots such as Night lake's boat, use octant characters from Unicode 16; Ghostty draws them itself, and other terminals need a font that has them.
 
-![Autumn pagoda in the player with the library put away, while Rainy study's rain and thunder play over it](docs/pictures.png)
+![Fuji at dawn filling the player with both sides put away, drawn in blocks](docs/pictures.png)
 
 Focus stats count every minute a focus block ran, including blocks you stopped early. Breaks never count. The header shows today's total and a seven-day sparkline; press `i` for the chart.
 
