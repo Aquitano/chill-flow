@@ -25,6 +25,7 @@ struct History {
 
 pub struct Diagnostics {
     history: History,
+    history_loaded: bool,
     pub path: PathBuf,
     pub log_error: Option<String>,
 }
@@ -50,13 +51,17 @@ impl Diagnostics {
         match loaded {
             Ok(history) => Self {
                 history,
+                history_loaded: true,
                 path,
                 log_error: None,
             },
             Err(error) => Self {
                 history: History::default(),
+                history_loaded: false,
                 path,
-                log_error: Some(format!("Could not read diagnostic log: {error}")),
+                log_error: Some(format!(
+                    "Could not read diagnostic log: {error}. New entries stay in memory. Restore access to the log and restart chill to resume saving."
+                )),
             },
         }
     }
@@ -119,6 +124,9 @@ impl Diagnostics {
     }
 
     fn save(&mut self) {
+        if !self.history_loaded {
+            return;
+        }
         let result = (|| -> anyhow::Result<()> {
             let mut file =
                 tempfile::NamedTempFile::new_in(self.path.parent().unwrap_or_else(|| std::path::Path::new(".")))?;
@@ -184,6 +192,35 @@ mod tests {
         restored.record("ffmpeg is missing", None);
         assert_eq!(restored.pending(), 1);
         assert_eq!(restored.entries()[0].occurrences, 2);
+    }
+
+    #[test]
+    fn unreadable_history_survives_new_notices_until_successful_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("diagnostics.json");
+        let mut original = Diagnostics::new(path.clone());
+        original.record("earlier unresolved failure", None);
+        let valid = std::fs::read(&path).unwrap();
+        let mut unreadable = valid.clone();
+        unreadable.push(0xff);
+        std::fs::write(&path, &unreadable).unwrap();
+
+        let mut failed = Diagnostics::new(path.clone());
+        assert!(failed.log_error.is_some());
+        failed.record("new failure", None);
+        failed.dismiss(0);
+        failed.dismiss_overflow();
+        assert_eq!(std::fs::read(&path).unwrap(), unreadable);
+        assert_eq!(failed.entries()[0].message, "new failure");
+
+        std::fs::write(&path, &valid).unwrap();
+        failed.record("another failure", None);
+        assert_eq!(std::fs::read(&path).unwrap(), valid);
+        let mut recovered = Diagnostics::new(path.clone());
+        assert!(recovered.log_error.is_none());
+        assert_eq!(recovered.entries()[0].message, "earlier unresolved failure");
+        recovered.record("failure after recovery", None);
+        assert_eq!(Diagnostics::new(path).entries().len(), 2);
     }
 
     #[test]
