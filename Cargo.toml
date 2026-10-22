@@ -18,7 +18,7 @@ ureq = "3.4.2"
 
 [dependencies]
 anyhow.workspace = true
-axoupdater = { version = "0.10.3", features = ["blocking"] }
+axoupdater = "0.10.3"
 catalog-schema = { path = "crates/catalog-schema" }
 clap.workspace = true
 cpal = "0.18.2"
@@ -40,6 +40,7 @@ sha2 = "0.10.9"
 souvlaki = { version = "0.8.3", default-features = false, features = ["use_zbus"] }
 tempfile = "3.27.0"
 terminal-colorsaurus = "1.0.3"
+tokio = { version = "1.54.1", features = ["rt", "net", "time"] }
 toml = "1.1.8"
 toml_edit = "0.25.17"
 unicode-width = "0.2.2"
