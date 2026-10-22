@@ -736,6 +736,11 @@ mod tests {
 
         assert_eq!(press(&mut app, &mut ui, KeyCode::Char('2')), Panel::Library);
         assert!(!app.library_hidden);
+
+        app.library_hidden = true;
+        let mut restored = Ui::new(Theme::new(None), Picker::halfblocks(), false);
+        restored.absorb(&mut app, Instant::now());
+        assert_eq!(restored.focus, Panel::Queue);
     }
 
     #[test]
