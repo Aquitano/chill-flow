@@ -215,6 +215,7 @@ mod tests {
         .unwrap();
         assert_eq!(legacy_session.playback.key(), Some("r2:old"));
         assert_eq!(legacy_session.volume, Session::default().volume);
+        assert!(!legacy_session.library_hidden && !legacy_session.side_hidden);
 
         let item = serde_json::json!({
             "key": "yt:queued",

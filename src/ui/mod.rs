@@ -292,7 +292,15 @@ impl Ui {
         self.overlay.is_none() && self.hover.is_some_and(|(x, y)| rect.contains((x, y).into()))
     }
 
+    /// Moves focus off a panel that's put away, which a restored session can start on.
+    pub fn keep_focus_visible(&mut self, app: &App) {
+        if app.panel_hidden(self.focus) {
+            self.set_focus(Panel::Queue);
+        }
+    }
+
     fn absorb(&mut self, app: &mut App, now: Instant) {
+        self.keep_focus_visible(app);
         let motion = !app.config.reduce_motion;
         if self.motion && !motion {
             self.settle();
@@ -701,20 +709,25 @@ mod tests {
     }
 
     #[test]
-    fn hidden_sides_are_kept_skipped_by_tab_and_a_tab_key_brings_the_library_back() {
+    fn a_hidden_side_never_keeps_the_keys_and_a_tab_key_brings_the_library_back() {
         let mut app = offline_app();
         let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
-        let mut press = |app: &mut TestApp, code| {
-            input::handle(app, &mut ui, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+        let press = |app: &mut TestApp, ui: &mut Ui, code| {
+            input::handle(app, ui, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
             ui.focus
         };
-        press(&mut app, KeyCode::Char('H'));
-        assert_eq!(press(&mut app, KeyCode::Char('L')), Panel::Queue);
+        press(&mut app, &mut ui, KeyCode::Char('/'));
+        press(&mut app, &mut ui, KeyCode::Char('r'));
+        input::apply(&mut app, &mut ui, Action::ToggleLibraryPanel);
+        assert!(!ui.filtering && app.filter.is_empty());
+
+        assert_eq!(press(&mut app, &mut ui, KeyCode::Char('L')), Panel::Queue);
         let session = app.session();
         assert!(session.library_hidden && session.side_hidden);
-        assert_eq!(press(&mut app, KeyCode::Tab), Panel::Queue);
+        assert_eq!(press(&mut app, &mut ui, KeyCode::Tab), Panel::Queue);
+        assert_eq!(press(&mut app, &mut ui, KeyCode::Esc), Panel::Queue);
 
-        assert_eq!(press(&mut app, KeyCode::Char('2')), Panel::Library);
+        assert_eq!(press(&mut app, &mut ui, KeyCode::Char('2')), Panel::Library);
         assert!(!app.library_hidden);
     }
 

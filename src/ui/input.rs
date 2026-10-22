@@ -67,11 +67,14 @@ pub fn apply(app: &mut App, ui: &mut Ui, action: Action) {
         }
         Action::ToggleLibraryPanel | Action::ToggleSidePanel => {
             app.dispatch(action);
-            if app.panel_hidden(ui.focus) {
-                ui.set_focus(Panel::Queue);
+            if app.library_hidden && ui.filtering {
+                ui.filtering = false;
+                app.filter.clear();
             }
+            ui.keep_focus_visible(app);
         }
-        Action::Focus(panel) => ui.set_focus(panel),
+        Action::Focus(panel) if !app.panel_hidden(panel) => ui.set_focus(panel),
+        Action::Focus(_) => {}
         Action::OpenPrompt(kind) => ui.open(Overlay::Prompt {
             kind,
             input: String::new(),
