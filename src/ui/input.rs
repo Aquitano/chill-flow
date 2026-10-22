@@ -61,10 +61,20 @@ pub fn handle(app: &mut App, ui: &mut Ui, event: Event) {
 pub fn apply(app: &mut App, ui: &mut Ui, action: Action) {
     match action {
         Action::ShowTab(tab) => {
+            app.library_hidden = false;
             ui.show_tab(app, tab);
             ui.set_focus(Panel::Library);
         }
-        Action::Focus(panel) => ui.set_focus(panel),
+        Action::ToggleLibraryPanel | Action::ToggleSidePanel => {
+            app.dispatch(action);
+            if app.library_hidden && ui.filtering {
+                ui.filtering = false;
+                app.filter.clear();
+            }
+            ui.keep_focus_visible(app);
+        }
+        Action::Focus(panel) if !app.panel_hidden(panel) => ui.set_focus(panel),
+        Action::Focus(_) => {}
         Action::OpenPrompt(kind) => ui.open(Overlay::Prompt {
             kind,
             input: String::new(),
@@ -160,6 +170,7 @@ fn key_pressed(app: &mut App, ui: &mut Ui, key: KeyEvent) {
         return;
     }
     if key.code == KeyCode::Char('/') {
+        app.library_hidden = false;
         ui.set_focus(Panel::Library);
         ui.filtering = true;
         return;
@@ -183,6 +194,9 @@ fn key_pressed(app: &mut App, ui: &mut Ui, key: KeyEvent) {
         KeyCode::Char('x') => Some(Action::TimerSkip),
         KeyCode::Char('m') => Some(Action::CycleTimerMode),
         KeyCode::Char('F') => Some(Action::ToggleTimerPanel),
+        KeyCode::Char('H') => Some(Action::ToggleLibraryPanel),
+        KeyCode::Char('L') => Some(Action::ToggleSidePanel),
+        KeyCode::Char('v') => Some(Action::AdjustSetting(Setting::Picture, 1)),
         KeyCode::Char('o') => Some(Action::OpenPrompt(Prompt::OpenUrl)),
         KeyCode::Char(':') => Some(Action::OpenPalette),
         KeyCode::Char('?') => Some(Action::OpenHelp),
@@ -193,8 +207,8 @@ fn key_pressed(app: &mut App, ui: &mut Ui, key: KeyEvent) {
         KeyCode::Char(digit @ '1'..='5') => Tab::ALL
             .get(digit as usize - '1' as usize)
             .map(|tab| Action::ShowTab(*tab)),
-        KeyCode::Tab => Some(Action::Focus(next_panel(ui.focus, 1))),
-        KeyCode::BackTab => Some(Action::Focus(next_panel(ui.focus, -1))),
+        KeyCode::Tab => Some(Action::Focus(next_panel(app, ui.focus, 1))),
+        KeyCode::BackTab => Some(Action::Focus(next_panel(app, ui.focus, -1))),
         _ => None,
     };
     if let Some(action) = global {
@@ -207,10 +221,14 @@ fn key_pressed(app: &mut App, ui: &mut Ui, key: KeyEvent) {
     }
 }
 
-fn next_panel(panel: Panel, step: isize) -> Panel {
+/// The next panel that's showing; the queue always is.
+fn next_panel(app: &App, panel: Panel, step: isize) -> Panel {
     const ORDER: [Panel; 3] = [Panel::Library, Panel::Queue, Panel::Ambience];
     let index = ORDER.iter().position(|candidate| *candidate == panel).unwrap_or(0) as isize;
-    ORDER[(index + step).rem_euclid(3) as usize]
+    (1..=3)
+        .map(|offset| ORDER[(index + step * offset).rem_euclid(3) as usize])
+        .find(|panel| !app.panel_hidden(*panel))
+        .unwrap_or(Panel::Queue)
 }
 
 fn moved(current: usize, len: usize, key: KeyCode) -> Option<usize> {

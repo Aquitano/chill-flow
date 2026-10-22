@@ -9,10 +9,11 @@ use unicode_width::UnicodeWidthStr;
 
 use super::widgets::{self, fill, fit, meter, put, wrap};
 use super::{Hit, Slider, Ui};
-use crate::action::{Action, Panel, Prompt, Tab};
+use crate::action::{Action, Panel, Prompt, Setting, Tab};
 use crate::app::{App, Stream, format_clock};
 use crate::model::{Repeat, Source};
 use crate::timer::{Phase, TimerMode};
+use crate::ui::picture::Picture;
 
 const TAB_SLIDE: Duration = Duration::from_millis(220);
 
@@ -33,6 +34,21 @@ fn panel(buf: &mut Buffer, area: Rect, title: &str, glow: f32, ui: &Ui) -> Rect 
     let inner = block.inner(area);
     block.render(area, buf);
     inner
+}
+
+/// A `×` on the panel's top border that puts the panel away.
+fn close_button(buf: &mut Buffer, area: Rect, action: Action, ui: &mut Ui) {
+    if area.height == 0 || area.width < 12 {
+        return;
+    }
+    let close = Rect::new(area.right() - 4, area.y, 3, 1);
+    let color = if ui.hovered(close) {
+        ui.theme.text()
+    } else {
+        ui.theme.faint()
+    };
+    put(buf, close.x, close.y, " × ", Style::new().fg(color));
+    ui.hit(close, Hit::Act(action));
 }
 
 fn centered(buf: &mut Buffer, area: Rect, y: u16, text: &str, style: Style) {
@@ -208,6 +224,7 @@ pub fn library(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instan
     let glow = ui.panel_glow[0].value(now);
     let inner = panel(buf, area, "Library", glow, ui);
     ui.hit(area, Hit::Panel(Panel::Library));
+    close_button(buf, area, Action::ToggleLibraryPanel, ui);
     if inner.height < 4 {
         return;
     }
@@ -387,30 +404,40 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
 
     let controls_y = inner.bottom() - 1;
     let progress_y = controls_y.saturating_sub(2);
-    let cover_height = (inner.height * 3 / 10)
-        .clamp(5, 12)
-        .min(progress_y.saturating_sub(inner.y + 1));
-    let aspect = ui.cover_for(item.as_ref().and_then(|item| item.cover.as_deref()));
-    let cover_width = ((f32::from(cover_height) * 2.0 * aspect.unwrap_or(1.0)).round() as u16).min(inner.width / 2);
-    let cover = Rect::new(inner.x, inner.y, cover_width, cover_height);
-    fill(buf, cover, Style::new().bg(theme.surface()));
-    let (glyph, glyph_color) = if soundscape {
-        ("≋", theme.calm)
+    let picture = app.config.picture;
+    let cover = if picture == Picture::Cover {
+        let cover_height = (inner.height * 3 / 10)
+            .clamp(5, 12)
+            .min(progress_y.saturating_sub(inner.y + 1));
+        let aspect = ui.cover_for(item.as_ref().and_then(|item| item.cover.as_deref()));
+        let cover_width = ((f32::from(cover_height) * 2.0 * aspect.unwrap_or(1.0)).round() as u16).min(inner.width / 2);
+        let cover = Rect::new(inner.x, inner.y, cover_width, cover_height);
+        fill(buf, cover, Style::new().bg(theme.surface()));
+        let (glyph, glyph_color) = if soundscape {
+            ("≋", theme.calm)
+        } else {
+            ("♪", theme.faint())
+        };
+        put(
+            buf,
+            cover.x + cover.width / 2,
+            cover.y + cover.height / 2,
+            glyph,
+            Style::new().fg(glyph_color).bg(theme.surface()),
+        );
+        if aspect.is_some() {
+            ui.cover_rect = Some(cover);
+        }
+        cover
     } else {
-        ("♪", theme.faint())
+        Rect::new(inner.x, inner.y, 0, 0)
     };
-    put(
-        buf,
-        cover.x + cover.width / 2,
-        cover.y + cover.height / 2,
-        glyph,
-        Style::new().fg(glyph_color).bg(theme.surface()),
-    );
-    if aspect.is_some() {
-        ui.cover_rect = Some(cover);
-    }
 
-    let meta_x = cover.right() + 3;
+    let meta_x = if picture == Picture::Cover {
+        cover.right() + 3
+    } else {
+        inner.x
+    };
     let meta_width = inner.right().saturating_sub(meta_x);
     let meta_y = cover.y + cover.height.saturating_sub(5) / 2;
     let width = usize::from(meta_width);
@@ -519,12 +546,25 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
         put(buf, x, status_y, &text, style);
     }
 
-    let viz_top = cover.bottom() + 1;
-    let viz = Rect::new(inner.x, viz_top, inner.width, progress_y.saturating_sub(viz_top + 1));
-    if ui.motion && viz.height >= 2 {
-        let count = usize::from((viz.width / 3).clamp(8, 64));
-        ui.bars.resize(count);
-        widgets::spectrum(buf, viz, &ui.bars.levels, &ui.bars.peaks, &theme);
+    if picture == Picture::Cover {
+        let viz_top = cover.bottom() + 1;
+        let viz = Rect::new(inner.x, viz_top, inner.width, progress_y.saturating_sub(viz_top + 1));
+        if ui.motion && viz.height >= 2 {
+            let count = usize::from((viz.width / 3).clamp(8, 64));
+            ui.bars.resize(count);
+            widgets::spectrum(buf, viz, &ui.bars.levels, &ui.bars.peaks, &theme);
+        }
+    } else {
+        if inner.width >= 44 && status_y < progress_y {
+            picture_picker(buf, Rect::new(inner.x, status_y, inner.width, 1), picture, ui);
+        }
+        // The picture reaches the panel's edges; only the words keep their margin.
+        let top = status_y + 2;
+        let frame = Rect::new(area.x, top, area.width, progress_y.saturating_sub(top + 1));
+        if frame.height >= 3 {
+            let weather = ui.weather(app, now);
+            ui.scene.draw(buf, frame, picture, app.config.look, weather, &theme);
+        }
     }
 
     match &item {
@@ -588,6 +628,24 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
     }
 
     controls(buf, inner, controls_y, app, ui);
+}
+
+/// `‹ Night lake ›` at the right end of `row`, stepping through the pictures.
+fn picture_picker(buf: &mut Buffer, row: Rect, picture: Picture, ui: &mut Ui) {
+    let theme = ui.theme;
+    let label = picture.label();
+    let right = row.right().saturating_sub(1);
+    let left = right.saturating_sub(label.width() as u16 + 3);
+    let name = Rect::new(left + 2, row.y, label.width() as u16, 1);
+    let name_color = if ui.hovered(name) { theme.text() } else { theme.muted() };
+    put(buf, name.x, row.y, label, Style::new().fg(name_color));
+    ui.hit(name, Hit::Act(Action::AdjustSetting(Setting::Picture, 1)));
+    for (symbol, x, step) in [("‹", left, -1), ("›", right, 1)] {
+        let rect = Rect::new(x.saturating_sub(1), row.y, 3, 1);
+        let color = if ui.hovered(rect) { theme.accent } else { theme.faint() };
+        put(buf, x, row.y, symbol, Style::new().fg(color));
+        ui.hit(rect, Hit::Act(Action::AdjustSetting(Setting::Picture, step)));
+    }
 }
 
 fn controls(buf: &mut Buffer, inner: Rect, y: u16, app: &App, ui: &mut Ui) {
@@ -762,12 +820,7 @@ pub fn focus(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant)
     let timer = &app.timer;
     let glow = ui.glow.value(now).max(if timer.is_running() { 0.25 } else { 0.0 });
     let inner = panel(buf, area, "Focus", glow, ui);
-    if area.height > 0 && area.width >= 12 {
-        let close = Rect::new(area.right() - 4, area.y, 3, 1);
-        let close_color = if ui.hovered(close) { theme.text() } else { theme.faint() };
-        put(buf, close.x, close.y, " × ", Style::new().fg(close_color));
-        ui.hit(close, Hit::Act(Action::ToggleTimerPanel));
-    }
+    close_button(buf, area, Action::ToggleTimerPanel, ui);
     if inner.height < 8 || inner.width < 34 {
         return false;
     }
@@ -865,6 +918,7 @@ pub fn ambience(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Insta
     let glow = ui.panel_glow[2].value(now);
     let inner = panel(buf, area, "Ambience", glow, ui);
     ui.hit(area, Hit::Panel(Panel::Ambience));
+    close_button(buf, area, Action::ToggleSidePanel, ui);
     if inner.height < 3 || inner.width < 20 {
         return;
     }

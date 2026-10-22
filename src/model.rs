@@ -167,6 +167,8 @@ pub struct Session {
     pub levels: Levels,
     pub timer: TimerMode,
     pub timer_hidden: bool,
+    pub library_hidden: bool,
+    pub side_hidden: bool,
     pub shuffle: bool,
     pub repeat: Repeat,
 }
@@ -181,6 +183,8 @@ impl Default for Session {
             levels: Levels::new(),
             timer: TimerMode::Pomodoro,
             timer_hidden: false,
+            library_hidden: false,
+            side_hidden: false,
             shuffle: false,
             repeat: Repeat::All,
         }
@@ -211,6 +215,7 @@ mod tests {
         .unwrap();
         assert_eq!(legacy_session.playback.key(), Some("r2:old"));
         assert_eq!(legacy_session.volume, Session::default().volume);
+        assert!(!legacy_session.library_hidden && !legacy_session.side_hidden);
 
         let item = serde_json::json!({
             "key": "yt:queued",

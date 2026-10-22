@@ -2,6 +2,7 @@ pub mod anim;
 pub mod input;
 mod overlay;
 mod panels;
+pub mod picture;
 pub mod theme;
 pub mod widgets;
 
@@ -17,6 +18,7 @@ use ratatui_image::{FilterType, Resize, StatefulImage};
 use crate::action::{Action, Panel, Prompt, Tab};
 use crate::app::{App, Event, Tone};
 use anim::{Bars, Tween};
+use picture::{Picture, Scene, Weather};
 use theme::Theme;
 
 pub enum Overlay {
@@ -97,6 +99,7 @@ pub struct Ui {
     cover_rect: Option<Rect>,
     dialog_area: Option<Rect>,
     bars: Bars,
+    scene: Scene,
     tab_x: Tween,
     tab_width: Tween,
     volume: Tween,
@@ -140,6 +143,7 @@ impl Ui {
             cover_rect: None,
             dialog_area: None,
             bars: Bars::default(),
+            scene: Scene::default(),
             tab_x: Tween::new(0.0),
             tab_width: Tween::new(0.0),
             volume: Tween::new(0.0),
@@ -236,6 +240,16 @@ impl Ui {
         }
     }
 
+    /// The ambience as pictures show it: eased like the sliders, and as loud as the balance
+    /// lets it be heard over the music.
+    fn weather(&self, app: &App, now: Instant) -> Weather {
+        let heard = app.ambience_heard();
+        Weather::from_sounds(app.catalog.ambient.iter().map(|sound| {
+            let level = self.levels.get(&sound.id).map_or(0.0, |tween| tween.value(now));
+            (sound.id.as_str(), level * heard)
+        }))
+    }
+
     pub fn show_tab(&mut self, app: &mut App, tab: Tab) {
         if app.tab == tab {
             return;
@@ -280,7 +294,15 @@ impl Ui {
         self.overlay.is_none() && self.hover.is_some_and(|(x, y)| rect.contains((x, y).into()))
     }
 
+    /// Moves focus off a panel that's put away, which a restored session can start on.
+    pub fn keep_focus_visible(&mut self, app: &App) {
+        if app.panel_hidden(self.focus) {
+            self.set_focus(Panel::Queue);
+        }
+    }
+
     fn absorb(&mut self, app: &mut App, now: Instant) {
+        self.keep_focus_visible(app);
         let motion = !app.config.reduce_motion;
         if self.motion && !motion {
             self.settle();
@@ -333,8 +355,16 @@ impl Ui {
         self.last_frame = now;
         self.absorb(app, now);
         if self.motion {
-            app.engine.spectrum(self.bars.raw_mut());
+            // A picture stands in for the spectrum, so its bars just fall still.
+            if app.config.picture == Picture::Cover {
+                app.engine.spectrum(self.bars.raw_mut());
+            } else {
+                self.bars.raw_mut().fill(0.0);
+            }
             self.bars.update(elapsed.as_secs_f32().min(0.1));
+            if app.is_playing() {
+                self.scene.advance(elapsed.as_secs_f32().min(0.1));
+            }
         }
         self.toasts.retain(|toast| now.duration_since(toast.born) < toast.life);
         self.hits.clear();
@@ -351,36 +381,56 @@ impl Ui {
         let split = medium && body.width >= 104;
         let mut clock_shown = false;
         if wide {
-            let library_width = (body.width * 30 / 100).clamp(34, 50);
+            let library_width = if app.library_hidden {
+                0
+            } else {
+                (body.width * 30 / 100).clamp(34, 50)
+            };
+            let side_width = if app.side_hidden { 0 } else { 40 };
             let [library, center, side] = Layout::horizontal([
                 Constraint::Length(library_width),
                 Constraint::Fill(1),
-                Constraint::Length(40),
+                Constraint::Length(side_width),
             ])
             .spacing(1)
             .areas(body);
             let queue_height = (center.height / 5).max(5);
             let [player, queue] =
                 Layout::vertical([Constraint::Fill(1), Constraint::Length(queue_height)]).areas(center);
-            panels::library(buf, library, app, self, now);
+            if !app.library_hidden {
+                panels::library(buf, library, app, self, now);
+            }
             panels::player(buf, player, app, self, now);
             panels::queue(buf, queue, app, self);
-            if app.timer_hidden {
-                panels::ambience(buf, side, app, self, now);
-            } else {
-                let [focus, ambience] = Layout::vertical([Constraint::Length(13), Constraint::Fill(1)]).areas(side);
-                clock_shown = panels::focus(buf, focus, app, self, now);
-                panels::ambience(buf, ambience, app, self, now);
+            if !app.side_hidden {
+                if app.timer_hidden {
+                    panels::ambience(buf, side, app, self, now);
+                } else {
+                    let [focus, ambience] = Layout::vertical([Constraint::Length(13), Constraint::Fill(1)]).areas(side);
+                    clock_shown = panels::focus(buf, focus, app, self, now);
+                    panels::ambience(buf, ambience, app, self, now);
+                }
             }
         } else if medium {
-            let [library, center] = Layout::horizontal([Constraint::Length(36), Constraint::Fill(1)])
+            let library_width = if app.library_hidden { 0 } else { 36 };
+            let [library, center] = Layout::horizontal([Constraint::Length(library_width), Constraint::Fill(1)])
                 .spacing(1)
                 .areas(body);
-            let [player, bottom] = Layout::vertical([Constraint::Fill(1), Constraint::Length(13)]).areas(center);
-            panels::library(buf, library, app, self, now);
+            let bottom_height = if app.side_hidden {
+                (center.height / 5).max(5)
+            } else {
+                13
+            };
+            let [player, bottom] =
+                Layout::vertical([Constraint::Fill(1), Constraint::Length(bottom_height)]).areas(center);
+            if !app.library_hidden {
+                panels::library(buf, library, app, self, now);
+            }
             panels::player(buf, player, app, self, now);
-            let timer = !app.timer_hidden;
-            if split && timer {
+            let timer = !app.timer_hidden && !app.side_hidden;
+            if app.side_hidden {
+                panels::queue(buf, bottom, app, self);
+            } else if split && timer {
                 let [focus, side] = Layout::horizontal([Constraint::Length(40), Constraint::Fill(1)])
                     .spacing(1)
                     .areas(bottom);
@@ -402,9 +452,9 @@ impl Ui {
                 Layout::vertical([Constraint::Fill(1), Constraint::Length(bottom_height)]).areas(body);
             panels::player(buf, player, app, self, now);
             match self.focus {
-                Panel::Library => panels::library(buf, bottom, app, self, now),
-                Panel::Queue => panels::queue(buf, bottom, app, self),
-                Panel::Ambience => panels::ambience(buf, bottom, app, self, now),
+                Panel::Library if !app.library_hidden => panels::library(buf, bottom, app, self, now),
+                Panel::Ambience if !app.side_hidden => panels::ambience(buf, bottom, app, self, now),
+                _ => panels::queue(buf, bottom, app, self),
             }
         }
         let show_timer = !clock_shown && (!app.timer_hidden || app.timer.is_running());
@@ -443,7 +493,7 @@ mod tests {
     }
 
     fn random_event(rng: &mut fastrand::Rng, width: u16, height: u16) -> Event {
-        const KEYS: &str = " npfsrtTxmFo:?ic[]12345adjkhlgG/JK0,.+-<>qyz";
+        const KEYS: &str = " npfsrtTxmFo:?ic[]12345adjkhlgG/JK0,.+-<>qyzvHL";
         let code = |rng: &mut fastrand::Rng| match rng.u8(..12) {
             0 => KeyCode::Enter,
             1 => KeyCode::Esc,
@@ -663,6 +713,57 @@ mod tests {
         app.dispatch(Action::TimerToggle);
         app.dispatch(Action::ToggleTimerPanel);
         assert_eq!(draw(&mut app), (true, false));
+    }
+
+    #[test]
+    fn a_hidden_side_never_keeps_the_keys_and_a_tab_key_brings_the_library_back() {
+        let mut app = offline_app();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
+        let press = |app: &mut TestApp, ui: &mut Ui, code| {
+            input::handle(app, ui, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+            ui.focus
+        };
+        press(&mut app, &mut ui, KeyCode::Char('/'));
+        press(&mut app, &mut ui, KeyCode::Char('r'));
+        input::apply(&mut app, &mut ui, Action::ToggleLibraryPanel);
+        assert!(!ui.filtering && app.filter.is_empty());
+
+        assert_eq!(press(&mut app, &mut ui, KeyCode::Char('L')), Panel::Queue);
+        let session = app.session();
+        assert!(session.library_hidden && session.side_hidden);
+        assert_eq!(press(&mut app, &mut ui, KeyCode::Tab), Panel::Queue);
+        assert_eq!(press(&mut app, &mut ui, KeyCode::Esc), Panel::Queue);
+
+        assert_eq!(press(&mut app, &mut ui, KeyCode::Char('2')), Panel::Library);
+        assert!(!app.library_hidden);
+
+        app.library_hidden = true;
+        let mut restored = Ui::new(Theme::new(None), Picker::halfblocks(), false);
+        restored.absorb(&mut app, Instant::now());
+        assert_eq!(restored.focus, Panel::Queue);
+    }
+
+    #[test]
+    fn a_picture_takes_the_place_of_the_cover_and_spectrum_below_the_title() {
+        let mut app = offline_app();
+        let mut ui = Ui::new(
+            Theme::new(Some(([205, 214, 244], [30, 30, 46]))),
+            Picker::halfblocks(),
+            false,
+        );
+        let title = app.current().map(|item| item.title.clone()).unwrap_or_default();
+        let mut terminal = Terminal::new(TestBackend::new(160, 44)).unwrap();
+        let mut draw = |app: &mut TestApp| {
+            terminal.draw(|frame| ui.draw(frame, app)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let page: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+            let dotted = page.chars().any(|ch| ('\u{2801}'..='\u{28ff}').contains(&ch));
+            (page.contains(&title), dotted)
+        };
+        assert_eq!(draw(&mut app), (true, false));
+
+        app.dispatch(Action::SetPicture(picture::Picture::NightLake));
+        assert_eq!(draw(&mut app), (true, true));
     }
 
     #[test]

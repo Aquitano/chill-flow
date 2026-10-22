@@ -8,7 +8,7 @@ use image::DynamicImage;
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 
-use crate::action::{Action, Prompt, Removal, Setting, Tab};
+use crate::action::{Action, Panel, Prompt, Removal, Setting, Tab};
 use crate::audio::{Engine, EngineEvent, LoopSource, Noise, StreamInput};
 use crate::catalog::{self, AmbientSound, Catalog, Levels, Mix};
 use crate::config::{self, Config, Paths};
@@ -19,6 +19,7 @@ use crate::store::{FocusDays, Store};
 use crate::sync;
 use crate::timer::{Phase, PhaseEnded, Timer, TimerMode};
 use crate::tools::Tool;
+use crate::ui::picture::Picture;
 use crate::youtube;
 
 pub enum Job {
@@ -169,6 +170,8 @@ pub struct App {
     pub balance: f32,
     pub timer: Timer,
     pub timer_hidden: bool,
+    pub library_hidden: bool,
+    pub side_hidden: bool,
     pub focus_days: FocusDays,
     focus_block: Option<FocusBlock>,
     pub stream: Stream,
@@ -243,6 +246,8 @@ impl App {
         let mut app = App {
             timer: Timer::new(session.timer, config.pomodoro),
             timer_hidden: session.timer_hidden,
+            library_hidden: session.library_hidden,
+            side_hidden: session.side_hidden,
             focus_days: store.focus_days(7, &zone).unwrap_or(FocusDays { days: Vec::new() }),
             saved: store.saved().unwrap_or_default(),
             likes: Vec::new(),
@@ -457,6 +462,15 @@ impl App {
 
     pub fn is_playing(&self) -> bool {
         !self.engine.is_paused()
+    }
+
+    /// The queue sits under the player and never hides.
+    pub fn panel_hidden(&self, panel: Panel) -> bool {
+        match panel {
+            Panel::Library => self.library_hidden,
+            Panel::Queue => false,
+            Panel::Ambience => self.side_hidden,
+        }
     }
 
     pub fn current(&self) -> Option<&Item> {
@@ -807,7 +821,16 @@ impl App {
     }
 
     fn load_cover(&mut self) {
-        let Some(url) = self.current().and_then(|item| item.cover.clone()) else {
+        let wanted = self.current().and_then(|item| item.cover.clone());
+        if self.config.picture != Picture::Cover {
+            // A cover still downloading for an earlier track is dropped when it arrives, so it
+            // mustn't count as fetched once the cover shows again.
+            if self.cover_requested != wanted {
+                self.cover_requested = None;
+            }
+            return;
+        }
+        let Some(url) = wanted else {
             return;
         };
         if self.cover_requested.as_ref() == Some(&url) {
@@ -958,6 +981,13 @@ impl App {
                 self.set_timer_mode(presets[index % presets.len()]);
             }
             Action::ToggleTimerPanel => self.timer_hidden = !self.timer_hidden,
+            Action::ToggleLibraryPanel => self.library_hidden = !self.library_hidden,
+            Action::ToggleSidePanel => self.side_hidden = !self.side_hidden,
+            Action::SetPicture(picture) => {
+                self.config.picture = picture;
+                self.load_cover();
+                self.save_config();
+            }
             Action::SetLevel(id, level) => {
                 self.set_level(&id, level);
                 self.mix_name = self.matching_mix_name();
@@ -1048,15 +1078,20 @@ impl App {
         self.refresh_ambience();
     }
 
-    /// Soundscapes have no music to balance against, so they keep the ambience at its levels.
-    /// The floor is inaudible but keeps the sounds loaded, since a silent lane is dropped and
-    /// would have to be decoded again.
-    fn ambience_share(&self) -> f32 {
+    /// How much of the ambience the balance lets through, from 0 to 1. Soundscapes have no music
+    /// to balance against, so they keep the ambience at its levels.
+    pub fn ambience_heard(&self) -> f32 {
         if self.source == Source::Soundscape {
             1.0
         } else {
-            (2.0 * self.balance).clamp(0.1, 1.0)
+            (2.0 * self.balance).min(1.0)
         }
+    }
+
+    /// The floor is inaudible but keeps the sounds loaded, since a silent lane is dropped and
+    /// would have to be decoded again.
+    fn ambience_share(&self) -> f32 {
+        self.ambience_heard().max(0.1)
     }
 
     fn refresh_ambience(&mut self) {
@@ -1538,6 +1573,8 @@ impl App {
             Setting::AutoStartFocus => toggle(pomodoro.auto_start_focus),
             Setting::Chime => toggle(self.config.chime),
             Setting::Notifications => toggle(self.config.notifications),
+            Setting::Picture => self.config.picture.label().to_string(),
+            Setting::Look => self.config.look.label().to_string(),
             Setting::ReduceMotion => toggle(self.config.reduce_motion),
         }
     }
@@ -1560,16 +1597,25 @@ impl App {
             Setting::AutoStartFocus => pomodoro.auto_start_focus = !pomodoro.auto_start_focus,
             Setting::Chime => self.config.chime = !self.config.chime,
             Setting::Notifications => self.config.notifications = !self.config.notifications,
+            Setting::Picture => {
+                self.config.picture = self.config.picture.step(delta);
+                self.load_cover();
+            }
+            Setting::Look => self.config.look = self.config.look.step(delta),
             Setting::ReduceMotion => self.config.reduce_motion = !self.config.reduce_motion,
         }
         self.timer.set_settings(self.config.pomodoro);
+        // How a picture looks depends on each terminal's font, so pictures stay on this machine.
         let synced_as = match setting {
-            Setting::Chime => "chime",
-            Setting::Notifications => "notifications",
-            Setting::ReduceMotion => "reduce_motion",
-            _ => "pomodoro",
+            Setting::Chime => Some("chime"),
+            Setting::Notifications => Some("notifications"),
+            Setting::ReduceMotion => Some("reduce_motion"),
+            Setting::Picture | Setting::Look => None,
+            _ => Some("pomodoro"),
         };
-        self.note_setting_changed(synced_as);
+        if let Some(name) = synced_as {
+            self.note_setting_changed(name);
+        }
         self.save_config();
     }
 
@@ -1770,6 +1816,8 @@ impl App {
             levels: self.levels.clone(),
             timer: self.timer.mode(),
             timer_hidden: self.timer_hidden,
+            library_hidden: self.library_hidden,
+            side_hidden: self.side_hidden,
             shuffle: self.queue.shuffle,
             repeat: self.queue.repeat,
         }
@@ -2606,6 +2654,21 @@ mod tests {
             app.dispatch(Action::TogglePlay);
             assert_eq!((app.is_playing(), app.timer.is_running()), (false, timing));
         }
+    }
+
+    #[test]
+    fn a_picture_in_the_player_leaves_the_cover_until_the_cover_is_shown_again() {
+        let mut app = app();
+        let cover = app.current().and_then(|item| item.cover.clone());
+        assert!(cover.is_some());
+        app.config.picture = Picture::NightLake;
+        app.cover_requested = Some("an earlier track's cover".into());
+
+        app.load_cover();
+        assert_eq!(app.cover_requested, None);
+
+        app.dispatch(Action::SetPicture(Picture::Cover));
+        assert_eq!(app.cover_requested, cover);
     }
 
     #[test]

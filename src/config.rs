@@ -5,6 +5,7 @@ use etcetera::BaseStrategy;
 use serde::Deserialize;
 
 use crate::timer::PomodoroSettings;
+use crate::ui::picture::{Look, Picture};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -14,6 +15,8 @@ pub struct Config {
     pub catalogs: Vec<String>,
     pub sync_url: String,
     pub reduce_motion: bool,
+    pub picture: Picture,
+    pub look: Look,
     pub chime: bool,
     pub notifications: bool,
     pub pomodoro: PomodoroSettings,
@@ -26,6 +29,8 @@ impl Default for Config {
             catalogs: Vec::new(),
             sync_url: crate::sync::DEFAULT_URL.into(),
             reduce_motion: false,
+            picture: Picture::default(),
+            look: Look::default(),
             chime: true,
             notifications: true,
             pomodoro: PomodoroSettings::default(),
@@ -81,6 +86,8 @@ pub fn save(path: &Path, config: &Config) -> Result<()> {
     };
     let mut document: toml_edit::DocumentMut = text.parse().with_context(|| format!("reading {}", path.display()))?;
     set(&mut document["reduce_motion"], config.reduce_motion);
+    set(&mut document["picture"], config.picture.id());
+    set(&mut document["look"], config.look.id());
     set(&mut document["chime"], config.chime);
     set(&mut document["notifications"], config.notifications);
     if config.catalogs.is_empty() {
@@ -132,6 +139,7 @@ mod tests {
         .unwrap();
         let mut config = load(&path).unwrap();
         config.chime = false;
+        config.picture = Picture::FujiDawn;
         config.pomodoro.focus_minutes = 40;
         config.catalogs = vec!["https://friends.example/catalog.json".into()];
         save(&path, &config).unwrap();
@@ -144,6 +152,7 @@ mod tests {
         assert_eq!(reloaded.catalog_url, "https://example.com/catalog.json");
         assert_eq!(reloaded.catalogs, config.catalogs);
         assert_eq!((reloaded.chime, reloaded.pomodoro.focus_minutes), (false, 40));
+        assert_eq!(reloaded.picture, Picture::FujiDawn);
     }
 
     #[cfg(unix)]

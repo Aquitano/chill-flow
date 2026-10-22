@@ -68,6 +68,11 @@ impl Theme {
         self.known.is_some()
     }
 
+    /// Dark text on a light background. An unknown theme counts as dark.
+    pub fn is_light(&self) -> bool {
+        self.known.is_some_and(|(fg, bg)| luminance(bg) > luminance(fg))
+    }
+
     pub fn text(&self) -> Color {
         self.mix(1.0)
     }
