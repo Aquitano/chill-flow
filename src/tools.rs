@@ -177,8 +177,9 @@ pub fn node() -> Option<String> {
     usable_node(&output).map(str::to_owned)
 }
 
-/// Checked once per run: it starts node, and every YouTube link checks its tools first.
-fn node_stands_in() -> bool {
+/// Checked once per run, and first by the startup tool check, since it starts node and a
+/// YouTube link checks its tools on the interface thread.
+pub fn node_stands_in() -> bool {
     static USABLE: OnceLock<bool> = OnceLock::new();
     *USABLE.get_or_init(|| node().is_some())
 }
