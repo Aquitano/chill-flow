@@ -19,7 +19,7 @@ use crate::queue::Queue;
 use crate::store::{FocusDays, Store};
 use crate::sync;
 use crate::timer::{Phase, PhaseEnded, Timer, TimerMode};
-use crate::tools::{Inspection as ToolInspection, Tool};
+use crate::tools::{self, Inspection as ToolInspection, Tool};
 use crate::ui::picture::Picture;
 use crate::youtube;
 
@@ -341,6 +341,7 @@ impl App {
         let jobs = self.jobs.clone();
         std::thread::spawn(move || {
             let found = Tool::ALL.into_iter().map(Tool::inspect).collect();
+            tools::node_stands_in();
             let _ = jobs.send(Job::Tools(found));
         });
     }

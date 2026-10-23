@@ -193,7 +193,10 @@ fn doctor(paths: &config::Paths) -> bool {
                 }
                 println!("  update: {}", tool.upgrade());
             }
-            _ => println!("  install: {}", tool.install()),
+            _ => match (tool == Tool::Deno).then(tools::node).flatten() {
+                Some(version) => println!("  yt-dlp uses node {version} instead."),
+                None => println!("  install: {}", tool.install()),
+            },
         }
     }
     println!();
