@@ -94,7 +94,7 @@ pub fn apply(app: &mut App, ui: &mut Ui, action: Action) {
             query: String::new(),
             selected: 0,
         }),
-        Action::OpenHelp => ui.open(Overlay::Help),
+        Action::OpenHelp => ui.open(Overlay::Help { scroll: 0 }),
         Action::OpenDiagnostics => ui.open(Overlay::Diagnostics {
             selected: app
                 .diagnostics
@@ -421,7 +421,13 @@ fn overlay_key(app: &mut App, ui: &mut Ui, key: KeyEvent) {
             KeyCode::Esc | KeyCode::Char('n') => ui.close(),
             _ => {}
         },
-        Overlay::Help | Overlay::Stats => {
+        Overlay::Help { scroll } => match key.code {
+            KeyCode::Up | KeyCode::Char('k') => *scroll = scroll.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => *scroll += 1,
+            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q' | '?' | 'i') => ui.close(),
+            _ => {}
+        },
+        Overlay::Stats => {
             if matches!(key.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q' | '?' | 'i')) {
                 ui.close();
             }
@@ -610,6 +616,7 @@ fn scrolled(app: &mut App, ui: &mut Ui, x: u16, y: u16, step: isize) {
                     .saturating_add_signed(step)
                     .min(crate::diagnostics::MESSAGE_LIMIT);
             }
+            Overlay::Help { scroll } => *scroll = scroll.saturating_add_signed(step),
             Overlay::Settings { selected } => {
                 *selected = selected.saturating_add_signed(step).min(Setting::ALL.len() - 1);
             }

@@ -263,7 +263,7 @@ pub fn draw(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant
         Overlay::Palette { query, selected } => palette(&mut layer, screen, app, ui, query, *selected),
         Overlay::Prompt { kind, input } => prompt(&mut layer, screen, ui, *kind, input),
         Overlay::Confirm { message, .. } => confirm(&mut layer, screen, ui, message),
-        Overlay::Help => help(&mut layer, screen, app, ui),
+        Overlay::Help { scroll } => help(&mut layer, screen, app, ui, scroll),
         Overlay::Diagnostics { selected, scroll } => diagnostics(&mut layer, screen, app, ui, *selected, scroll),
         Overlay::Stats => stats(&mut layer, screen, app, ui, now),
         Overlay::Settings { selected } => settings(&mut layer, screen, app, ui, *selected),
@@ -403,7 +403,7 @@ const KEYS: [(&str, &str); 32] = [
     ("x", "skip to the next phase"),
     ("m", "next timer preset"),
     ("F", "show or hide the timer"),
-    ("H / L", "show or hide the left / right side"),
+    ("H / L", "show or hide left / right"),
     ("v", "next picture in the player"),
     ("o", "open or paste a YouTube link"),
     ("tab", "move between panels"),
@@ -412,7 +412,7 @@ const KEYS: [(&str, &str); 32] = [
     ("← → / h l", "tabs, or a sound's level"),
     ("enter", "play the selection"),
     ("a", "queue the selection"),
-    ("R", "refresh the selected YouTube playlist"),
+    ("R", "refresh a YouTube playlist"),
     ("right click", "add a row to the queue"),
     ("d", "remove the selection"),
     ("J / K", "move a queued item"),
@@ -426,58 +426,67 @@ const KEYS: [(&str, &str); 32] = [
     ("q", "quit"),
 ];
 
-fn help(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui) {
+/// Each key with the longest description beside it, which two columns need side by side.
+const KEY_COLUMN: u16 = 44;
+
+/// Two columns of keys when the window is wide enough, one otherwise, and the rows that don't
+/// fit scroll.
+fn help(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, scroll: &mut usize) {
     let theme = ui.theme;
-    let half = KEYS.len().div_ceil(2);
+    let (text, muted, faint) = (
+        Style::new().fg(theme.text()),
+        Style::new().fg(theme.muted()),
+        Style::new().fg(theme.faint()),
+    );
+    let width = 2 * KEY_COLUMN + 6;
+    let columns = if screen.width.saturating_sub(4) >= width { 2 } else { 1 };
+    let per_column = KEYS.len().div_ceil(columns);
+    let mut rows: Vec<Vec<(u16, String, Style)>> = (0..per_column)
+        .map(|row| {
+            (0..columns)
+                .filter_map(|column| {
+                    KEYS.get(row + column * per_column)
+                        .map(|key| (column as u16 * KEY_COLUMN, key))
+                })
+                .flat_map(|(x, (key, what))| [(x, format!("{key:>11}"), text), (x + 13, what.to_string(), muted)])
+                .collect()
+        })
+        .collect();
     let credits: Vec<String> = app
         .catalog
         .ambient
         .iter()
         .filter_map(|sound| sound.credit.as_ref().map(|credit| format!("{}: {credit}", sound.label)))
         .collect();
-    let credit_rows = if credits.is_empty() {
-        0
-    } else {
-        credits.len() as u16 + 2
-    };
-    let content = dialog(buf, screen, 94, half as u16 + credit_rows + 6, None, "Keys", ui);
-    let column = content.width / 2;
-    for (index, (key, what)) in KEYS.iter().enumerate() {
-        let (x, y) = if index < half {
-            (content.x, content.y + index as u16)
-        } else {
-            (content.x + column, content.y + (index - half) as u16)
-        };
-        put(buf, x, y, &format!("{key:>11}"), Style::new().fg(theme.text()));
-        put(
-            buf,
-            x + 13,
-            y,
-            &fit(what, usize::from(column.saturating_sub(15))),
-            Style::new().fg(theme.muted()),
-        );
+    if !credits.is_empty() {
+        rows.push(Vec::new());
+        rows.push(vec![(0, "Ambient recordings".to_owned(), text)]);
+        rows.extend(credits.into_iter().map(|credit| vec![(0, credit, faint)]));
     }
-    let mut y = content.y + half as u16 + 1;
-    if !credits.is_empty() && content.height >= half as u16 + credit_rows + 2 {
-        put(buf, content.x, y, "Ambient recordings", Style::new().fg(theme.text()));
-        for credit in credits {
-            y += 1;
-            put(
-                buf,
-                content.x,
-                y,
-                &fit(&credit, usize::from(content.width)),
-                Style::new().fg(theme.faint()),
-            );
+    let content = dialog(buf, screen, width, rows.len() as u16 + 6, None, "Keys", ui);
+    let view = usize::from(content.height.saturating_sub(2));
+    *scroll = (*scroll).min(rows.len().saturating_sub(view));
+    for (y, row) in (content.y..).zip(rows.iter().skip(*scroll).take(view)) {
+        for (index, (x, words, style)) in row.iter().enumerate() {
+            let room = row
+                .get(index + 1)
+                .map_or(content.width, |(next, ..)| next.saturating_sub(2))
+                .saturating_sub(*x);
+            put(buf, content.x + x, y, &fit(words, usize::from(room)), *style);
         }
     }
-    if content.height >= half as u16 + 2 {
+    let hint = if rows.len() > view {
+        "↑↓ scroll   esc close"
+    } else {
+        "Mouse works too: click, drag the sliders, scroll the lists."
+    };
+    if content.height >= 2 {
         put(
             buf,
             content.x,
-            content.bottom().saturating_sub(1),
-            "Mouse works too: click, drag the sliders, scroll the lists.",
-            Style::new().fg(theme.faint()),
+            content.bottom() - 1,
+            &fit(hint, usize::from(content.width)),
+            faint,
         );
     }
 }
@@ -769,6 +778,42 @@ mod tests {
     use crate::app::TestApp;
     use crate::ui::theme::Theme;
     use ratatui_image::picker::Picker;
+
+    #[test]
+    fn help_scrolls_inside_a_small_window_and_fits_two_columns_in_a_wide_one() {
+        let app = TestApp::new();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), true);
+        let mut draw = |width, height, scroll: &mut usize| {
+            let screen = Rect::new(0, 0, width, height);
+            let mut buffer = Buffer::empty(screen);
+            help(&mut buffer, screen, &app, &mut ui, scroll);
+            let area = ui.dialog_area.take().unwrap();
+            let page: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+            (page, buffer[(area.x + 1, area.bottom() - 1)].symbol().to_owned())
+        };
+
+        let (top, border) = draw(60, 20, &mut 0);
+        assert!(top.contains("↑↓ scroll") && !top.contains("Ambient recordings"));
+        assert_eq!(border, "─");
+        let mut seen = String::new();
+        for requested in 0.. {
+            let mut scroll = requested;
+            let (page, border) = draw(60, 20, &mut scroll);
+            assert_eq!(border, "─");
+            seen.push_str(&page);
+            if scroll < requested {
+                break;
+            }
+        }
+        for (_, what) in KEYS {
+            assert!(seen.contains(what), "{what} never shows");
+        }
+        assert!(seen.contains("Ambient recordings"));
+
+        let (wide, _) = draw(160, 45, &mut 0);
+        assert!(wide.contains("play or pause the sound") && wide.contains("quit") && wide.contains("Mouse works too"));
+        assert!(!wide.contains('…'));
+    }
 
     #[test]
     fn diagnostic_details_keep_long_words_and_log_paths_through_scroll() {

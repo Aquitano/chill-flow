@@ -28,7 +28,7 @@ pub enum Overlay {
     Palette { query: String, selected: usize },
     Prompt { kind: Prompt, input: String },
     Confirm { message: String, action: Action },
-    Help,
+    Help { scroll: usize },
     Stats,
     Diagnostics { selected: usize, scroll: usize },
     Settings { selected: usize },
@@ -705,7 +705,7 @@ mod tests {
         terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
         let bright = header(&terminal);
 
-        ui.open(Overlay::Help);
+        ui.open(Overlay::Help { scroll: 0 });
         terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
         let dimmed = header(&terminal);
         ui.close();
