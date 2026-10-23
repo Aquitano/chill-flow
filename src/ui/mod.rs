@@ -1189,6 +1189,31 @@ mod tests {
     }
 
     #[test]
+    fn a_short_ambience_list_counts_the_sounds_out_of_view() {
+        let mut app = offline_app();
+        let count = app.catalog.ambient.len();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
+        input::apply(&mut app, &mut ui, Action::Focus(Panel::Ambience));
+        let mut page = |width, height| {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+            terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+        };
+        let short = page(60, 20);
+        let below = (1..count)
+            .find(|n| short.contains(&format!(" ↓ {n} more ")))
+            .expect("no count");
+        assert!(below < count);
+        assert!(!page(160, 45).contains(" more "));
+    }
+
+    #[test]
     fn a_picture_takes_the_place_of_the_cover_and_spectrum_with_the_title_over_it() {
         let mut app = offline_app();
         let mut ui = Ui::new(

@@ -1080,6 +1080,17 @@ pub fn ambience(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Insta
         ui.hit(rect, Hit::Sound(index));
         ui.hit(slider, Hit::Slider(Slider::Level(sound.id.clone())));
     }
+    // A short panel cuts the list off, so the bottom border says how many sounds are out of view.
+    let above = ui.sound_offset;
+    let below = count.saturating_sub(ui.sound_offset + usize::from(list.height));
+    let more = match (above, below) {
+        (0, 0) => return,
+        (0, below) => format!(" ↓ {below} more "),
+        (above, 0) => format!(" ↑ {above} more "),
+        (above, below) => format!(" ↑ {above}  ↓ {below} "),
+    };
+    let x = area.right().saturating_sub(more.chars().count() as u16 + 2);
+    put(buf, x, area.bottom() - 1, &more, Style::new().fg(theme.muted()));
 }
 
 /// Music on the left, ambience on the right. A soundscape has no music to weigh against, so the
