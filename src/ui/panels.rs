@@ -825,7 +825,7 @@ pub fn queue(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
         let message = if app.source == Source::Soundscape {
             "Pick a track to bring the music back"
         } else {
-            "Nothing up next. Press a on a track to queue it."
+            "Press a on a track to queue it"
         };
         let lines = wrap(
             message,
