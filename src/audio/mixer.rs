@@ -75,7 +75,7 @@ impl LaneLevel {
         }
     }
 
-    fn try_retire(&self) -> bool {
+    pub(super) fn try_retire(&self) -> bool {
         self.0
             .compare_exchange(0, RETIRED, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok()

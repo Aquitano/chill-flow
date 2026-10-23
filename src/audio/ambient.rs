@@ -39,7 +39,7 @@ pub(super) fn spawn_load(request: LoadRequest, loaded: Sender<LoadedLoop>, event
                     level: request.level,
                 });
             }
-            Ok(None) => request.level.retire(),
+            Ok(None) => {}
             Err(message) => {
                 request.level.retire();
                 let _ = events.send(EngineEvent::AmbientFailed {
@@ -51,8 +51,9 @@ pub(super) fn spawn_load(request: LoadRequest, loaded: Sender<LoadedLoop>, event
     );
 }
 
-/// The loop for `source`, or nothing once `level` says the sound was turned off meanwhile, so
-/// switching mixes quickly doesn't decode recordings no one hears.
+/// The loop for `source`, or nothing once the sound was turned off meanwhile, so switching mixes
+/// quickly doesn't decode recordings no one hears. Giving up retires `level` only while it's
+/// still off, so a sound turned back on in the meantime loads after all.
 fn load(source: &LoopSource, cache_dir: &Path, rate: u32, level: &LaneLevel) -> Result<Option<Box<[i16]>>, String> {
     let url = match source {
         LoopSource::File(url) => url,
@@ -62,20 +63,27 @@ fn load(source: &LoopSource, cache_dir: &Path, rate: u32, level: &LaneLevel) -> 
             return Ok(Some(samples.into_boxed_slice()));
         }
     };
-    if !level.wanted() {
+    if level.try_retire() {
         return Ok(None);
     }
     let path = cached_file(url, cache_dir)?;
-    let decoded = decode(&path, rate, level);
-    if !level.wanted() {
-        return Ok(None);
+    loop {
+        let looped = match decode(&path, rate, level) {
+            Ok(Some(samples)) => into_loop(&path, samples, rate),
+            Ok(None) if level.try_retire() => return Ok(None),
+            // Turned back on while decoding stopped, so the whole recording is needed after all.
+            Ok(None) => continue,
+            Err(error) => Err(error),
+        };
+        if looped.is_err() {
+            // A damaged download would fail the same way every time, so the next try fetches it again.
+            let _ = fs::remove_file(&path);
+            if level.try_retire() {
+                return Ok(None);
+            }
+        }
+        return looped.map(Some);
     }
-    let looped = decoded.and_then(|samples| into_loop(&path, samples, rate));
-    if looped.is_err() {
-        // A damaged download would fail the same way every time, so the next try fetches it again.
-        let _ = fs::remove_file(&path);
-    }
-    looped.map(Some)
 }
 
 fn cached_file(url: &str, cache_dir: &Path) -> Result<PathBuf, String> {
@@ -117,18 +125,21 @@ fn cache_name(url: &str) -> Option<String> {
     Some(format!("{:x}", Sha256::digest(resource.as_bytes())))
 }
 
-fn decode(path: &Path, rate: u32, level: &LaneLevel) -> Result<Vec<i16>, String> {
+/// The whole recording, or nothing if the sound was turned off before it finished.
+fn decode(path: &Path, rate: u32, level: &LaneLevel) -> Result<Option<Vec<i16>>, String> {
     let source = File::open(path).map_err(|error| format!("could not open {}: {error}", path.display()))?;
     let mut samples = Vec::new();
+    let mut stopped = false;
     file::decode(Box::new(source), 0.0, rate, |decoded| {
         samples.extend(
             decoded
                 .iter()
                 .map(|&sample| (sample * 32768.0).round().clamp(-32768.0, 32767.0) as i16),
         );
-        level.wanted()
+        stopped = !level.wanted();
+        !stopped
     })?;
-    Ok(samples)
+    Ok((!stopped).then_some(samples))
 }
 
 fn into_loop(path: &Path, mut samples: Vec<i16>, rate: u32) -> Result<Box<[i16]>, String> {
@@ -247,16 +258,13 @@ mod tests {
         fs::write(&path, include_bytes!("tone.mp3")).unwrap();
         let source = LoopSource::File(url.into());
 
-        assert!(
-            load(&source, cache.path(), 48_000, &LaneLevel::new(1.0))
-                .unwrap()
-                .is_some()
-        );
-        assert!(
-            load(&source, cache.path(), 48_000, &LaneLevel::new(0.0))
-                .unwrap()
-                .is_none()
-        );
+        let on = LaneLevel::new(1.0);
+        assert!(load(&source, cache.path(), 48_000, &on).unwrap().is_some());
+        assert!(on.set(0.5));
+        let off = LaneLevel::new(0.0);
+        assert!(load(&source, cache.path(), 48_000, &off).unwrap().is_none());
+        // Giving up retired the level, so turning the sound up again starts a fresh load.
+        assert!(!off.set(0.5));
     }
 
     #[test]
