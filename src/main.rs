@@ -55,7 +55,7 @@ pub fn is_command(name: &str) -> bool {
 
 #[derive(Subcommand)]
 enum CliCommand {
-    /// Check that ffmpeg, yt-dlp, and deno are installed, and show where chill keeps its files.
+    /// Check the tools YouTube links need, and show where chill keeps its files.
     Doctor,
     /// Update an official installer-managed copy of chill to the latest release.
     Update,
@@ -171,14 +171,12 @@ fn doctor(paths: &config::Paths) -> bool {
     println!("chill {}\n", env!("CARGO_PKG_VERSION"));
     let today = jiff::Zoned::now().date();
     let mut healthy = true;
+    println!("YouTube links need these tools. The catalog and the ambience play without them.");
     for inspection in Tool::ALL.into_iter().map(Tool::inspect) {
         let tool = inspection.tool;
         let state = match &inspection.state {
             tools::State::Installed(version) => format!("installed ({version})"),
-            tools::State::Missing => {
-                healthy = false;
-                "missing".into()
-            }
+            tools::State::Missing => "missing".into(),
             tools::State::Broken(error) => {
                 healthy = false;
                 format!("broken: {error}")

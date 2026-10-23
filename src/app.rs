@@ -336,7 +336,7 @@ impl App {
         }
     }
 
-    /// A missing ffmpeg would otherwise only show up as an error on the first play.
+    /// A broken or outdated tool would otherwise only show up as an error on the first YouTube link.
     pub fn check_tools(&self) {
         let jobs = self.jobs.clone();
         std::thread::spawn(move || {
@@ -763,12 +763,7 @@ impl App {
         self.load_cover();
         match item.play {
             Playable::File { url } => {
-                self.engine.play_stream(StreamInput {
-                    url,
-                    headers: Vec::new(),
-                    start_secs,
-                    live: false,
-                });
+                self.engine.play_file(&url, start_secs);
                 self.stream = Stream::Playing;
                 self.resume_at = None;
             }
@@ -1855,7 +1850,7 @@ impl App {
             }));
         }
         self.retry_reconnect(now);
-        // Every seek restarts ffmpeg, so a held key or a scrolled wheel settles first.
+        // Every seek restarts the decoder, so a held key or a scrolled wheel settles first.
         if let Some((at, asked)) = self.pending_seek
             && now.duration_since(asked) >= Duration::from_millis(150)
         {
@@ -2390,9 +2385,9 @@ mod tests {
         app.tools_checked(vec![ToolInspection {
             tool: Tool::Deno,
             path: None,
-            state: crate::tools::State::Missing,
+            state: crate::tools::State::Broken("loader failed".into()),
         }]);
-        assert!(app.diagnostics.entries()[0].message.contains("deno is missing"));
+        assert!(app.diagnostics.entries()[0].message.contains("deno is broken"));
         assert!(matches!(app.events.last(), Some(Event::Toast(Tone::Warning, _))));
         app.handle_engine(EngineEvent::NoDevice("device disconnected".into()));
         assert!(

@@ -6,14 +6,7 @@ A terminal player for focused work. It plays lo-fi from a hosted catalog or from
 
 ## Install
 
-chill drives three tools it doesn't ship:
-
-| Tool | What chill uses it for | macOS | Windows |
-| --- | --- | --- | --- |
-| ffmpeg | decoding every stream | `brew install ffmpeg` | `winget install Gyan.FFmpeg` |
-| yt-dlp and deno | resolving YouTube links | `brew install yt-dlp deno` | `winget install yt-dlp.yt-dlp DenoLand.Deno` |
-
-Then install chill itself. Prebuilt binaries cover Apple Silicon Macs and 64-bit Windows.
+Prebuilt binaries cover Apple Silicon Macs and 64-bit Windows.
 
 ```bash
 # macOS
@@ -31,7 +24,14 @@ Both put `chill` in `~/.cargo/bin` and add it to `PATH`. Run `chill update` in y
 cargo install --git https://github.com/Aquitano/chill-flow
 ```
 
-After a winget install, open a new terminal so the tools are on `PATH`. `chill doctor` checks all three with a five-second limit per tool. It reports installed, missing, or broken tools, their versions and paths, and install or update commands. It also prints the config, library, cache, and diagnostic log paths, and exits unsuccessfully for missing or broken tools or an invalid config. It never installs dependencies. YouTube changes often enough that an old yt-dlp stops working, so chill mentions it at startup once your yt-dlp is more than 60 days old; update it with `brew upgrade yt-dlp` or `winget upgrade yt-dlp.yt-dlp`.
+chill plays the catalog, the ambience, and the generated noise on its own. YouTube links also need three tools chill doesn't ship: ffmpeg decodes their audio, yt-dlp resolves them, and deno lets yt-dlp read YouTube's player.
+
+```bash
+brew install ffmpeg yt-dlp deno                          # macOS
+winget install Gyan.FFmpeg yt-dlp.yt-dlp DenoLand.Deno   # Windows
+```
+
+After a winget install, open a new terminal so the tools are on `PATH`. When a tool is missing, opening or playing a YouTube link names it and the command that installs it. `chill doctor` checks all three with a five-second limit per tool. It reports installed, missing, or broken tools, their versions and paths, and install or update commands. It also prints the config, library, cache, and diagnostic log paths, and exits unsuccessfully for broken tools or an invalid config. It never installs dependencies. YouTube changes often enough that an old yt-dlp stops working, so chill mentions it at startup once your yt-dlp is more than 60 days old; update it with `brew upgrade yt-dlp` or `winget upgrade yt-dlp.yt-dlp`.
 
 `chill update` supports the official Apple Silicon macOS and x64 Windows installers. It requires their receipt to match the running executable and the official release repository. Copies and source builds without a matching installer receipt get instructions instead, as do unsupported platforms. For a Cargo installation, use `cargo install --git https://github.com/Aquitano/chill-flow --force`; for another package manager, use its update command. No update checks run at startup or in the TUI.
 
@@ -47,7 +47,7 @@ A running or paused in-progress timer stays visible in the header when its panel
 chill                                   # resume where you left off
 chill https://youtu.be/…                # play a video, playlist, or live stream
 chill "rainy study"                     # load a saved scene
-chill doctor                            # check ffmpeg, yt-dlp, and deno
+chill doctor                            # check the tools YouTube links need
 chill update                            # update an official installation
 ```
 
