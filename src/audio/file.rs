@@ -1,3 +1,4 @@
+use std::f32::consts::FRAC_1_SQRT_2;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
@@ -277,7 +278,13 @@ fn to_stereo(samples: &[f32], channels: usize, skip: usize, stereo: &mut Vec<f32
     stereo.clear();
     match channels {
         0 => {}
-        1 => stereo.extend(samples.iter().skip(skip).flat_map(|&sample| [sample, sample])),
+        // ffmpeg's upmix, which the ambience levels were set against, puts mono 3 dB down on each side.
+        1 => stereo.extend(
+            samples
+                .iter()
+                .skip(skip)
+                .flat_map(|&sample| [sample * FRAC_1_SQRT_2; 2]),
+        ),
         _ => stereo.extend(
             samples
                 .chunks_exact(channels)
@@ -295,6 +302,11 @@ enum ToRate {
         pending: Vec<f32>,
         output: Vec<f32>,
         delay: usize,
+        ratio: f64,
+        frames_in: usize,
+        frames_out: usize,
+        /// How many frames the file comes to at the output rate, once it has ended.
+        end: Option<usize>,
     },
 }
 
@@ -310,6 +322,10 @@ impl ToRate {
             delay: resampler.output_delay(),
             resampler: Box::new(resampler),
             pending: Vec::new(),
+            ratio: f64::from(to) / f64::from(from),
+            frames_in: 0,
+            frames_out: 0,
+            end: None,
         })
     }
 
@@ -320,10 +336,17 @@ impl ToRate {
             pending,
             output,
             delay,
+            frames_in,
+            frames_out,
+            end,
+            ..
         } = self
         else {
             return Ok(push(stereo));
         };
+        if end.is_none() {
+            *frames_in += stereo.len() / 2;
+        }
         pending.extend_from_slice(stereo);
         let mut used = 0;
         while pending.len() - used >= resampler.input_frames_next() * 2 {
@@ -339,7 +362,12 @@ impl ToRate {
             // The resampler starts with a few frames of its own delay, which would shift the track.
             let late = (*delay).min(written);
             *delay -= late;
-            if !push(&output[late * 2..written * 2]) {
+            let mut ready = &output[late * 2..written * 2];
+            if let Some(end) = *end {
+                ready = &ready[..ready.len().min(end.saturating_sub(*frames_out) * 2)];
+            }
+            *frames_out += ready.len() / 2;
+            if !push(ready) {
                 return Ok(false);
             }
         }
@@ -347,9 +375,18 @@ impl ToRate {
         Ok(true)
     }
 
-    /// Lets out the last frames the resampler holds, followed by a moment of silence.
+    /// Lets out the last frames the resampler holds by flushing it with silence, and stops where
+    /// the file ends so the silence doesn't play.
     fn finish(&mut self, push: &mut impl FnMut(&[f32]) -> bool) -> Result<(), String> {
-        if let ToRate::Resampled { resampler, .. } = self {
+        if let ToRate::Resampled {
+            resampler,
+            ratio,
+            frames_in,
+            end,
+            ..
+        } = self
+        {
+            *end = Some((*frames_in as f64 * *ratio).round() as usize);
             let silence = vec![0.0; (resampler.input_frames_max() + resampler.output_delay() + 1) * 4];
             self.feed(&silence, push)?;
         }
@@ -392,8 +429,7 @@ mod tests {
             })
             .unwrap();
 
-        let frames = output.len() / 2;
-        assert!((48_000..48_000 + 4 * CHUNK_FRAMES).contains(&frames), "{frames} frames");
+        assert_eq!(output.len() / 2, 48_000);
         let peak = output[..96_000]
             .iter()
             .fold(0.0_f32, |peak, sample| peak.max(sample.abs()));
@@ -428,19 +464,17 @@ mod tests {
     fn an_mp3_plays_in_stereo_at_the_output_rate_from_its_start() {
         const TONE: &[u8] = include_bytes!("tone.mp3");
         let whole = decoded(io::Cursor::new(TONE), 0.0);
-        let frames = whole.len() / 2;
-        assert!((96_000..96_000 + 4 * CHUNK_FRAMES).contains(&frames), "{frames} frames");
+        assert_eq!(whole.len() / 2, 96_000);
         assert!(whole.as_chunks::<2>().0.iter().all(|[left, right]| left == right));
         let peak = whole.iter().fold(0.0_f32, |peak, sample| peak.max(sample.abs()));
-        assert!((0.45..0.55).contains(&peak), "peak {peak}");
+        assert!((peak - 0.5 * FRAC_1_SQRT_2).abs() < 0.03, "peak {peak}");
 
         let streamed = |start_secs| {
             let state = Arc::new(MusicState::new());
             decoded(Bytes::new(download(TONE, Some(Ok(()))), state), start_secs)
         };
         assert_eq!(streamed(0.0), whole);
-        let later = streamed(1.5).len() / 2;
-        assert!((24_000..24_000 + 4 * CHUNK_FRAMES).contains(&later), "{later} frames");
+        assert_eq!(streamed(1.5).len() / 2, 24_000);
         assert!(streamed(5.0).is_empty());
     }
 
