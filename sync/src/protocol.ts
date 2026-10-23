@@ -48,8 +48,9 @@ export type SyncRecord = typeof incomingRecord.inferIn;
 /** A record on its way into storage, with the body serialized to JSON. */
 export type StoredChange = typeof incomingRecord.infer;
 
-export type SyncResult =
-  | { type: "synced"; cursor: number; changes: StoredChange[]; more: boolean }
+export type SyncFailure =
   | { type: "full" }
   | { type: "over budget" }
   | { type: "deleted" };
+
+export type SyncResult = Response | SyncFailure;

@@ -57,6 +57,56 @@ it("sends the winner back to a client whose change lost a tie, even below its cu
   expect(await lost.json()).toEqual({ cursor, changes: [like("a", 100, { v: 2 })], more: false });
 });
 
+it("returns every tie winner when they exceed the page budgets and still advances the cursor", async () => {
+  const token = await newToken();
+  const chime = { kind: "setting", id: "chime", updatedAt: 100, deleted: false, body: true };
+  const mixes = Array.from({ length: limits.changesPerRequest - 23 }, (_, index) => ({
+    kind: "mix", id: `mix-${index}`, updatedAt: 100, deleted: false, body: { rain: 50 },
+  }));
+  const playlists = Array.from({ length: 42 }, (_, index) => ({
+    kind: "saved", id: `ytpl:${index}`, updatedAt: 100, deleted: false,
+    body: {
+      id: `ytpl:${index}`, url: `https://youtube.com/playlist?list=${index}`,
+      title: "é".repeat(100 * 1024), channel: "", items: [],
+    },
+  }));
+  expect((await sync(token, { cursor: 0, changes: [chime, ...mixes] })).status).toBe(200);
+  for (let offset = 0; offset < playlists.length; offset += 7) {
+    const changes = playlists.slice(offset, offset + 7);
+    expect((await sync(token, { cursor: mixes.length + 1 + offset, changes })).status).toBe(200);
+  }
+
+  const cursor = mixes.length + 22;
+  const winners = [chime, ...mixes, ...playlists.slice(0, 21), playlists.at(-1)!];
+  const forward = playlists.slice(21);
+  const changes = winners.map((record) => ({
+    ...record, deleted: record.kind !== "setting", body: record.kind === "setting" ? false : null,
+  }));
+  const response = await sync(token, { cursor, changes });
+  expect(response.status).toBe(200);
+  const first = await response.json<SyncResponse>();
+  expect(first.changes[0]).toEqual(chime);
+  expect(first.changes).toHaveLength(winners.length + 1);
+  expect(first.changes.slice(0, winners.length)).toEqual(winners);
+  expect(first.changes.slice(winners.length)).toEqual(forward.slice(0, 1));
+  expect(first).toMatchObject({ cursor: cursor + 1, more: true });
+  const bytes = new TextEncoder().encode(JSON.stringify(first)).byteLength;
+  expect(bytes).toBeGreaterThan(limits.pageBytes);
+  expect(bytes).toBeLessThan(16 * 1024 * 1024);
+
+  const received = first.changes.slice(winners.length);
+  let page = first;
+  for (let pages = 0; page.more; pages++) {
+    expect(pages).toBeLessThan(forward.length);
+    const next = await pull(token, page.cursor);
+    expect(next.cursor).toBeGreaterThan(page.cursor);
+    received.push(...next.changes);
+    page = next;
+  }
+  expect(received).toEqual(forward);
+  expect(page.cursor).toBe(cursor + forward.length);
+});
+
 it("pages through changes in seq order and reports when more remain", async () => {
   const token = await newToken();
   const changes = Array.from({ length: 1500 }, (_, index) => like(`track-${index}`, 1_000 + index));
@@ -170,7 +220,7 @@ it("deletes a space for good, so a machine still holding the token is told it is
 
 it("ends a page early rather than send more than a few MiB at once", async () => {
   const token = await newToken();
-  const body = { filler: "x".repeat(250 * 1024) };
+  const body = { filler: "é".repeat(125 * 1024) };
   for (let batch = 0; batch < 3; batch++) {
     const changes = Array.from({ length: 7 }, (_, index) => like(`${batch}-${index}`, 1, body));
     expect((await sync(token, { cursor: 0, changes })).status).toBe(200);
@@ -178,7 +228,7 @@ it("ends a page early rather than send more than a few MiB at once", async () =>
 
   const first = await pull(token);
   expect(first.more).toBe(true);
-  expect(JSON.stringify(first.changes).length).toBeLessThan(limits.pageBytes + 64 * 1024);
+  expect(new TextEncoder().encode(JSON.stringify(first.changes)).byteLength).toBeLessThan(limits.pageBytes + 64 * 1024);
   const second = await pull(token, first.cursor);
   expect(second.more).toBe(false);
   expect(first.changes.length + second.changes.length).toBe(21);

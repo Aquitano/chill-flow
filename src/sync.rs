@@ -110,21 +110,20 @@ pub fn readable_setting(name: &str, value: &Value) -> bool {
     }
 }
 
-/// The largest answer read from the server. Pages end at about 4 MiB, so this leaves room
-/// while keeping a misbehaving server from filling memory.
+/// The largest answer read from the server. Pages target 4 MiB, but tie winners can fill the
+/// 10 MiB space, so this leaves room while keeping a misbehaving server from filling memory.
 const ANSWER_LIMIT: u64 = 16 * 1024 * 1024;
 
 /// `path` on the sync server. Only https carries the key, except to this machine for testing.
 fn endpoint(server: &str, path: &str) -> Result<String> {
     let server = server.trim_end_matches('/');
-    let local = ["http://localhost", "http://127.0.0.1", "http://[::1]"]
-        .iter()
-        .any(|prefix| {
-            server
-                .strip_prefix(prefix)
-                .is_some_and(|rest| rest.is_empty() || rest.starts_with([':', '/']))
-        });
-    if !server.starts_with("https://") && !local {
+    let uri: ureq::http::Uri = server.parse().context("sync_url must be a valid URL")?;
+    let authority = uri.authority().context("sync_url must have a host")?;
+    if authority.as_str().contains('@') {
+        bail!("sync_url must not contain user information");
+    }
+    let local = authority.host().eq_ignore_ascii_case("localhost") || matches!(authority.host(), "127.0.0.1" | "[::1]");
+    if uri.scheme_str() != Some("https") && !(uri.scheme_str() == Some("http") && local) {
         bail!("sync_url must start with https://, so the sync key never crosses the network unencrypted");
     }
     Ok(format!("{server}{path}"))
@@ -427,9 +426,17 @@ mod tests {
         );
         assert!(endpoint("http://127.0.0.1:8787", "/v1/sync").is_ok());
         assert!(endpoint("http://localhost", "/v1/sync").is_ok());
+        assert!(endpoint("http://[::1]:8787", "/v1/sync").is_ok());
+        assert!(endpoint("http://LOCALHOST:8787/base/", "/v1/sync").is_ok());
         for server in [
             "http://sync.example",
             "http://localhost.evil.example",
+            "http://localhost:8787@example.invalid",
+            "http://127.0.0.1:8787@example.invalid",
+            "http://[::1]:8787@example.invalid",
+            "http://user@localhost:8787",
+            "https://user:password@sync.example",
+            "https:///missing-host",
             "ftp://localhost",
             "",
         ] {
