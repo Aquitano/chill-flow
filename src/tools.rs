@@ -167,7 +167,14 @@ fn youtube_hint(missing: &[Tool], command: Option<String>, has_brew: bool) -> Op
         Some(command) => format!("Install {them} with `{command}`."),
         None => "Run chill doctor to see how to install them.".to_owned(),
     };
-    Some(format!("YouTube links need {names}, which chill can't find. {install}"))
+    let node = if missing.contains(&Tool::Deno) {
+        " Node.js 22 or newer works in place of deno."
+    } else {
+        ""
+    };
+    Some(format!(
+        "YouTube links need {names}, which chill can't find. {install}{node}"
+    ))
 }
 
 /// The version of Node.js on the PATH, when it's new enough for yt-dlp to use in place of deno.
@@ -357,7 +364,7 @@ mod tests {
         assert_eq!(youtube_hint(&[], brew(), true), None);
         assert_eq!(
             youtube_hint(&[Tool::Ffmpeg, Tool::Deno], brew(), true).unwrap(),
-            "YouTube links need ffmpeg and deno, which chill can't find. Install them with `brew install ffmpeg deno`."
+            "YouTube links need ffmpeg and deno, which chill can't find. Install them with `brew install ffmpeg deno`. Node.js 22 or newer works in place of deno."
         );
         assert!(
             youtube_hint(&[Tool::Ffmpeg, Tool::Deno], brew(), false)
@@ -373,7 +380,7 @@ mod tests {
         let elsewhere = youtube_hint(&Tool::ALL, None, false).unwrap();
         assert!(
             elsewhere.contains("ffmpeg, yt-dlp, and deno")
-                && elsewhere.ends_with("Run chill doctor to see how to install them.")
+                && elsewhere.contains("Run chill doctor to see how to install them.")
         );
     }
 
