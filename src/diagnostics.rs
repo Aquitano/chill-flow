@@ -85,8 +85,13 @@ impl Diagnostics {
             + usize::from(self.history.omitted > 0 && !self.history.overflow_dismissed)
     }
 
-    pub fn first_pending(&self) -> Option<&Diagnostic> {
-        self.history.entries.iter().find(|entry| !entry.dismissed)
+    /// The pending entry seen most recently, so the notice shows what just went wrong.
+    pub fn latest_pending(&self) -> Option<&Diagnostic> {
+        self.history
+            .entries
+            .iter()
+            .filter(|entry| !entry.dismissed)
+            .max_by_key(|entry| entry.last_seen.parse::<jiff::Timestamp>().ok())
     }
 
     pub fn adjacent_entry(&self, id: usize, step: isize) -> Option<usize> {
@@ -197,6 +202,23 @@ pub fn redact(message: &str, secret: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_notice_shows_the_failure_seen_last() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut diagnostics = Diagnostics::new(dir.path().join("diagnostics.json"));
+        let mut record = |message| {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            diagnostics.record(message, None);
+            diagnostics.latest_pending().map(|entry| entry.message.clone())
+        };
+        assert_eq!(record("No audio output").as_deref(), Some("No audio output"));
+        assert_eq!(
+            record("YouTube links need ffmpeg").as_deref(),
+            Some("YouTube links need ffmpeg")
+        );
+        assert_eq!(record("No audio output").as_deref(), Some("No audio output"));
+    }
 
     #[test]
     fn dismissal_keeps_history_and_repeated_failures_reopen_the_notice() {

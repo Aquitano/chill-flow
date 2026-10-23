@@ -53,7 +53,7 @@ chill update                            # update an official installation
 
 Paste a YouTube link anywhere in the app to add it to the library and play it. Everything responds to the mouse: click rows and buttons, drag the sliders, scroll the lists. Press `?` for every key, or `ctrl+p` to search all commands.
 
-Errors and dependency notices stay in a compact notice until dismissed. Click the notice, press `D`, or search for **Recent errors and diagnostics** in the palette. Use left and right to choose an entry, up and down to read long messages, and Enter to dismiss it. Dismissed entries remain in the history. The cache holds up to 100 entries in `diagnostics.json`, with URLs and sync keys redacted. Repeated failures share an entry and a count. When all entries are unresolved, an explicit overflow count records further failures until you dismiss some entries. Quiet successful toasts still disappear on their own.
+Errors and dependency notices stay in a compact notice until dismissed, which shows the one that happened last. Click the notice, press `D`, or search for **Recent errors and diagnostics** in the palette. Use left and right to choose an entry, up and down to read long messages, and Enter to dismiss it. Dismissed entries remain in the history. The cache holds up to 100 entries in `diagnostics.json`, with URLs and sync keys redacted. Repeated failures share an entry and a count. When all entries are unresolved, an explicit overflow count records further failures until you dismiss some entries. Quiet successful toasts still disappear on their own.
 
 | Key | Does |
 | --- | --- |

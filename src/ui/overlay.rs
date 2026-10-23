@@ -690,7 +690,7 @@ pub fn diagnostic_notice(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
         .diagnostics
         .log_error
         .as_deref()
-        .or_else(|| app.diagnostics.first_pending().map(|entry| entry.message.as_str()))
+        .or_else(|| app.diagnostics.latest_pending().map(|entry| entry.message.as_str()))
         .unwrap_or("More failures occurred while the history was full. Open diagnostics for the count.");
     put(
         buf,
