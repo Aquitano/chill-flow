@@ -31,39 +31,59 @@ pub(super) struct LoadRequest {
 }
 
 pub(super) fn spawn_load(request: LoadRequest, loaded: Sender<LoadedLoop>, events: Sender<EngineEvent>) {
-    thread::spawn(move || match load(&request.source, &request.cache_dir, request.rate) {
-        Ok(samples) => {
-            let _ = loaded.send(LoadedLoop {
-                samples,
-                level: request.level,
-            });
-        }
-        Err(message) => {
-            request.level.retire();
-            let _ = events.send(EngineEvent::AmbientFailed {
-                id: request.id,
-                message,
-            });
-        }
-    });
+    thread::spawn(
+        move || match load(&request.source, &request.cache_dir, request.rate, &request.level) {
+            Ok(Some(samples)) => {
+                let _ = loaded.send(LoadedLoop {
+                    samples,
+                    level: request.level,
+                });
+            }
+            Ok(None) => {}
+            Err(message) => {
+                request.level.retire();
+                let _ = events.send(EngineEvent::AmbientFailed {
+                    id: request.id,
+                    message,
+                });
+            }
+        },
+    );
 }
 
-fn load(source: &LoopSource, cache_dir: &Path, rate: u32) -> Result<Box<[i16]>, String> {
+/// The loop for `source`, or nothing once the sound was turned off meanwhile, so switching mixes
+/// quickly doesn't decode recordings no one hears. Giving up retires `level` only while it's
+/// still off, so a sound turned back on in the meantime loads after all.
+fn load(source: &LoopSource, cache_dir: &Path, rate: u32, level: &LaneLevel) -> Result<Option<Box<[i16]>>, String> {
     let url = match source {
         LoopSource::File(url) => url,
         LoopSource::Noise(noise) => {
             let mut samples = noise.generate(rate);
             close_loop(&mut samples, (SEAM_SECS * rate as f32) as usize);
-            return Ok(samples.into_boxed_slice());
+            return Ok(Some(samples.into_boxed_slice()));
         }
     };
-    let path = cached_file(url, cache_dir)?;
-    let looped = decode(&path, rate).and_then(|samples| into_loop(&path, samples, rate));
-    if looped.is_err() {
-        // A damaged download would fail the same way every time, so the next try fetches it again.
-        let _ = fs::remove_file(&path);
+    if level.try_retire() {
+        return Ok(None);
     }
-    looped
+    let path = cached_file(url, cache_dir)?;
+    loop {
+        let looped = match decode(&path, rate, level) {
+            Ok(Some(samples)) => into_loop(&path, samples, rate),
+            Ok(None) if level.try_retire() => return Ok(None),
+            // Turned back on while decoding stopped, so the whole recording is needed after all.
+            Ok(None) => continue,
+            Err(error) => Err(error),
+        };
+        if looped.is_err() {
+            // A damaged download would fail the same way every time, so the next try fetches it again.
+            let _ = fs::remove_file(&path);
+            if level.try_retire() {
+                return Ok(None);
+            }
+        }
+        return looped.map(Some);
+    }
 }
 
 fn cached_file(url: &str, cache_dir: &Path) -> Result<PathBuf, String> {
@@ -105,18 +125,21 @@ fn cache_name(url: &str) -> Option<String> {
     Some(format!("{:x}", Sha256::digest(resource.as_bytes())))
 }
 
-fn decode(path: &Path, rate: u32) -> Result<Vec<i16>, String> {
+/// The whole recording, or nothing if the sound was turned off before it finished.
+fn decode(path: &Path, rate: u32, level: &LaneLevel) -> Result<Option<Vec<i16>>, String> {
     let source = File::open(path).map_err(|error| format!("could not open {}: {error}", path.display()))?;
     let mut samples = Vec::new();
+    let mut stopped = false;
     file::decode(Box::new(source), 0.0, rate, |decoded| {
         samples.extend(
             decoded
                 .iter()
                 .map(|&sample| (sample * 32768.0).round().clamp(-32768.0, 32767.0) as i16),
         );
-        true
+        stopped = !level.wanted();
+        !stopped
     })?;
-    Ok(samples)
+    Ok((!stopped).then_some(samples))
 }
 
 fn into_loop(path: &Path, mut samples: Vec<i16>, rate: u32) -> Result<Box<[i16]>, String> {
@@ -214,8 +237,34 @@ mod tests {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, b"not audio").unwrap();
 
-        assert!(load(&LoopSource::File(url.into()), cache.path(), 48_000).is_err());
+        assert!(
+            load(
+                &LoopSource::File(url.into()),
+                cache.path(),
+                48_000,
+                &LaneLevel::new(1.0)
+            )
+            .is_err()
+        );
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn a_sound_turned_off_while_it_loads_is_never_decoded() {
+        let cache = tempfile::tempdir().unwrap();
+        let url = "https://example.com/tone.mp3";
+        let path = cache.path().join("ambient").join(cache_name(url).unwrap());
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, include_bytes!("tone.mp3")).unwrap();
+        let source = LoopSource::File(url.into());
+
+        let on = LaneLevel::new(1.0);
+        assert!(load(&source, cache.path(), 48_000, &on).unwrap().is_some());
+        assert!(on.set(0.5));
+        let off = LaneLevel::new(0.0);
+        assert!(load(&source, cache.path(), 48_000, &off).unwrap().is_none());
+        // Giving up retired the level, so turning the sound up again starts a fresh load.
+        assert!(!off.set(0.5));
     }
 
     #[test]
