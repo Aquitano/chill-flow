@@ -50,7 +50,7 @@ impl Item {
 
     pub fn origin(&self) -> &'static str {
         match self.play {
-            Playable::File { .. } => "R2",
+            Playable::File { .. } => "Catalog",
             Playable::YouTube { live: true, .. } => "YouTube live",
             Playable::YouTube { live: false, .. } => "YouTube",
         }
