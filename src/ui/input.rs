@@ -98,7 +98,7 @@ pub fn apply(app: &mut App, ui: &mut Ui, action: Action) {
         Action::OpenDiagnostics => ui.open(Overlay::Diagnostics {
             selected: app
                 .diagnostics
-                .first_pending()
+                .latest_pending()
                 .or_else(|| app.diagnostics.entries().last())
                 .map_or(0, |entry| entry.id),
             scroll: 0,

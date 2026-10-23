@@ -133,7 +133,7 @@ pub fn clock_width(text: &str) -> u16 {
 }
 
 /// Renders digits and colons three rows tall from a 3x5 pixel font, two columns per pixel.
-pub fn big_clock(buf: &mut Buffer, x: u16, y: u16, text: &str, style: Style, colon: Style) {
+pub fn big_clock(buf: &mut Buffer, x: u16, y: u16, text: &str, style: Style) {
     let mut cursor = x;
     for ch in text.chars() {
         let (glyph, narrow) = match ch {
@@ -143,7 +143,6 @@ pub fn big_clock(buf: &mut Buffer, x: u16, y: u16, text: &str, style: Style, col
                 None => continue,
             },
         };
-        let style = if narrow { colon } else { style };
         for row in 0..3 {
             for column in 0..3 {
                 if narrow && column != 1 {
@@ -237,7 +236,7 @@ pub fn bar_chart(buf: &mut Buffer, area: Rect, bars: &[(String, u32, bool)], gro
         let label_style = if *highlight {
             Style::new().fg(theme.text())
         } else {
-            Style::new().fg(theme.faint())
+            Style::new().fg(theme.muted())
         };
         put(buf, label_x, area.y + chart_rows + 1, label, label_style);
     }

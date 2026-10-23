@@ -192,7 +192,7 @@ fn dialog(buf: &mut Buffer, screen: Rect, width: u16, height: u16, top: Option<u
         Style::new().fg(theme.text()).add_modifier(Modifier::BOLD),
     );
     let esc = Rect::new(inner.right().saturating_sub(3), inner.y, 3, 1);
-    let esc_color = if ui.hovered(esc) { theme.text() } else { theme.faint() };
+    let esc_color = if ui.hovered(esc) { theme.text() } else { theme.muted() };
     put(buf, esc.x, esc.y, "esc", Style::new().fg(esc_color));
     ui.hits.push((area, Hit::Dialog));
     ui.hits.push((esc, Hit::Backdrop));
@@ -238,8 +238,8 @@ fn key_hints(buf: &mut Buffer, x: u16, y: u16, hints: &[(&str, &str)], ui: &Ui) 
     let theme = ui.theme;
     let mut x = x;
     for (key, label) in hints {
-        x = put(buf, x, y, key, Style::new().fg(theme.muted()));
-        x = put(buf, x + 1, y, label, Style::new().fg(theme.faint())) + 3;
+        x = put(buf, x, y, key, Style::new().fg(theme.text()));
+        x = put(buf, x + 1, y, label, Style::new().fg(theme.muted())) + 3;
     }
 }
 
@@ -304,7 +304,7 @@ fn palette(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, query: &str, 
             list.x + 2,
             list.y,
             "No matching command",
-            Style::new().fg(theme.faint()),
+            Style::new().fg(theme.muted()),
         );
         return;
     }
@@ -324,7 +324,7 @@ fn palette(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, query: &str, 
             rect.right().saturating_sub(key_width + 1),
             y,
             entry.key,
-            Style::new().fg(theme.faint()),
+            Style::new().fg(theme.muted()),
         );
         let available = usize::from(rect.width.saturating_sub(key_width + 4));
         let color = if index == selected { theme.text() } else { theme.muted() };
@@ -356,7 +356,7 @@ fn prompt(buf: &mut Buffer, screen: Rect, ui: &mut Ui, kind: Prompt, input: &str
             content.x,
             content.y + 2 + offset as u16,
             line,
-            Style::new().fg(theme.faint()),
+            Style::new().fg(theme.muted()),
         );
     }
     key_hints(
@@ -486,7 +486,7 @@ fn help(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, scroll: &mut usi
             content.x,
             content.bottom() - 1,
             &fit(hint, usize::from(content.width)),
-            faint,
+            muted,
         );
     }
 }
@@ -496,7 +496,7 @@ fn stats(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant) {
     let content = dialog(buf, screen, 66, 19, None, "Focus", ui);
     let days = &app.focus_days.days;
     let week: u32 = days.iter().map(|(_, minutes)| *minutes).sum();
-    let x = put(buf, content.x, content.y, "today ", Style::new().fg(theme.faint()));
+    let x = put(buf, content.x, content.y, "today ", Style::new().fg(theme.muted()));
     let x = put(
         buf,
         x,
@@ -504,7 +504,7 @@ fn stats(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant) {
         &widgets::long_minutes(app.focus_days.today()),
         Style::new().fg(theme.text()).add_modifier(Modifier::BOLD),
     );
-    let x = put(buf, x + 4, content.y, "last 7 days ", Style::new().fg(theme.faint()));
+    let x = put(buf, x + 4, content.y, "last 7 days ", Style::new().fg(theme.muted()));
     put(
         buf,
         x,
@@ -529,7 +529,7 @@ fn stats(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant) {
         content.x,
         content.bottom().saturating_sub(1),
         "Counts every minute a focus block ran. Breaks never count.",
-        Style::new().fg(theme.faint()),
+        Style::new().fg(theme.muted()),
     );
 }
 
@@ -564,7 +564,7 @@ fn settings(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, selected: us
         let (index, setting) = match line {
             Line::Gap => continue,
             Line::Group(name) => {
-                put(buf, content.x, y, name, Style::new().fg(theme.faint()));
+                put(buf, content.x, y, name, Style::new().fg(theme.muted()));
                 continue;
             }
             Line::Row(index, setting) => (*index, *setting),
@@ -584,7 +584,7 @@ fn settings(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, selected: us
         let more = Rect::new(rect.right().saturating_sub(2), y, 1, 1);
         let value_x = more.x.saturating_sub(value.width() as u16 + 1);
         if setting.is_toggle() {
-            let color = if value == "on" { theme.accent } else { theme.faint() };
+            let color = if value == "on" { theme.accent } else { theme.muted() };
             put(buf, value_x, y, &value, Style::new().fg(color));
         } else {
             let arrow = |hovered: bool| Style::new().fg(if hovered { theme.accent } else { theme.faint() });
@@ -603,7 +603,7 @@ fn settings(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, selected: us
             content.x,
             content.bottom().saturating_sub(3),
             &fit(&format!("Changes save to {path}"), usize::from(content.width)),
-            Style::new().fg(theme.faint()),
+            Style::new().fg(theme.muted()),
         );
     }
     key_hints(
@@ -690,7 +690,7 @@ pub fn diagnostic_notice(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
         .diagnostics
         .log_error
         .as_deref()
-        .or_else(|| app.diagnostics.first_pending().map(|entry| entry.message.as_str()))
+        .or_else(|| app.diagnostics.latest_pending().map(|entry| entry.message.as_str()))
         .unwrap_or("More failures occurred while the history was full. Open diagnostics for the count.");
     put(
         buf,

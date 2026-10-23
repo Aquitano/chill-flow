@@ -85,8 +85,9 @@ impl Diagnostics {
             + usize::from(self.history.omitted > 0 && !self.history.overflow_dismissed)
     }
 
-    pub fn first_pending(&self) -> Option<&Diagnostic> {
-        self.history.entries.iter().find(|entry| !entry.dismissed)
+    /// The pending entry seen most recently, so the notice shows what just went wrong.
+    pub fn latest_pending(&self) -> Option<&Diagnostic> {
+        self.history.entries.iter().rev().find(|entry| !entry.dismissed)
     }
 
     pub fn adjacent_entry(&self, id: usize, step: isize) -> Option<usize> {
@@ -102,10 +103,13 @@ impl Diagnostics {
     pub fn record(&mut self, message: &str, secret: Option<&str>) {
         let message = redact(message, secret);
         let now = jiff::Timestamp::now().to_string();
-        if let Some(entry) = self.history.entries.iter_mut().find(|entry| entry.message == message) {
+        if let Some(index) = self.history.entries.iter().position(|entry| entry.message == message) {
+            // A repeat moves to the end, so the entries stay in the order they were last seen.
+            let mut entry = self.history.entries.remove(index);
             entry.occurrences = entry.occurrences.saturating_add(1);
             entry.last_seen = now;
             entry.dismissed = false;
+            self.history.entries.push(entry);
         } else {
             if self.history.entries.len() == CAPACITY {
                 if let Some(index) = self.history.entries.iter().position(|entry| entry.dismissed) {
@@ -197,6 +201,22 @@ pub fn redact(message: &str, secret: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_notice_shows_the_failure_seen_last() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut diagnostics = Diagnostics::new(dir.path().join("diagnostics.json"));
+        let mut record = |message| {
+            diagnostics.record(message, None);
+            diagnostics.latest_pending().map(|entry| entry.message.clone())
+        };
+        assert_eq!(record("No audio output").as_deref(), Some("No audio output"));
+        assert_eq!(
+            record("YouTube links need ffmpeg").as_deref(),
+            Some("YouTube links need ffmpeg")
+        );
+        assert_eq!(record("No audio output").as_deref(), Some("No audio output"));
+    }
 
     #[test]
     fn dismissal_keeps_history_and_repeated_failures_reopen_the_notice() {
