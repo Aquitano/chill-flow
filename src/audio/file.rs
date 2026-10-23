@@ -144,6 +144,10 @@ impl Read for Bytes {
         let download = &self.download;
         let mut progress = download.lock();
         loop {
+            // Checked before the bytes in hand, so a decoder a seek replaced stops scanning at once.
+            if self.state.cancelled.load(Ordering::Acquire) {
+                return Err(io::Error::other("playback moved on"));
+            }
             if let Some(available) = progress.bytes.get(self.position..)
                 && !available.is_empty()
             {
@@ -155,9 +159,6 @@ impl Read for Bytes {
             match &progress.end {
                 Some(Ok(())) => return Ok(0),
                 Some(Err(message)) => return Err(io::Error::other(message.clone())),
-                None if self.state.cancelled.load(Ordering::Acquire) => {
-                    return Err(io::Error::other("playback moved on"));
-                }
                 None if progress.arrived_at.elapsed() >= STALL => {
                     progress.end = Some(Err("the download stopped arriving".to_owned()));
                 }
@@ -476,6 +477,14 @@ mod tests {
         assert_eq!(streamed(0.0), whole);
         assert_eq!(streamed(1.5).len() / 2, 24_000);
         assert!(streamed(5.0).is_empty());
+    }
+
+    #[test]
+    fn a_replaced_decoder_stops_reading_bytes_already_downloaded() {
+        let state = Arc::new(MusicState::new());
+        state.cancelled.store(true, Ordering::Release);
+        let mut bytes = Bytes::new(download(b"abc", Some(Ok(()))), state);
+        assert!(bytes.read(&mut [0; 3]).is_err());
     }
 
     #[test]
