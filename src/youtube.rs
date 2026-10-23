@@ -159,7 +159,9 @@ fn yt_dlp(args: &[&str], report: impl FnOnce(Result<Vec<u8>>) + Send + 'static) 
         return Lookup { process: None };
     }
     let mut command = Command::new("yt-dlp");
-    command.args(args);
+    // yt-dlp only enables deno by default. With node enabled too, deno still wins when both
+    // are there, and node covers machines without deno.
+    command.args(["--js-runtimes", "node"]).args(args);
     Lookup::spawn(command, report)
 }
 

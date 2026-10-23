@@ -1,6 +1,7 @@
 use std::io::{Read, Seek};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
@@ -18,6 +19,8 @@ pub enum Tool {
 /// yt-dlp versions are release dates, and YouTube changes often enough that a release this old
 /// has likely stopped resolving some links.
 const YT_DLP_STALE_DAYS: i32 = 60;
+/// The oldest Node.js yt-dlp runs in place of deno.
+const NODE_MIN_MAJOR: u32 = 22;
 
 impl Tool {
     pub const ALL: [Tool; 3] = [Tool::Ffmpeg, Tool::YtDlp, Tool::Deno];
@@ -119,27 +122,34 @@ impl Tool {
     }
 }
 
-/// One command that installs `tools` on the platforms chill ships for.
+/// One command that installs `tools`: winget on Windows, and Homebrew on a Mac or wherever
+/// it's installed.
 fn install_command(tools: &[Tool]) -> Option<String> {
-    let (manager, package): (&str, fn(Tool) -> &'static str) = match std::env::consts::OS {
-        "macos" => ("brew", Tool::name),
-        "windows" => ("winget", Tool::winget_id),
-        _ => return None,
+    let (manager, package): (&str, fn(Tool) -> &'static str) = if cfg!(windows) {
+        ("winget", Tool::winget_id)
+    } else if cfg!(target_os = "macos") || has_brew() {
+        ("brew", Tool::name)
+    } else {
+        return None;
     };
     let packages: Vec<&str> = tools.iter().map(|&tool| package(tool)).collect();
     Some(format!("{manager} install {}", packages.join(" ")))
+}
+
+fn has_brew() -> bool {
+    which::which("brew").is_ok()
 }
 
 /// What stops YouTube links from working on this machine, if any of the tools is missing.
 pub fn missing_for_youtube() -> Option<String> {
     let missing: Vec<Tool> = Tool::ALL
         .into_iter()
-        .filter(|tool| which::which(tool.name()).is_err())
+        .filter(|&tool| which::which(tool.name()).is_err() && !(tool == Tool::Deno && node_stands_in()))
         .collect();
-    youtube_hint(&missing)
+    youtube_hint(&missing, install_command(&missing), has_brew())
 }
 
-fn youtube_hint(missing: &[Tool]) -> Option<String> {
+fn youtube_hint(missing: &[Tool], command: Option<String>, has_brew: bool) -> Option<String> {
     let (names, them) = match missing {
         [] => return None,
         [tool] => (tool.name().to_owned(), "it"),
@@ -147,14 +157,36 @@ fn youtube_hint(missing: &[Tool]) -> Option<String> {
         _ => ("ffmpeg, yt-dlp, and deno".to_owned(), "them"),
     };
     // winget puts what it installs on the PATH of terminals opened afterwards.
-    let install = match install_command(missing) {
-        Some(command) if cfg!(windows) => {
+    let install = match command {
+        Some(command) if command.starts_with("winget") => {
             format!("Install {them} with `{command}`, then start chill from a new terminal.")
+        }
+        Some(command) if !has_brew => {
+            format!("Install Homebrew from https://brew.sh, then install {them} with `{command}`.")
         }
         Some(command) => format!("Install {them} with `{command}`."),
         None => "Run chill doctor to see how to install them.".to_owned(),
     };
     Some(format!("YouTube links need {names}, which chill can't find. {install}"))
+}
+
+/// The version of Node.js on the PATH, when it's new enough for yt-dlp to use in place of deno.
+pub fn node() -> Option<String> {
+    let path = which::which("node").ok()?;
+    let output = version_output(Command::new(path).arg("--version"), Duration::from_secs(5)).ok()?;
+    usable_node(&output).map(str::to_owned)
+}
+
+/// Checked once per run: it starts node, and every YouTube link checks its tools first.
+fn node_stands_in() -> bool {
+    static USABLE: OnceLock<bool> = OnceLock::new();
+    *USABLE.get_or_init(|| node().is_some())
+}
+
+fn usable_node(output: &str) -> Option<&str> {
+    let version = output.trim().strip_prefix('v')?;
+    let major: u32 = version.split('.').next()?.parse().ok()?;
+    (major >= NODE_MIN_MAJOR).then_some(version)
 }
 
 #[derive(Debug)]
@@ -305,16 +337,36 @@ mod tests {
 
     #[test]
     fn youtube_names_every_missing_tool_in_one_install_command() {
-        assert_eq!(youtube_hint(&[]), None);
-        let hint = youtube_hint(&[Tool::Ffmpeg, Tool::Deno]).unwrap();
-        assert!(hint.starts_with("YouTube links need ffmpeg and deno, which chill can't find."));
-        if cfg!(target_os = "macos") {
-            assert!(hint.contains("`brew install ffmpeg deno`"));
-        }
-        if cfg!(windows) {
-            assert!(hint.contains("`winget install Gyan.FFmpeg DenoLand.Deno`"));
-        }
-        assert!(youtube_hint(&Tool::ALL).unwrap().contains("ffmpeg, yt-dlp, and deno"));
+        let brew = || Some("brew install ffmpeg deno".to_owned());
+        assert_eq!(youtube_hint(&[], brew(), true), None);
+        assert_eq!(
+            youtube_hint(&[Tool::Ffmpeg, Tool::Deno], brew(), true).unwrap(),
+            "YouTube links need ffmpeg and deno, which chill can't find. Install them with `brew install ffmpeg deno`."
+        );
+        assert!(
+            youtube_hint(&[Tool::Ffmpeg, Tool::Deno], brew(), false)
+                .unwrap()
+                .contains("Install Homebrew from https://brew.sh, then install them with `brew install ffmpeg deno`.")
+        );
+        let winget = Some("winget install Gyan.FFmpeg".to_owned());
+        assert!(
+            youtube_hint(&[Tool::Ffmpeg], winget, false)
+                .unwrap()
+                .ends_with("then start chill from a new terminal.")
+        );
+        let elsewhere = youtube_hint(&Tool::ALL, None, false).unwrap();
+        assert!(
+            elsewhere.contains("ffmpeg, yt-dlp, and deno")
+                && elsewhere.ends_with("Run chill doctor to see how to install them.")
+        );
+    }
+
+    #[test]
+    fn node_22_or_newer_stands_in_for_deno() {
+        assert_eq!(usable_node("v22.11.0\n"), Some("22.11.0"));
+        assert_eq!(usable_node("v24.1.0"), Some("24.1.0"));
+        assert_eq!(usable_node("v20.18.0"), None);
+        assert_eq!(usable_node("node: command failed"), None);
     }
 
     #[test]
