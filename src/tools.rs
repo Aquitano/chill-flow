@@ -1,7 +1,7 @@
 use std::io::{Read, Seek};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
@@ -172,16 +172,31 @@ fn youtube_hint(missing: &[Tool], command: Option<String>, has_brew: bool) -> Op
 
 /// The version of Node.js on the PATH, when it's new enough for yt-dlp to use in place of deno.
 pub fn node() -> Option<String> {
-    let path = which::which("node").ok()?;
+    node_at(&which::which("node").ok()?)
+}
+
+fn node_at(path: &Path) -> Option<String> {
     let output = version_output(Command::new(path).arg("--version"), Duration::from_secs(5)).ok()?;
     usable_node(&output).map(str::to_owned)
 }
 
-/// Checked once per run, and first by the startup tool check, since it starts node and a
-/// YouTube link checks its tools on the interface thread.
+/// Starts node only when the one on the PATH resolves to a different file than last time, such
+/// as after an install or upgrade, since a YouTube link checks its tools on the interface thread.
+/// The startup tool check asks first.
 pub fn node_stands_in() -> bool {
-    static USABLE: OnceLock<bool> = OnceLock::new();
-    *USABLE.get_or_init(|| node().is_some())
+    static CHECKED: Mutex<Option<(PathBuf, bool)>> = Mutex::new(None);
+    let Some(path) = which::which("node").ok().and_then(|path| path.canonicalize().ok()) else {
+        return false;
+    };
+    let mut checked = CHECKED.lock().unwrap_or_else(PoisonError::into_inner);
+    match &*checked {
+        Some((seen, usable)) if *seen == path => *usable,
+        _ => {
+            let usable = node_at(&path).is_some();
+            *checked = Some((path, usable));
+            usable
+        }
+    }
 }
 
 fn usable_node(output: &str) -> Option<&str> {
