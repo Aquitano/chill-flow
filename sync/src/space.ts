@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { limits, type StoredChange, type SyncResult } from "./protocol";
+import { limits, type StoredChange, type SyncFailure, type SyncRecord, type SyncResult } from "./protocol";
 
 type Row = {
   kind: StoredChange["kind"];
@@ -22,7 +22,7 @@ const upsert = `
 
 /** Thrown inside the transaction to roll it back and answer with `result` instead. */
 class Refused extends Error {
-  constructor(readonly result: SyncResult) {
+  constructor(readonly result: SyncFailure) {
     super(result.type);
   }
 }
@@ -79,11 +79,10 @@ export class SyncSpace extends DurableObject<Env> {
     const winners = lostTies.flatMap(({ kind, id, updatedAt }) =>
       sql
         .exec<Row>(
-          "SELECT kind, id, updated_at, deleted, body, seq FROM records WHERE kind = ? AND id = ? AND updated_at = ? AND seq <= ?",
+          "SELECT kind, id, updated_at, deleted, body, seq FROM records WHERE kind = ? AND id = ? AND updated_at = ?",
           kind,
           id,
           updatedAt,
-          cursor,
         )
         .toArray(),
     );
@@ -95,21 +94,28 @@ export class SyncSpace extends DurableObject<Env> {
         limits.recordsPerPage + 1,
       )
       .toArray();
-    // A page also stops at a size, so a client never has to hold a thousand of the largest bodies.
-    const page: Row[] = [];
-    let bytes = 0;
-    for (const row of [...rows.slice(0, limits.recordsPerPage), ...winners]) {
-      if (page.length > 0 && bytes + row.body.length > limits.pageBytes) break;
-      page.push(row);
-      bytes += row.body.length;
+    // Winners cannot wait for another page once the client acknowledges its upload. The space
+    // cap bounds them; one forward row still fits the client's answer limit and advances its cursor.
+    const encoder = new TextEncoder();
+    const winnerSeqs = new Set(winners.map(({ seq }) => seq));
+    const forwardLimit = Math.max(1, limits.recordsPerPage - winners.length);
+    const sent: Row[] = [];
+    let consumed = 0;
+    let bytes = winners.reduce((total, row) => total + encoder.encode(row.body).byteLength, 0);
+    for (const row of rows.slice(0, limits.recordsPerPage)) {
+      if (!winnerSeqs.has(row.seq)) {
+        const rowBytes = encoder.encode(row.body).byteLength;
+        if (sent.length > 0 && (sent.length >= forwardLimit || bytes + rowBytes > limits.pageBytes)) break;
+        sent.push(row);
+        bytes += rowBytes;
+      }
+      consumed++;
     }
-    const sent = page.filter((row) => row.seq > cursor);
-    return {
-      type: "synced",
-      cursor: sent.at(-1)?.seq ?? cursor,
-      changes: page.map(toChange),
-      more: sent.length < rows.length,
-    };
+    return Response.json({
+      cursor: rows[consumed - 1]?.seq ?? cursor,
+      changes: [...winners, ...sent].map(toRecord),
+      more: consumed < rows.length,
+    });
   }
 
   /**
@@ -144,7 +150,9 @@ export class SyncSpace extends DurableObject<Env> {
   }
 }
 
-function toChange(row: Row): StoredChange {
-  const key = { kind: row.kind, id: row.id, updatedAt: row.updated_at, body: row.body };
-  return row.deleted ? { ...key, deleted: true } : { ...key, deleted: false };
+function toRecord(row: Row): SyncRecord {
+  const key = { kind: row.kind, id: row.id, updatedAt: row.updated_at };
+  return row.deleted
+    ? { ...key, deleted: true, body: null }
+    : { ...key, deleted: false, body: JSON.parse(row.body) };
 }

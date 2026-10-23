@@ -1,6 +1,6 @@
 import { type } from "arktype";
 import { exports } from "cloudflare:workers";
-import { limits, syncRequest, type StoredChange, type SyncRecord } from "./protocol";
+import { limits, syncRequest } from "./protocol";
 import { mintToken, verifyToken } from "./token";
 
 export { Admission } from "./admission";
@@ -56,11 +56,10 @@ async function sync(request: Request, env: Env) {
   if (keys.size < parsed.changes.length) return fail(400, "the sync request changes the same record twice");
 
   const result = await space.sync(parsed.cursor, parsed.changes);
+  if (result instanceof Response) return result;
   if (result.type === "full") return fail(507, "this sync space is full");
   if (result.type === "over budget") return fail(429, "this sync space changed too much today, try again tomorrow");
-  if (result.type === "deleted") return fail(410, "this sync space was deleted");
-  const { cursor, changes, more } = result;
-  return Response.json({ cursor, changes: changes.map(toRecord), more });
+  return fail(410, "this sync space was deleted");
 }
 
 async function deleteSpace(request: Request, env: Env) {
@@ -110,10 +109,4 @@ async function readBody(request: Request): Promise<unknown> {
   } catch {
     return fail(400, "the request body is not valid JSON");
   }
-}
-
-function toRecord({ body, ...change }: StoredChange): SyncRecord {
-  return change.deleted
-    ? { ...change, deleted: true, body: null }
-    : { ...change, deleted: false, body: JSON.parse(body) };
 }

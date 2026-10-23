@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui_image::picker::Picker;
+use ratatui_image::picker::{Picker, ProtocolType};
 use ratatui_image::protocol::StatefulProtocol;
 use ratatui_image::{FilterType, Resize, StatefulImage};
 
@@ -493,14 +493,26 @@ impl Ui {
         let toast_footer = if notice.height > 0 { notice } else { footer };
         overlay::toasts(buf, toast_footer, self, now);
 
-        if let (Some(rect), Some(cover)) = (self.cover_rect, self.cover.as_mut()) {
+        let graphics = self.picker.protocol_type() != ProtocolType::Halfblocks;
+        if graphics {
+            overlay::draw(frame.buffer_mut(), area, app, self, now);
+        }
+        if let (Some(rect), Some(cover)) = (self.cover_rect, self.cover.as_mut())
+            && (!graphics
+                || !self
+                    .hits
+                    .iter()
+                    .any(|(dialog, hit)| *hit == Hit::Dialog && rect.intersects(*dialog)))
+        {
             frame.render_stateful_widget(
                 StatefulImage::default().resize(Resize::Scale(Some(FilterType::Triangle))),
                 rect,
                 &mut cover.protocol,
             );
         }
-        overlay::draw(frame.buffer_mut(), area, app, self, now);
+        if !graphics {
+            overlay::draw(frame.buffer_mut(), area, app, self, now);
+        }
     }
 
     fn cover_for(&self, url: Option<&str>) -> Option<f32> {

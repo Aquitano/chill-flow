@@ -250,12 +250,16 @@ impl Mixer {
                         self.discard(Garbage::Music(old));
                     }
                 }
-                Command::Ambient(lane) if self.ambient.len() < MAX_AMBIENT_LANES => {
-                    self.ambient.push(lane);
-                }
                 Command::Ambient(lane) => {
-                    lane.level.retire();
-                    self.discard(Garbage::Ambient(lane));
+                    if self.ambient.len() == MAX_AMBIENT_LANES {
+                        self.retire_silent_lanes();
+                    }
+                    if self.ambient.len() < MAX_AMBIENT_LANES {
+                        self.ambient.push(lane);
+                    } else {
+                        lane.level.retire();
+                        self.discard(Garbage::Ambient(lane));
+                    }
                 }
                 Command::Chime => self.chime_position = 0,
             }
@@ -282,8 +286,8 @@ impl Mixer {
             for lane in &mut self.ambient {
                 lane.mix_into(out, self.smoothing);
             }
-            self.retire_silent_lanes();
         }
+        self.retire_silent_lanes();
 
         let pause_target = if paused { 0.0 } else { 1.0 };
         let target_gain = self.controls.gain.load();
@@ -308,10 +312,11 @@ impl Mixer {
     }
 
     fn retire_silent_lanes(&mut self) {
+        let paused = self.controls.paused.load(Ordering::Relaxed) && self.pause_gain == 0.0;
         let mut index = 0;
         while index < self.ambient.len() {
             let lane = &self.ambient[index];
-            if lane.gain < SILENT && lane.level.try_retire() {
+            if (paused || lane.gain < SILENT) && lane.level.try_retire() {
                 let lane = self.ambient.swap_remove(index);
                 self.discard(Garbage::Ambient(lane));
             } else {
@@ -336,4 +341,56 @@ fn soft_limit(sample: f32) -> f32 {
     }
     let headroom = 1.0 - LIMITER_KNEE;
     sample.signum() * (LIMITER_KNEE + headroom * ((magnitude - LIMITER_KNEE) / headroom).tanh())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn muted_lanes_leave_room_for_new_sounds_while_paused() {
+        for played in [false, true] {
+            let controls = Arc::new(Controls {
+                gain: AtomicF32::new(1.0),
+                music_gain: AtomicF32::new(1.0),
+                paused: AtomicBool::new(!played),
+            });
+            let (mut mixer, mut ends) = Mixer::new(48_000, Arc::clone(&controls));
+            let levels: Vec<_> = (0..MAX_AMBIENT_LANES).map(|_| Arc::new(LaneLevel::new(0.5))).collect();
+            for level in &levels {
+                assert!(
+                    ends.commands
+                        .push(Command::Ambient(AmbientLane::new(
+                            vec![16_000; 2].into_boxed_slice(),
+                            Arc::clone(level),
+                        )))
+                        .is_ok()
+                );
+            }
+            let mut out = [0.0; BLOCK_FRAMES * 2];
+            mixer.render(&mut out);
+            controls.paused.store(true, Ordering::Relaxed);
+            for _ in 0..8 {
+                mixer.render(&mut out);
+            }
+            for level in levels {
+                assert!(level.set(0.0));
+            }
+            let replacement = Arc::new(LaneLevel::new(0.5));
+            assert!(
+                ends.commands
+                    .push(Command::Ambient(AmbientLane::new(
+                        vec![16_000; 2].into_boxed_slice(),
+                        Arc::clone(&replacement),
+                    )))
+                    .is_ok()
+            );
+            mixer.render(&mut out);
+            assert!(out.iter().all(|sample| *sample == 0.0));
+            assert!(replacement.set(0.75));
+            controls.paused.store(false, Ordering::Relaxed);
+            mixer.render(&mut out);
+            assert!(out.iter().any(|sample| *sample > 0.0));
+        }
+    }
 }

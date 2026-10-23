@@ -5,13 +5,13 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Modifier};
-use ratatui_image::picker::Picker;
+use ratatui_image::picker::{Picker, ProtocolType};
 use unicode_width::UnicodeWidthStr;
 
-use super::{Ui, picture::Picture, theme::Theme};
+use super::{Hit, Overlay, Ui, picture::Picture, theme::Theme};
 use crate::app::TestApp;
 use crate::catalog::{AmbientSound, Catalog, CatalogTrack};
-use crate::model::Item;
+use crate::model::{Item, Playable};
 use crate::store::FocusDays;
 use crate::timer::{Timer, TimerMode};
 
@@ -182,6 +182,56 @@ fn render(layout: Layout) -> Buffer {
 
 fn row(buffer: &Buffer, y: u16) -> String {
     (0..buffer.area.width).map(|x| buffer[(x, y)].symbol()).collect()
+}
+
+#[test]
+fn kitty_cover_transmission_waits_until_a_dialog_no_longer_overlaps() {
+    let graphics = |buffer: &Buffer| {
+        let contains = |text| buffer.content().iter().any(|cell| cell.symbol().contains(text));
+        (contains("\x1b_G"), contains("\u{10eeee}"))
+    };
+    for (width, height, overlaps, covers_origin) in
+        [(80, 24, true, true), (160, 44, true, false), (160, 80, false, false)]
+    {
+        let mut app = TestApp::offline();
+        let url = "offline-cover";
+        app.queue.replace(
+            vec![Item {
+                key: "offline-track".into(),
+                title: "Offline track".into(),
+                artist: String::new(),
+                duration: Some(180),
+                cover: Some(url.into()),
+                play: Playable::File {
+                    url: "offline-audio".into(),
+                },
+            }],
+            None,
+        );
+        let mut picker = Picker::halfblocks();
+        picker.set_protocol_type(ProtocolType::Kitty);
+        let mut ui = Ui::new(Theme::new(None), picker, true);
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        ui.open(Overlay::Help);
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        app.covers.push((
+            url.into(),
+            image::RgbaImage::from_pixel(40, 40, image::Rgba([80, 120, 160, 255])).into(),
+        ));
+        for first in [true, false] {
+            let buffer = terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap().buffer;
+            let cover = ui.cover_rect.unwrap();
+            let dialog = ui.hits.iter().find(|(_, hit)| *hit == Hit::Dialog).unwrap().0;
+            assert_eq!(cover.intersects(dialog), overlaps, "{width}x{height}");
+            assert_eq!(dialog.contains(cover.as_position()), covers_origin, "{width}x{height}");
+            assert_eq!(graphics(buffer), (!overlaps && first, !overlaps), "{width}x{height}");
+        }
+        ui.close();
+        let buffer = terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap().buffer;
+        assert_eq!(graphics(buffer), (overlaps, true), "{width}x{height}");
+        let buffer = terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap().buffer;
+        assert_eq!(graphics(buffer), (false, true), "{width}x{height}");
+    }
 }
 
 #[test]
