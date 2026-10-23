@@ -7,7 +7,7 @@ use anyhow::{Context, Result, bail};
 
 use jiff::civil::Date;
 
-/// The programs chill runs but doesn't ship.
+/// The programs chill runs for YouTube but doesn't ship.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
     Ffmpeg,
@@ -32,23 +32,28 @@ impl Tool {
 
     pub fn purpose(self) -> &'static str {
         match self {
-            Tool::Ffmpeg => "decodes every stream",
+            Tool::Ffmpeg => "decodes YouTube audio",
             Tool::YtDlp => "resolves YouTube links",
             Tool::Deno => "lets yt-dlp read YouTube's player",
         }
     }
 
-    pub fn install(self) -> &'static str {
-        match (self, std::env::consts::OS) {
-            (Tool::Ffmpeg, "macos") => "brew install ffmpeg",
-            (Tool::YtDlp, "macos") => "brew install yt-dlp",
-            (Tool::Deno, "macos") => "brew install deno",
-            (Tool::Ffmpeg, "windows") => "winget install Gyan.FFmpeg",
-            (Tool::YtDlp, "windows") => "winget install yt-dlp.yt-dlp",
-            (Tool::Deno, "windows") => "winget install DenoLand.Deno",
-            (Tool::Ffmpeg, _) => "install ffmpeg with your system package manager (https://ffmpeg.org/download.html)",
-            (Tool::YtDlp, _) => "follow https://github.com/yt-dlp/yt-dlp#installation",
-            (Tool::Deno, _) => "follow https://docs.deno.com/runtime/getting_started/installation/",
+    pub fn install(self) -> String {
+        install_command(&[self]).unwrap_or_else(|| {
+            match self {
+                Tool::Ffmpeg => "install ffmpeg with your system package manager (https://ffmpeg.org/download.html)",
+                Tool::YtDlp => "follow https://github.com/yt-dlp/yt-dlp#installation",
+                Tool::Deno => "follow https://docs.deno.com/runtime/getting_started/installation/",
+            }
+            .to_owned()
+        })
+    }
+
+    fn winget_id(self) -> &'static str {
+        match self {
+            Tool::Ffmpeg => "Gyan.FFmpeg",
+            Tool::YtDlp => "yt-dlp.yt-dlp",
+            Tool::Deno => "DenoLand.Deno",
         }
     }
 
@@ -114,6 +119,44 @@ impl Tool {
     }
 }
 
+/// One command that installs `tools` on the platforms chill ships for.
+fn install_command(tools: &[Tool]) -> Option<String> {
+    let (manager, package): (&str, fn(Tool) -> &'static str) = match std::env::consts::OS {
+        "macos" => ("brew", Tool::name),
+        "windows" => ("winget", Tool::winget_id),
+        _ => return None,
+    };
+    let packages: Vec<&str> = tools.iter().map(|&tool| package(tool)).collect();
+    Some(format!("{manager} install {}", packages.join(" ")))
+}
+
+/// What stops YouTube links from working on this machine, if any of the tools is missing.
+pub fn missing_for_youtube() -> Option<String> {
+    let missing: Vec<Tool> = Tool::ALL
+        .into_iter()
+        .filter(|tool| which::which(tool.name()).is_err())
+        .collect();
+    youtube_hint(&missing)
+}
+
+fn youtube_hint(missing: &[Tool]) -> Option<String> {
+    let (names, them) = match missing {
+        [] => return None,
+        [tool] => (tool.name().to_owned(), "it"),
+        [first, second] => (format!("{} and {}", first.name(), second.name()), "them"),
+        _ => ("ffmpeg, yt-dlp, and deno".to_owned(), "them"),
+    };
+    // winget puts what it installs on the PATH of terminals opened afterwards.
+    let install = match install_command(missing) {
+        Some(command) if cfg!(windows) => {
+            format!("Install {them} with `{command}`, then start chill from a new terminal.")
+        }
+        Some(command) => format!("Install {them} with `{command}`."),
+        None => "Run chill doctor to see how to install them.".to_owned(),
+    };
+    Some(format!("YouTube links need {names}, which chill can't find. {install}"))
+}
+
 #[derive(Debug)]
 pub struct Inspection {
     pub tool: Tool,
@@ -129,10 +172,12 @@ pub enum State {
 }
 
 impl Inspection {
+    /// What to say at startup. A missing tool waits until a YouTube link needs it, since
+    /// everything else plays without it.
     pub fn notice(&self, today: Date) -> Option<String> {
         let tool = self.tool;
         let detail = match &self.state {
-            State::Missing => format!("{} is missing.", tool.name()),
+            State::Missing => return None,
             State::Broken(error) => format!("{} is broken: {error}.", tool.name()),
             State::Installed(version) => {
                 tool.stale_days(version, today)?;
@@ -227,7 +272,7 @@ mod tests {
     }
 
     #[test]
-    fn dependency_notices_are_stable_and_leave_install_guidance_to_doctor() {
+    fn startup_notices_cover_broken_and_stale_tools_and_leave_missing_ones_to_youtube() {
         let today = Date::new(2026, 10, 19).unwrap();
         let stale = Inspection {
             tool: Tool::YtDlp,
@@ -245,14 +290,7 @@ mod tests {
                 path: None,
                 state: State::Missing,
             };
-            assert_eq!(
-                inspection.notice(today).unwrap(),
-                format!(
-                    "{} is missing. It {}. Run chill doctor for details.",
-                    tool.name(),
-                    tool.purpose()
-                )
-            );
+            assert_eq!(inspection.notice(today), None);
             inspection.state = State::Broken("loader failed".into());
             assert_eq!(
                 inspection.notice(today).unwrap(),
@@ -263,6 +301,20 @@ mod tests {
                 )
             );
         }
+    }
+
+    #[test]
+    fn youtube_names_every_missing_tool_in_one_install_command() {
+        assert_eq!(youtube_hint(&[]), None);
+        let hint = youtube_hint(&[Tool::Ffmpeg, Tool::Deno]).unwrap();
+        assert!(hint.starts_with("YouTube links need ffmpeg and deno, which chill can't find."));
+        if cfg!(target_os = "macos") {
+            assert!(hint.contains("`brew install ffmpeg deno`"));
+        }
+        if cfg!(windows) {
+            assert!(hint.contains("`winget install Gyan.FFmpeg DenoLand.Deno`"));
+        }
+        assert!(youtube_hint(&Tool::ALL).unwrap().contains("ffmpeg, yt-dlp, and deno"));
     }
 
     #[test]

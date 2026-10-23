@@ -336,7 +336,7 @@ impl App {
         }
     }
 
-    /// A missing ffmpeg would otherwise only show up as an error on the first play.
+    /// A broken or outdated tool would otherwise only show up as an error on the first YouTube link.
     pub fn check_tools(&self) {
         let jobs = self.jobs.clone();
         std::thread::spawn(move || {
@@ -2385,9 +2385,9 @@ mod tests {
         app.tools_checked(vec![ToolInspection {
             tool: Tool::Deno,
             path: None,
-            state: crate::tools::State::Missing,
+            state: crate::tools::State::Broken("loader failed".into()),
         }]);
-        assert!(app.diagnostics.entries()[0].message.contains("deno is missing"));
+        assert!(app.diagnostics.entries()[0].message.contains("deno is broken"));
         assert!(matches!(app.events.last(), Some(Event::Toast(Tone::Warning, _))));
         app.handle_engine(EngineEvent::NoDevice("device disconnected".into()));
         assert!(

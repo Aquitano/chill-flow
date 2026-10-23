@@ -11,8 +11,7 @@ use serde::Deserialize;
 
 use crate::audio::StreamInput;
 use crate::model::{Item, Playable, Saved};
-
-const INSTALL_HINT: &str = "yt-dlp is not installed. Install it with `brew install yt-dlp deno` (macOS) or `winget install yt-dlp.yt-dlp DenoLand.Deno` (Windows).";
+use crate::tools;
 
 #[derive(Debug, Deserialize)]
 struct Info {
@@ -66,10 +65,7 @@ impl Lookup {
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(error) => {
-                report(Err(match error.kind() {
-                    io::ErrorKind::NotFound => anyhow!(INSTALL_HINT),
-                    _ => anyhow!("could not run yt-dlp: {error}"),
-                }));
+                report(Err(anyhow!("could not run yt-dlp: {error}")));
                 return Self { process: None };
             }
         };
@@ -158,6 +154,10 @@ fn lookup_output(
 }
 
 fn yt_dlp(args: &[&str], report: impl FnOnce(Result<Vec<u8>>) + Send + 'static) -> Lookup {
+    if let Some(missing) = tools::missing_for_youtube() {
+        report(Err(anyhow!(missing)));
+        return Lookup { process: None };
+    }
     let mut command = Command::new("yt-dlp");
     command.args(args);
     Lookup::spawn(command, report)
