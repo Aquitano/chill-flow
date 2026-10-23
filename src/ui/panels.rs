@@ -156,11 +156,7 @@ pub fn header(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant
         return;
     }
 
-    let glyph = match (app.is_playing(), ui.motion) {
-        (true, true) => ["◐", "◓", "◑", "◒"][(now.duration_since(ui.started).as_millis() / 300) as usize % 4],
-        (true, false) => "●",
-        (false, _) => "○",
-    };
+    let glyph = if app.is_playing() { "●" } else { "○" };
     let mut x = put(buf, area.x + 1, area.y, glyph, Style::new().fg(theme.accent));
     x = put(
         buf,
@@ -916,16 +912,7 @@ pub fn focus(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant)
     } else {
         theme.muted()
     };
-    let blink_off = ui.motion && timer.is_running() && now.duration_since(ui.started).as_millis() % 1000 >= 500;
-    let colon = if blink_off { theme.mix(0.4) } else { digits };
-    widgets::big_clock(
-        buf,
-        clock_x,
-        clock_y,
-        &clock,
-        Style::new().fg(digits),
-        Style::new().fg(colon),
-    );
+    widgets::big_clock(buf, clock_x, clock_y, &clock, Style::new().fg(digits));
 
     let label = match timer.cycle() {
         Some((block, of)) => format!("{} · {block} of {of}", timer.phase().label()),
