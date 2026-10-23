@@ -444,7 +444,8 @@ impl Ui {
             let [library, center] = Layout::horizontal([Constraint::Length(library_width), Constraint::Fill(1)])
                 .spacing(1)
                 .areas(content);
-            let bottom_height = if app.side_hidden { queue_height(app, center) } else { 13 };
+            let bottom_height = if app.side_hidden { queue_height(app, center) } else { 13 }
+                .min(center.height.saturating_sub(panels::PLAYER_MIN_HEIGHT));
             let [player, bottom] =
                 Layout::vertical([Constraint::Fill(1), Constraint::Length(bottom_height)]).areas(center);
             if !app.library_hidden {
@@ -472,7 +473,9 @@ impl Ui {
                 }
             }
         } else {
-            let bottom_height = (body.height / 2).clamp(6, 14);
+            let bottom_height = (body.height / 2)
+                .clamp(6, 14)
+                .min(body.height.saturating_sub(panels::PLAYER_MIN_HEIGHT));
             let [player, bottom] =
                 Layout::vertical([Constraint::Fill(1), Constraint::Length(bottom_height)]).areas(body);
             panels::player(buf, player, app, self, now);
@@ -1150,6 +1153,29 @@ mod tests {
                 }),
             );
             assert!(!app.library_hidden);
+        }
+    }
+
+    #[test]
+    fn a_retained_diagnostic_leaves_room_for_the_player() {
+        for (width, height) in [(84, 24), (96, 24), (118, 24), (60, 20)] {
+            let mut app = offline_app();
+            app.diagnostics.record("yt-dlp is out of date and may fail.", None);
+            let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
+            let title = app.current().map(|item| item.title.clone()).unwrap_or_default();
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+            let page: String = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(
+                page.contains(&title) && page.contains("◂◂"),
+                "player hidden at {width}x{height}"
+            );
         }
     }
 

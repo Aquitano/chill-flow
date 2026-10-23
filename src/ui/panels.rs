@@ -452,13 +452,16 @@ pub fn library(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instan
     }
 }
 
+/// The rows the player needs for the track, the seek bar, and the controls.
+pub const PLAYER_MIN_HEIGHT: u16 = 9;
+
 pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Instant) {
     let theme = ui.theme;
     let inner = area.inner(Margin {
         horizontal: 2,
         vertical: 1,
     });
-    if inner.height < 7 || inner.width < 30 {
+    if area.height < PLAYER_MIN_HEIGHT || inner.width < 30 {
         return;
     }
     let item = app.current().cloned();
