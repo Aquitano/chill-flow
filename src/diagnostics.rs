@@ -87,11 +87,7 @@ impl Diagnostics {
 
     /// The pending entry seen most recently, so the notice shows what just went wrong.
     pub fn latest_pending(&self) -> Option<&Diagnostic> {
-        self.history
-            .entries
-            .iter()
-            .filter(|entry| !entry.dismissed)
-            .max_by_key(|entry| entry.last_seen.parse::<jiff::Timestamp>().ok())
+        self.history.entries.iter().rev().find(|entry| !entry.dismissed)
     }
 
     pub fn adjacent_entry(&self, id: usize, step: isize) -> Option<usize> {
@@ -107,10 +103,13 @@ impl Diagnostics {
     pub fn record(&mut self, message: &str, secret: Option<&str>) {
         let message = redact(message, secret);
         let now = jiff::Timestamp::now().to_string();
-        if let Some(entry) = self.history.entries.iter_mut().find(|entry| entry.message == message) {
+        if let Some(index) = self.history.entries.iter().position(|entry| entry.message == message) {
+            // A repeat moves to the end, so the entries stay in the order they were last seen.
+            let mut entry = self.history.entries.remove(index);
             entry.occurrences = entry.occurrences.saturating_add(1);
             entry.last_seen = now;
             entry.dismissed = false;
+            self.history.entries.push(entry);
         } else {
             if self.history.entries.len() == CAPACITY {
                 if let Some(index) = self.history.entries.iter().position(|entry| entry.dismissed) {
@@ -208,7 +207,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut diagnostics = Diagnostics::new(dir.path().join("diagnostics.json"));
         let mut record = |message| {
-            std::thread::sleep(std::time::Duration::from_millis(2));
             diagnostics.record(message, None);
             diagnostics.latest_pending().map(|entry| entry.message.clone())
         };
