@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -109,10 +110,38 @@ pub fn save(path: &Path, config: &Config) -> Result<()> {
     // Written beside the file and renamed over it, so a crash mid-save can't leave a half-written
     // config that stops the next start. A config linked from elsewhere, such as a dotfiles
     // repository, is replaced where the link points, so the link survives.
-    let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let partial = target.with_extension("toml.part");
-    std::fs::write(&partial, document.to_string())
-        .and_then(|()| std::fs::rename(&partial, &target))
+    let target = match std::fs::canonicalize(path) {
+        Ok(target) => target,
+        Err(error) => match std::fs::symlink_metadata(path) {
+            Err(metadata_error)
+                if metadata_error.kind() == std::io::ErrorKind::NotFound
+                    && error.kind() == std::io::ErrorKind::NotFound =>
+            {
+                path.to_path_buf()
+            }
+            _ => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "resolving {}; ensure any symlink destination exists before saving",
+                        path.display()
+                    )
+                });
+            }
+        },
+    };
+    let permissions = match std::fs::metadata(&target) {
+        Ok(metadata) => Some(metadata.permissions()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error).with_context(|| format!("reading permissions of {}", target.display())),
+    };
+    tempfile::NamedTempFile::new_in(target.parent().unwrap_or_else(|| Path::new(".")))
+        .and_then(|mut partial| {
+            if let Some(permissions) = permissions {
+                partial.as_file().set_permissions(permissions)?;
+            }
+            partial.write_all(document.to_string().as_bytes())?;
+            partial.persist(&target).map(|_| ()).map_err(|error| error.error)
+        })
         .with_context(|| format!("writing {}", path.display()))
 }
 
@@ -153,6 +182,47 @@ mod tests {
         assert_eq!(reloaded.catalogs, config.catalogs);
         assert_eq!((reloaded.chime, reloaded.pomodoro.focus_minutes), (false, 40));
         assert_eq!(reloaded.picture, Picture::FujiDawn);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saving_keeps_restrictive_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("config.toml");
+        std::fs::write(&path, "chime = true\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        save(&path, &Config::default()).unwrap();
+
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+
+        let new_path = folder.path().join("new-config.toml");
+        save(&new_path, &Config::default()).unwrap();
+        assert_eq!(
+            std::fs::metadata(&new_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saving_through_a_dangling_link_chain_keeps_the_links() {
+        let folder = tempfile::tempdir().unwrap();
+        let nested = folder.path().join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        let linked = nested.join("config.toml");
+        let intermediate = folder.path().join("intermediate.toml");
+        std::os::unix::fs::symlink("../intermediate.toml", &linked).unwrap();
+        std::os::unix::fs::symlink("missing.toml", &intermediate).unwrap();
+
+        let error = save(&linked, &Config::default()).unwrap_err();
+
+        assert!(error.to_string().contains("ensure any symlink destination exists"));
+        assert_eq!(std::fs::read_link(&linked).unwrap(), Path::new("../intermediate.toml"));
+        assert_eq!(std::fs::read_link(&intermediate).unwrap(), Path::new("missing.toml"));
+        assert!(!folder.path().join("missing.toml").exists());
     }
 
     #[cfg(unix)]
