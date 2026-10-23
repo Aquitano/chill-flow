@@ -28,7 +28,7 @@ pub enum Overlay {
     Palette { query: String, selected: usize },
     Prompt { kind: Prompt, input: String },
     Confirm { message: String, action: Action },
-    Help,
+    Help { scroll: usize },
     Stats,
     Diagnostics { selected: usize, scroll: usize },
     Settings { selected: usize },
@@ -705,7 +705,7 @@ mod tests {
         terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
         let bright = header(&terminal);
 
-        ui.open(Overlay::Help);
+        ui.open(Overlay::Help { scroll: 0 });
         terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
         let dimmed = header(&terminal);
         ui.close();
@@ -1186,6 +1186,53 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn an_empty_queue_says_how_to_fill_it_in_every_layout() {
+        for (width, height) in [(160, 45), (120, 30), (100, 30), (60, 20)] {
+            let mut app = offline_app();
+            let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
+            input::apply(&mut app, &mut ui, Action::Focus(Panel::Queue));
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+            let page: String = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(
+                page.contains("Press a on a track to queue it"),
+                "hint cut off at {width}x{height}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_short_ambience_list_counts_the_sounds_out_of_view() {
+        let mut app = offline_app();
+        let count = app.catalog.ambient.len();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
+        input::apply(&mut app, &mut ui, Action::Focus(Panel::Ambience));
+        let mut page = |width, height| {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+            terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+        };
+        let short = page(60, 20);
+        let below = (1..count)
+            .find(|n| short.contains(&format!(" ↓ {n} more ")))
+            .expect("no count");
+        assert!(below < count);
+        assert!(!page(160, 45).contains(" more "));
     }
 
     #[test]

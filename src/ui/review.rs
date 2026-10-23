@@ -212,7 +212,7 @@ fn kitty_cover_transmission_waits_until_a_dialog_no_longer_overlaps() {
         picker.set_protocol_type(ProtocolType::Kitty);
         let mut ui = Ui::new(Theme::new(None), picker, true);
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-        ui.open(Overlay::Help);
+        ui.open(Overlay::Help { scroll: 0 });
         terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
         app.covers.push((
             url.into(),

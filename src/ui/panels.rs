@@ -354,7 +354,7 @@ pub fn library(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instan
     let tab = app.tab.index();
     if rows.is_empty() {
         let message = match (app.tab, app.filter.is_empty()) {
-            (_, false) => "Nothing matches the filter",
+            (_, false) => "Nothing matches. Esc clears the filter.",
             (Tab::Tracks, _) => "The catalog has no tracks yet",
             (Tab::Liked, _) => "Press f while something plays to keep it here",
             (Tab::YouTube, _) => "Paste a YouTube link anywhere, or press o",
@@ -825,15 +825,17 @@ pub fn queue(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
         let message = if app.source == Source::Soundscape {
             "Pick a track to bring the music back"
         } else {
-            "Nothing up next"
+            "Press a on a track to queue it"
         };
-        centered(
-            buf,
-            inner,
-            inner.y + inner.height / 2,
+        let lines = wrap(
             message,
-            Style::new().fg(theme.faint()),
+            usize::from(inner.width.saturating_sub(4)),
+            usize::from(inner.height.min(2)),
         );
+        let top = inner.y + inner.height.saturating_sub(lines.len() as u16) / 2;
+        for (offset, line) in lines.iter().enumerate() {
+            centered(buf, inner, top + offset as u16, line, Style::new().fg(theme.faint()));
+        }
         return;
     }
     ui.queue_selected = ui.queue_selected.min(upcoming.len() - 1);
@@ -1078,6 +1080,17 @@ pub fn ambience(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Insta
         ui.hit(rect, Hit::Sound(index));
         ui.hit(slider, Hit::Slider(Slider::Level(sound.id.clone())));
     }
+    // A short panel cuts the list off, so the bottom border says how many sounds are out of view.
+    let above = ui.sound_offset;
+    let below = count.saturating_sub(ui.sound_offset + usize::from(list.height));
+    let more = match (above, below) {
+        (0, 0) => return,
+        (0, below) => format!(" ↓ {below} more "),
+        (above, 0) => format!(" ↑ {above} more "),
+        (above, below) => format!(" ↑ {above}  ↓ {below} "),
+    };
+    let x = area.right().saturating_sub(more.chars().count() as u16 + 2);
+    put(buf, x, area.bottom() - 1, &more, Style::new().fg(theme.muted()));
 }
 
 /// Music on the left, ambience on the right. A soundscape has no music to weigh against, so the
