@@ -886,13 +886,16 @@ pub fn queue(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
 }
 
 /// Returns whether the clock fit, since the header shows the timer when it didn't.
+/// The rows the focus panel needs to keep its clock, label, bar, buttons, and presets apart.
+pub const FOCUS_MIN_HEIGHT: u16 = 12;
+
 pub fn focus(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant) -> bool {
     let theme = ui.theme;
     let timer = &app.timer;
     let glow = ui.glow.value(now).max(if timer.is_running() { 0.25 } else { 0.0 });
     let inner = panel(buf, area, "Focus", glow, ui);
     close_button(buf, area, Action::ToggleTimerPanel, ui);
-    if inner.height < 8 || inner.width < 34 {
+    if area.height < FOCUS_MIN_HEIGHT || inner.width < 34 {
         return false;
     }
     let phase_color = match timer.phase() {

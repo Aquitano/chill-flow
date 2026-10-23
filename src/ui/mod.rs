@@ -453,7 +453,8 @@ impl Ui {
             }
             panels::player(buf, player, app, self, now);
             panels::reopen_handles(buf, body, player, app, self);
-            let timer = app.timer_panel_visible();
+            // Too short a bottom panel leaves the timer to the header.
+            let timer = app.timer_panel_visible() && bottom.height >= panels::FOCUS_MIN_HEIGHT;
             if app.side_hidden {
                 panels::queue(buf, bottom, app, self);
             } else if split && timer {
@@ -1157,25 +1158,33 @@ mod tests {
     }
 
     #[test]
-    fn a_retained_diagnostic_leaves_room_for_the_player() {
-        for (width, height) in [(84, 24), (96, 24), (118, 24), (60, 20)] {
+    fn a_retained_diagnostic_leaves_room_for_the_player_and_the_timer() {
+        for (width, height) in [(84, 24), (96, 24), (96, 23), (118, 24), (60, 20)] {
             let mut app = offline_app();
             app.diagnostics.record("yt-dlp is out of date and may fail.", None);
             let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
             let title = app.current().map(|item| item.title.clone()).unwrap_or_default();
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
-            let page: String = terminal
+            let rows: Vec<String> = terminal
                 .backend()
                 .buffer()
                 .content()
-                .iter()
-                .map(|cell| cell.symbol())
+                .chunks(usize::from(width))
+                .map(|row| row.iter().map(|cell| cell.symbol()).collect())
                 .collect();
+            let page = rows.concat();
             assert!(
                 page.contains(&title) && page.contains("◂◂"),
                 "player hidden at {width}x{height}"
             );
+            // A squeezed focus panel drew its buttons over its bar or its phase label.
+            for row in rows.iter().filter(|row| row.contains("start")) {
+                assert!(
+                    !row.contains("──") && page.contains(" of 4"),
+                    "timer overlaps at {width}x{height}"
+                );
+            }
         }
     }
 
