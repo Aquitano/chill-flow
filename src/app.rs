@@ -763,12 +763,7 @@ impl App {
         self.load_cover();
         match item.play {
             Playable::File { url } => {
-                self.engine.play_stream(StreamInput {
-                    url,
-                    headers: Vec::new(),
-                    start_secs,
-                    live: false,
-                });
+                self.engine.play_file(&url, start_secs);
                 self.stream = Stream::Playing;
                 self.resume_at = None;
             }
@@ -1855,7 +1850,7 @@ impl App {
             }));
         }
         self.retry_reconnect(now);
-        // Every seek restarts ffmpeg, so a held key or a scrolled wheel settles first.
+        // Every seek restarts the decoder, so a held key or a scrolled wheel settles first.
         if let Some((at, asked)) = self.pending_seek
             && now.duration_since(asked) >= Duration::from_millis(150)
         {

@@ -2,6 +2,7 @@ mod ambient;
 mod chime;
 mod decoder;
 mod ffmpeg;
+mod file;
 mod mixer;
 mod noise;
 mod output;
@@ -17,6 +18,7 @@ use rtrb::{Consumer, Producer};
 
 use ambient::{LoadRequest, LoadedLoop};
 use decoder::Decoder;
+use file::Download;
 use mixer::{AmbientLane, AtomicF32, Command, Controls, Garbage, LaneLevel, Mixer};
 pub use noise::Noise;
 use output::Output;
@@ -24,8 +26,8 @@ use spectrum::Analysis;
 
 const FALLBACK_RATE: u32 = 48_000;
 
-/// One music stream for ffmpeg to decode: an R2 file, a resolved YouTube audio URL, or an
-/// HLS live playlist.
+/// One music stream for ffmpeg to decode: a resolved YouTube audio URL or an HLS live
+/// playlist.
 #[derive(Debug, Clone)]
 pub struct StreamInput {
     pub url: String,
@@ -63,9 +65,16 @@ pub struct Engine {
 
 struct Playing {
     id: u64,
-    input: StreamInput,
+    music: Music,
     start_secs: f64,
     decoder: Decoder,
+}
+
+#[derive(Clone)]
+enum Music {
+    /// A catalog file, which chill decodes itself.
+    File(Arc<Download>),
+    Stream(StreamInput),
 }
 
 /// Where an ambient loop's audio comes from.
@@ -127,7 +136,18 @@ impl Engine {
 
     pub fn play_stream(&mut self, input: StreamInput) {
         let start_secs = if input.live { 0.0 } else { input.start_secs.max(0.0) };
-        self.start_decoder(input, start_secs);
+        self.start_decoder(Music::Stream(input), start_secs);
+    }
+
+    pub fn play_file(&mut self, url: &str, start_secs: f64) {
+        let download = match &self.stream {
+            Some(Playing {
+                music: Music::File(download),
+                ..
+            }) if download.url() == url && download.usable() => Arc::clone(download),
+            _ => Download::start(url),
+        };
+        self.start_decoder(Music::File(download), start_secs.max(0.0));
     }
 
     pub fn stop_stream(&mut self) {
@@ -137,10 +157,10 @@ impl Engine {
 
     pub fn seek(&mut self, secs: f64) {
         if let Some(playing) = &self.stream
-            && !playing.input.live
+            && !matches!(&playing.music, Music::Stream(input) if input.live)
         {
-            let input = playing.input.clone();
-            self.start_decoder(input, secs.max(0.0));
+            let music = playing.music.clone();
+            self.start_decoder(music, secs.max(0.0));
         }
     }
 
@@ -231,19 +251,24 @@ impl Engine {
         events
     }
 
-    fn start_decoder(&mut self, input: StreamInput, start_secs: f64) {
+    fn start_decoder(&mut self, music: Music, start_secs: f64) {
         self.stream = None;
         self.next_stream += 1;
         let id = self.next_stream;
         let events = self.stream_events.clone();
-        match Decoder::spawn(&input, start_secs, self.rate, move |event| {
+        let report = move |event| {
             let _ = events.send((id, event));
-        }) {
+        };
+        let started = match &music {
+            Music::File(download) => Ok(Decoder::file(Arc::clone(download), start_secs, self.rate, report)),
+            Music::Stream(input) => Decoder::spawn(input, start_secs, self.rate, report),
+        };
+        match started {
             Ok((decoder, lane)) => {
                 self.send(Command::Music(Some(lane)));
                 self.stream = Some(Playing {
                     id,
-                    input,
+                    music,
                     start_secs,
                     decoder,
                 });

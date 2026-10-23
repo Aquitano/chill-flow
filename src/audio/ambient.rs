@@ -2,7 +2,6 @@ use std::f32::consts::FRAC_PI_2;
 use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Output, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
@@ -12,7 +11,7 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 
 use super::mixer::LaneLevel;
-use super::{EngineEvent, LoopSource, ffmpeg};
+use super::{EngineEvent, LoopSource, file};
 
 const SEAM_SECS: f32 = 0.5;
 const QUIET_WINDOW_SECS: f32 = 0.05;
@@ -59,8 +58,7 @@ fn load(source: &LoopSource, cache_dir: &Path, rate: u32) -> Result<Box<[i16]>, 
         }
     };
     let path = cached_file(url, cache_dir)?;
-    let output = decode(&path, rate).map_err(ffmpeg::spawn_error)?;
-    let looped = into_loop(&path, &output, rate);
+    let looped = decode(&path, rate).and_then(|samples| into_loop(&path, samples, rate));
     if looped.is_err() {
         // A damaged download would fail the same way every time, so the next try fetches it again.
         let _ = fs::remove_file(&path);
@@ -107,28 +105,21 @@ fn cache_name(url: &str) -> Option<String> {
     Some(format!("{:x}", Sha256::digest(resource.as_bytes())))
 }
 
-fn decode(path: &Path, rate: u32) -> io::Result<Output> {
-    ffmpeg::command()
-        .arg("-i")
-        .arg(path)
-        .args(["-vn", "-f", "s16le", "-ac", "2", "-ar", &rate.to_string(), "pipe:1"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
+fn decode(path: &Path, rate: u32) -> Result<Vec<i16>, String> {
+    let source = File::open(path).map_err(|error| format!("could not open {}: {error}", path.display()))?;
+    let mut samples = Vec::new();
+    file::decode(Box::new(source), 0.0, rate, |decoded| {
+        samples.extend(
+            decoded
+                .iter()
+                .map(|&sample| (sample * 32768.0).round().clamp(-32768.0, 32767.0) as i16),
+        );
+        true
+    })?;
+    Ok(samples)
 }
 
-fn into_loop(path: &Path, output: &Output, rate: u32) -> Result<Box<[i16]>, String> {
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(
-            ffmpeg::last_line(&stderr).map_or_else(|| format!("ffmpeg exited with {}", output.status), str::to_owned)
-        );
-    }
-    let (frames, _) = output.stdout.as_chunks::<4>();
-    let mut samples: Vec<i16> = frames
-        .iter()
-        .flat_map(|&[a, b, c, d]| [i16::from_le_bytes([a, b]), i16::from_le_bytes([c, d])])
-        .collect();
+fn into_loop(path: &Path, mut samples: Vec<i16>, rate: u32) -> Result<Box<[i16]>, String> {
     trim_quiet_ends(&mut samples, (QUIET_WINDOW_SECS * rate as f32) as usize);
     close_loop(&mut samples, (SEAM_SECS * rate as f32) as usize);
     if samples.len() < 2 {

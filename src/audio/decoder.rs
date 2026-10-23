@@ -7,16 +7,18 @@ use std::time::Duration;
 
 use rtrb::{Producer, RingBuffer};
 
+use super::file::{self, Bytes, Download};
 use super::mixer::{MusicLane, MusicState};
 use super::{EngineEvent, StreamInput, ffmpeg};
 
 const BUFFER_SECS: usize = 2;
 const BACKOFF: Duration = Duration::from_millis(10);
 
-/// Owns one ffmpeg process. Dropping it cancels the reader thread and kills the process.
+/// Decodes one music stream: a catalog file here, or anything else in an ffmpeg process.
+/// Dropping it cancels the decoding thread and kills the process.
 pub(super) struct Decoder {
     state: Arc<MusicState>,
-    child: Arc<Mutex<Child>>,
+    child: Option<Arc<Mutex<Child>>>,
 }
 
 impl Decoder {
@@ -72,18 +74,25 @@ impl Decoder {
             let _ = child.wait();
             return Err("ffmpeg started without output pipes".to_owned());
         };
-        let (producer, consumer) = RingBuffer::new(rate as usize * 2 * BUFFER_SECS);
-        let state = Arc::new(MusicState::new());
         let child = Arc::new(Mutex::new(child));
-        let reader = Reader {
-            producer,
-            state: Arc::clone(&state),
-            child: Arc::clone(&child),
-            report: Box::new(report),
-        };
-        thread::spawn(move || reader.run(stdout, collect_last_line(stderr)));
-        let lane = MusicLane::new(consumer, Arc::clone(&state));
-        Ok((Self { state, child }, lane))
+        let (reader, decoder, lane) = Reader::new(rate, report, Some(Arc::clone(&child)));
+        thread::spawn(move || reader.run(&child, stdout, collect_last_line(stderr)));
+        Ok((decoder, lane))
+    }
+
+    pub(super) fn file(
+        download: Arc<Download>,
+        start_secs: f64,
+        rate: u32,
+        report: impl Fn(EngineEvent) + Send + 'static,
+    ) -> (Self, MusicLane) {
+        let (mut reader, decoder, lane) = Reader::new(rate, report, None);
+        thread::spawn(move || {
+            let source = Bytes::new(download, Arc::clone(&reader.state));
+            let result = file::decode(Box::new(source), start_secs, rate, |samples| reader.push(samples));
+            reader.end(result);
+        });
+        (decoder, lane)
     }
 
     pub(super) fn state(&self) -> &MusicState {
@@ -94,44 +103,62 @@ impl Decoder {
 impl Drop for Decoder {
     fn drop(&mut self) {
         self.state.cancelled.store(true, Ordering::Release);
-        let _ = lock(&self.child).kill();
+        if let Some(child) = &self.child {
+            let _ = lock(child).kill();
+        }
     }
 }
 
 struct Reader {
     producer: Producer<f32>,
     state: Arc<MusicState>,
-    child: Arc<Mutex<Child>>,
     report: Box<dyn Fn(EngineEvent) + Send>,
 }
 
 impl Reader {
-    fn run(mut self, mut stdout: ChildStdout, stderr: JoinHandle<String>) {
+    fn new(
+        rate: u32,
+        report: impl Fn(EngineEvent) + Send + 'static,
+        child: Option<Arc<Mutex<Child>>>,
+    ) -> (Reader, Decoder, MusicLane) {
+        let (producer, consumer) = RingBuffer::new(rate as usize * 2 * BUFFER_SECS);
+        let state = Arc::new(MusicState::new());
+        let reader = Reader {
+            producer,
+            state: Arc::clone(&state),
+            report: Box::new(report),
+        };
+        let lane = MusicLane::new(consumer, Arc::clone(&state));
+        (reader, Decoder { state, child }, lane)
+    }
+
+    fn run(mut self, child: &Mutex<Child>, mut stdout: ChildStdout, stderr: JoinHandle<String>) {
         self.pump(&mut stdout);
-        let status = self.reap();
+        let status = self.reap(child);
         let last_line = stderr.join().unwrap_or_default();
+        let result = match status {
+            Ok(status) if status.success() => Ok(()),
+            Ok(status) if last_line.is_empty() => Err(format!("ffmpeg exited with {status}")),
+            Ok(_) => Err(last_line),
+            Err(error) => Err(error.to_string()),
+        };
+        self.end(result);
+    }
+
+    /// Reports how the stream ended, once the lane played what was decoded.
+    fn end(self, result: Result<(), String>) {
         self.state.finished.store(true, Ordering::Release);
         if self.cancelled() {
             return;
         }
-        match status {
-            Ok(status) if status.success() => {
+        match result {
+            Ok(()) => {
                 self.wait_until_drained();
                 if !self.cancelled() {
                     (self.report)(EngineEvent::Ended);
                 }
             }
-            Ok(status) => {
-                let message = if last_line.is_empty() {
-                    format!("ffmpeg exited with {status}")
-                } else {
-                    last_line
-                };
-                (self.report)(EngineEvent::Failed(message));
-            }
-            Err(error) => {
-                (self.report)(EngineEvent::Failed(error.to_string()));
-            }
+            Err(message) => (self.report)(EngineEvent::Failed(message)),
         }
     }
 
@@ -174,10 +201,10 @@ impl Reader {
         true
     }
 
-    fn reap(&self) -> std::io::Result<ExitStatus> {
+    fn reap(&self, child: &Mutex<Child>) -> std::io::Result<ExitStatus> {
         loop {
             {
-                let mut child = lock(&self.child);
+                let mut child = lock(child);
                 if self.cancelled() {
                     let _ = child.kill();
                 }
