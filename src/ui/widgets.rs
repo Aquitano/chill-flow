@@ -237,7 +237,7 @@ pub fn bar_chart(buf: &mut Buffer, area: Rect, bars: &[(String, u32, bool)], gro
         let label_style = if *highlight {
             Style::new().fg(theme.text())
         } else {
-            Style::new().fg(theme.faint())
+            Style::new().fg(theme.muted())
         };
         put(buf, label_x, area.y + chart_rows + 1, label, label_style);
     }

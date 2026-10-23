@@ -118,7 +118,7 @@ pub fn header(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant
     let start = if show_stats { area.right() - width } else { area.right() };
     if show_stats {
         let rect = Rect::new(start, area.y, width, 1);
-        let label = if ui.hovered(rect) { theme.muted() } else { theme.faint() };
+        let label = if ui.hovered(rect) { theme.text() } else { theme.muted() };
         let mut x = put(buf, start, area.y, "today ", Style::new().fg(label));
         x = put(buf, x, area.y, &today, Style::new().fg(theme.text()));
         x += 2;
@@ -188,7 +188,7 @@ pub fn header(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant
             x,
             area.y,
             &fit(&format!(" + {mix}"), room(x)),
-            Style::new().fg(theme.faint()),
+            Style::new().fg(theme.muted()),
         );
     }
 }
@@ -253,9 +253,9 @@ pub fn footer(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
         let label_color = if action.is_some() && ui.hovered(rect) {
             theme.text()
         } else {
-            theme.faint()
+            theme.muted()
         };
-        let next = put(buf, x, area.y, key, Style::new().fg(theme.muted()));
+        let next = put(buf, x, area.y, key, Style::new().fg(theme.text()));
         put(buf, next + 1, area.y, label, Style::new().fg(label_color));
         if let Some(action) = action {
             ui.hit(rect, Hit::Act(action));
@@ -307,9 +307,9 @@ pub fn library(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instan
         let style = if app.tab == tab {
             Style::new().fg(theme.text()).add_modifier(Modifier::BOLD)
         } else if ui.hovered(rect) {
-            Style::new().fg(theme.muted())
+            Style::new().fg(theme.text())
         } else {
-            Style::new().fg(theme.faint())
+            Style::new().fg(theme.muted())
         };
         put(buf, x, inner.y, tab.label(), style);
         ui.hit(rect, Hit::Act(Action::ShowTab(tab)));
@@ -368,7 +368,7 @@ pub fn library(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instan
                 list,
                 list.y + list.height / 3 + offset as u16,
                 line,
-                Style::new().fg(theme.faint()),
+                Style::new().fg(theme.muted()),
             );
         }
         return;
@@ -513,7 +513,7 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
             Some((format!("{spin} buffering"), Style::new().fg(theme.muted())))
         }
         (Some(item), false) if item.is_live() => Some(("● live".into(), Style::new().fg(theme.alert))),
-        _ if !app.is_playing() => Some(("paused".into(), Style::new().fg(theme.faint()))),
+        _ if !app.is_playing() => Some(("paused".into(), Style::new().fg(theme.muted()))),
         _ => None,
     };
     let likeable = item.as_ref().filter(|_| !soundscape);
@@ -772,8 +772,8 @@ fn controls(buf: &mut Buffer, inner: Rect, y: u16, app: &App, ui: &mut Ui) {
             1 | 3 => Style::new().fg(if hovered { theme.accent } else { theme.text() }),
             _ => Style::new().fg(match (on, hovered) {
                 (true, _) => theme.accent,
-                (false, true) => theme.muted(),
-                (false, false) => theme.faint(),
+                (false, true) => theme.text(),
+                (false, false) => theme.muted(),
             }),
         };
         put(buf, x, y, label, style);
@@ -784,7 +784,7 @@ fn controls(buf: &mut Buffer, inner: Rect, y: u16, app: &App, ui: &mut Ui) {
     let bar_width = inner.right().saturating_sub(x + 11).min(13);
     if bar_width >= 4 {
         let volume_x = inner.right().saturating_sub(bar_width + 9);
-        let label_end = put(buf, volume_x, y, "vol ", Style::new().fg(theme.faint()));
+        let label_end = put(buf, volume_x, y, "vol ", Style::new().fg(theme.muted()));
         let bar = Rect::new(label_end, y, bar_width, 1);
         let shown = ui.volume.value(ui.last_frame);
         let filled = if ui.hovered(bar) { theme.text() } else { theme.muted() };
@@ -800,7 +800,7 @@ fn controls(buf: &mut Buffer, inner: Rect, y: u16, app: &App, ui: &mut Ui) {
             bar.right() + 1,
             y,
             &format!("{:>3}", (app.volume * 100.0).round()),
-            Style::new().fg(theme.faint()),
+            Style::new().fg(theme.muted()),
         );
         ui.hit(bar, Hit::Slider(Slider::Volume));
     }
@@ -834,7 +834,7 @@ pub fn queue(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
         );
         let top = inner.y + inner.height.saturating_sub(lines.len() as u16) / 2;
         for (offset, line) in lines.iter().enumerate() {
-            centered(buf, inner, top + offset as u16, line, Style::new().fg(theme.faint()));
+            centered(buf, inner, top + offset as u16, line, Style::new().fg(theme.muted()));
         }
         return;
     }
@@ -980,7 +980,7 @@ pub fn focus(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant)
         } else if ui.hovered(rect) {
             Style::new().fg(theme.text())
         } else {
-            Style::new().fg(theme.faint())
+            Style::new().fg(theme.muted())
         };
         put(buf, x, presets_y, &label, style);
         ui.hit(rect, Hit::Act(Action::SetTimerMode(mode)));
@@ -1074,7 +1074,7 @@ pub fn ambience(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Insta
                 slider.right() + 1,
                 y,
                 &format!("{level:>3}"),
-                Style::new().fg(theme.faint()),
+                Style::new().fg(theme.muted()),
             );
         }
         ui.hit(rect, Hit::Sound(index));
