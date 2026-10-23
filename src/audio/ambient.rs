@@ -31,39 +31,51 @@ pub(super) struct LoadRequest {
 }
 
 pub(super) fn spawn_load(request: LoadRequest, loaded: Sender<LoadedLoop>, events: Sender<EngineEvent>) {
-    thread::spawn(move || match load(&request.source, &request.cache_dir, request.rate) {
-        Ok(samples) => {
-            let _ = loaded.send(LoadedLoop {
-                samples,
-                level: request.level,
-            });
-        }
-        Err(message) => {
-            request.level.retire();
-            let _ = events.send(EngineEvent::AmbientFailed {
-                id: request.id,
-                message,
-            });
-        }
-    });
+    thread::spawn(
+        move || match load(&request.source, &request.cache_dir, request.rate, &request.level) {
+            Ok(Some(samples)) => {
+                let _ = loaded.send(LoadedLoop {
+                    samples,
+                    level: request.level,
+                });
+            }
+            Ok(None) => request.level.retire(),
+            Err(message) => {
+                request.level.retire();
+                let _ = events.send(EngineEvent::AmbientFailed {
+                    id: request.id,
+                    message,
+                });
+            }
+        },
+    );
 }
 
-fn load(source: &LoopSource, cache_dir: &Path, rate: u32) -> Result<Box<[i16]>, String> {
+/// The loop for `source`, or nothing once `level` says the sound was turned off meanwhile, so
+/// switching mixes quickly doesn't decode recordings no one hears.
+fn load(source: &LoopSource, cache_dir: &Path, rate: u32, level: &LaneLevel) -> Result<Option<Box<[i16]>>, String> {
     let url = match source {
         LoopSource::File(url) => url,
         LoopSource::Noise(noise) => {
             let mut samples = noise.generate(rate);
             close_loop(&mut samples, (SEAM_SECS * rate as f32) as usize);
-            return Ok(samples.into_boxed_slice());
+            return Ok(Some(samples.into_boxed_slice()));
         }
     };
+    if !level.wanted() {
+        return Ok(None);
+    }
     let path = cached_file(url, cache_dir)?;
-    let looped = decode(&path, rate).and_then(|samples| into_loop(&path, samples, rate));
+    let decoded = decode(&path, rate, level);
+    if !level.wanted() {
+        return Ok(None);
+    }
+    let looped = decoded.and_then(|samples| into_loop(&path, samples, rate));
     if looped.is_err() {
         // A damaged download would fail the same way every time, so the next try fetches it again.
         let _ = fs::remove_file(&path);
     }
-    looped
+    looped.map(Some)
 }
 
 fn cached_file(url: &str, cache_dir: &Path) -> Result<PathBuf, String> {
@@ -105,7 +117,7 @@ fn cache_name(url: &str) -> Option<String> {
     Some(format!("{:x}", Sha256::digest(resource.as_bytes())))
 }
 
-fn decode(path: &Path, rate: u32) -> Result<Vec<i16>, String> {
+fn decode(path: &Path, rate: u32, level: &LaneLevel) -> Result<Vec<i16>, String> {
     let source = File::open(path).map_err(|error| format!("could not open {}: {error}", path.display()))?;
     let mut samples = Vec::new();
     file::decode(Box::new(source), 0.0, rate, |decoded| {
@@ -114,7 +126,7 @@ fn decode(path: &Path, rate: u32) -> Result<Vec<i16>, String> {
                 .iter()
                 .map(|&sample| (sample * 32768.0).round().clamp(-32768.0, 32767.0) as i16),
         );
-        true
+        level.wanted()
     })?;
     Ok(samples)
 }
@@ -214,8 +226,37 @@ mod tests {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, b"not audio").unwrap();
 
-        assert!(load(&LoopSource::File(url.into()), cache.path(), 48_000).is_err());
+        assert!(
+            load(
+                &LoopSource::File(url.into()),
+                cache.path(),
+                48_000,
+                &LaneLevel::new(1.0)
+            )
+            .is_err()
+        );
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn a_sound_turned_off_while_it_loads_is_never_decoded() {
+        let cache = tempfile::tempdir().unwrap();
+        let url = "https://example.com/tone.mp3";
+        let path = cache.path().join("ambient").join(cache_name(url).unwrap());
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, include_bytes!("tone.mp3")).unwrap();
+        let source = LoopSource::File(url.into());
+
+        assert!(
+            load(&source, cache.path(), 48_000, &LaneLevel::new(1.0))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            load(&source, cache.path(), 48_000, &LaneLevel::new(0.0))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

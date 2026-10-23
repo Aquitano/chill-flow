@@ -63,6 +63,11 @@ impl LaneLevel {
         self.0.store(RETIRED, Ordering::SeqCst);
     }
 
+    /// Whether the sound is still turned up, so a load can stop once it's been turned off.
+    pub(super) fn wanted(&self) -> bool {
+        self.target() > 0.0
+    }
+
     fn target(&self) -> f32 {
         match self.0.load(Ordering::SeqCst) {
             RETIRED => 0.0,
