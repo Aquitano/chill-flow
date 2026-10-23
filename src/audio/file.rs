@@ -26,8 +26,8 @@ const SIZE_LIMIT: u64 = 256 * 1024 * 1024;
 /// How many frames the resampler converts at a time.
 const CHUNK_FRAMES: usize = 1024;
 
-/// A catalog file fetched into memory while it plays, so a seek or a replay reads it again
-/// rather than fetching it twice.
+/// A catalog file fetched into memory while it plays, so a seek reads it again rather than
+/// fetching it twice.
 pub(super) struct Download {
     url: String,
     progress: Mutex<Progress>,
@@ -66,7 +66,7 @@ impl Download {
         &self.url
     }
 
-    /// Whether another play can read it, which a failed download can't.
+    /// Whether a seek can read it again, which a failed download can't.
     pub(super) fn usable(&self) -> bool {
         !matches!(self.lock().end, Some(Err(_)))
     }
@@ -99,7 +99,8 @@ fn fetch(url: &str, download: &Weak<Download>) -> Result<(), String> {
         .config()
         .timeout_connect(Some(Duration::from_secs(15)))
         .timeout_recv_response(Some(Duration::from_secs(15)))
-        // Bounds a connection that hangs without closing; reading gives up on it much sooner.
+        // ureq has no idle timeout, so a connection that goes silent holds this thread for up to
+        // this long, though playback gives up on it after STALL.
         .timeout_recv_body(Some(Duration::from_secs(30 * 60)))
         .build()
         .call()

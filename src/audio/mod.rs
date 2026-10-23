@@ -139,15 +139,9 @@ impl Engine {
         self.start_decoder(Music::Stream(input), start_secs);
     }
 
+    /// Always fetches anew, since a reconnect can't tell a download cut short from a complete one.
     pub fn play_file(&mut self, url: &str, start_secs: f64) {
-        let download = match &self.stream {
-            Some(Playing {
-                music: Music::File(download),
-                ..
-            }) if download.url() == url && download.usable() => Arc::clone(download),
-            _ => Download::start(url),
-        };
-        self.start_decoder(Music::File(download), start_secs.max(0.0));
+        self.start_decoder(Music::File(Download::start(url)), start_secs.max(0.0));
     }
 
     pub fn stop_stream(&mut self) {
@@ -156,12 +150,13 @@ impl Engine {
     }
 
     pub fn seek(&mut self, secs: f64) {
-        if let Some(playing) = &self.stream
-            && !matches!(&playing.music, Music::Stream(input) if input.live)
-        {
-            let music = playing.music.clone();
-            self.start_decoder(music, secs.max(0.0));
-        }
+        let Some(playing) = &self.stream else { return };
+        let music = match &playing.music {
+            Music::Stream(input) if input.live => return,
+            Music::File(download) if !download.usable() => Music::File(Download::start(download.url())),
+            music => music.clone(),
+        };
+        self.start_decoder(music, secs.max(0.0));
     }
 
     pub fn set_paused(&mut self, paused: bool) {
