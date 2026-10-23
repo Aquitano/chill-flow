@@ -1174,10 +1174,13 @@ mod tests {
                 .map(|row| row.iter().map(|cell| cell.symbol()).collect())
                 .collect();
             let page = rows.concat();
+            // The library lists the title too, so the source line proves the player drew.
             assert!(
-                page.contains(&title) && page.contains("◂◂"),
+                page.contains(&title) && page.contains("Catalog · ") && page.contains("◂◂"),
                 "player hidden at {width}x{height}"
             );
+            // None of these sizes leave the focus panel room, so the clock moves to the header.
+            assert!(rows[0].contains("focus "), "header timer missing at {width}x{height}");
             // A squeezed focus panel drew its buttons over its bar or its phase label.
             for row in rows.iter().filter(|row| row.contains("start")) {
                 assert!(
