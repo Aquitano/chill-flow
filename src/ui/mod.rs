@@ -444,7 +444,8 @@ impl Ui {
             let [library, center] = Layout::horizontal([Constraint::Length(library_width), Constraint::Fill(1)])
                 .spacing(1)
                 .areas(content);
-            let bottom_height = if app.side_hidden { queue_height(app, center) } else { 13 };
+            let bottom_height = if app.side_hidden { queue_height(app, center) } else { 13 }
+                .min(center.height.saturating_sub(panels::PLAYER_MIN_HEIGHT));
             let [player, bottom] =
                 Layout::vertical([Constraint::Fill(1), Constraint::Length(bottom_height)]).areas(center);
             if !app.library_hidden {
@@ -452,7 +453,8 @@ impl Ui {
             }
             panels::player(buf, player, app, self, now);
             panels::reopen_handles(buf, body, player, app, self);
-            let timer = app.timer_panel_visible();
+            // Too short a bottom panel leaves the timer to the header.
+            let timer = app.timer_panel_visible() && bottom.height >= panels::FOCUS_MIN_HEIGHT;
             if app.side_hidden {
                 panels::queue(buf, bottom, app, self);
             } else if split && timer {
@@ -472,7 +474,9 @@ impl Ui {
                 }
             }
         } else {
-            let bottom_height = (body.height / 2).clamp(6, 14);
+            let bottom_height = (body.height / 2)
+                .clamp(6, 14)
+                .min(body.height.saturating_sub(panels::PLAYER_MIN_HEIGHT));
             let [player, bottom] =
                 Layout::vertical([Constraint::Fill(1), Constraint::Length(bottom_height)]).areas(body);
             panels::player(buf, player, app, self, now);
@@ -1150,6 +1154,37 @@ mod tests {
                 }),
             );
             assert!(!app.library_hidden);
+        }
+    }
+
+    #[test]
+    fn a_retained_diagnostic_leaves_room_for_the_player_and_the_timer() {
+        for (width, height) in [(84, 24), (96, 24), (96, 23), (118, 24), (60, 20)] {
+            let mut app = offline_app();
+            app.diagnostics.record("yt-dlp is out of date and may fail.", None);
+            let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
+            let title = app.current().map(|item| item.title.clone()).unwrap_or_default();
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+            let rows: Vec<String> = terminal
+                .backend()
+                .buffer()
+                .content()
+                .chunks(usize::from(width))
+                .map(|row| row.iter().map(|cell| cell.symbol()).collect())
+                .collect();
+            let page = rows.concat();
+            assert!(
+                page.contains(&title) && page.contains("◂◂"),
+                "player hidden at {width}x{height}"
+            );
+            // A squeezed focus panel drew its buttons over its bar or its phase label.
+            for row in rows.iter().filter(|row| row.contains("start")) {
+                assert!(
+                    !row.contains("──") && page.contains(" of 4"),
+                    "timer overlaps at {width}x{height}"
+                );
+            }
         }
     }
 
