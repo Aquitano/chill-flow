@@ -29,8 +29,12 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       # Some tests start real playback, which runs ffmpeg like the app does.
+      # A stalled mirror once held this step for half an hour; time out and retry instead.
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev ffmpeg
+        timeout-minutes: 10
+        run: |
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y libasound2-dev ffmpeg
       - if: runner.os == 'macOS'
         run: brew install ffmpeg
       - if: runner.os == 'Windows'
