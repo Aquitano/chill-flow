@@ -328,6 +328,8 @@ fn meadow(frame: &mut Frame, fields: &[f32], front: &[f32], offset: i64, season:
         let slope = fields[(x + 1).min(fields.len() - 1)] - fields[x.saturating_sub(1)];
         let first = top.max(0.0) as usize;
         let crest_ink = inks.shade(if season == Season::Winter { 0.95 } else { 0.6 });
+        // On a dark theme the paper is dark too, so snow there is bright marks rather than bare paper.
+        let snow_glints = season == Season::Winter && !inks.theme.is_light();
         frame.set(x as isize, first as isize, (crest(top, slope), crest_ink, None));
         for y in first + 1..(front[x].ceil().max(0.0) as usize).min(frame.rows) {
             let wy = y as f32;
@@ -344,7 +346,8 @@ fn meadow(frame: &mut Frame, fields: &[f32], front: &[f32], offset: i64, season:
             let furrow = 0.5 + 0.5 * (wy * 1.6 + 4.0 * fbm(wx / 18.0, wy / 5.0, 2, 52)).sin();
             let ink = base + deepen * depth + furrows * furrow;
             if let Some(symbol) = ramp(ink, world, y) {
-                frame.set(x as isize, y as isize, (symbol, inks.shade(ink), None));
+                let color = inks.shade(if snow_glints { 0.8 } else { ink });
+                frame.set(x as isize, y as isize, (symbol, color, None));
             }
         }
     }
