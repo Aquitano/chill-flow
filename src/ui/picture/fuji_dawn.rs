@@ -339,11 +339,15 @@ impl FujiDawn {
 
         for (index, (row, half, speed)) in CLOUDS.into_iter().enumerate() {
             let k = index as f32;
-            painting.glaze((0.0, row - half - 3.0), (width, row + half + 3.0), SKY, |x, y| {
-                let drifted = x + t * speed * breeze;
-                let across = 1.0 - ((y - row - (drifted / 40.0 + k).sin() * 1.5) / half).abs();
+            let columns: [(f32, f32); WIDTH] = std::array::from_fn(|column| {
+                let drifted = column as f32 + 0.5 + t * speed * breeze;
                 let thick = fbm(drifted / 34.0, k * 3.1, 3, 50 + index as i64);
-                let amount = unit((thick - 0.52) * 3.0) * unit(across * 1.5) * 0.65;
+                ((drifted / 40.0 + k).sin() * 1.5, unit((thick - 0.52) * 3.0))
+            });
+            painting.glaze((0.0, row - half - 3.0), (width, row + half + 3.0), SKY, |x, y| {
+                let (bend, thick) = columns[x as usize];
+                let across = 1.0 - ((y - row - bend) / half).abs();
+                let amount = thick * unit(across * 1.5) * 0.65;
                 let lit = unit(1.0 - (x - SUN.0).hypot((y - SUN.1) * 2.0) / 90.0);
                 (amount > 0.02).then(|| (mix(light.cloud, light.cloud_lit, lit), amount))
             });

@@ -255,6 +255,8 @@ pub struct Painting {
     still: Vec<Rgb>,
     layers: Vec<u8>,
     frame: Vec<Rgb>,
+    /// Where `repaint` gathers a frame's new colors, kept so each frame doesn't allocate it again.
+    repainted: Vec<(usize, Rgb)>,
 }
 
 impl Painting {
@@ -266,6 +268,7 @@ impl Painting {
             still: vec![[0.0; 3]; pixels],
             layers: vec![0; pixels],
             frame: vec![[0.0; 3]; pixels],
+            repainted: Vec::new(),
         }
     }
 
@@ -319,18 +322,20 @@ impl Painting {
     /// what the frame shows so far, so water can mirror what moves above it.
     pub fn repaint(&mut self, from: (f32, f32), to: (f32, f32), layer: u8, color: impl Fn(&Painting, f32, f32) -> Rgb) {
         let (across, down) = (span(from.0, to.0, self.width), span(from.1, to.1, self.height));
-        let mut painted = Vec::new();
+        let mut repainted = std::mem::take(&mut self.repainted);
+        repainted.clear();
         for row in down {
             for column in across.clone() {
                 let index = row * self.width + column;
                 if self.layers[index] == layer {
-                    painted.push((index, color(self, column as f32 + 0.5, row as f32 + 0.5)));
+                    repainted.push((index, color(self, column as f32 + 0.5, row as f32 + 0.5)));
                 }
             }
         }
-        for (index, color) in painted {
+        for &(index, color) in &repainted {
             self.frame[index] = color;
         }
+        self.repainted = repainted;
     }
 
     /// Blends `color` over one of the painting's own pixels at `x`, `y`.

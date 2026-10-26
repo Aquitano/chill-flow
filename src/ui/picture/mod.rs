@@ -303,8 +303,8 @@ struct Shown {
     season: Season,
 }
 
-/// The picture on show. It is painted and turned into glyphs only when its frame, size, look, or
-/// weather changes; in between, the same glyphs are copied into each redraw.
+/// The picture on show. It is painted and turned into glyphs only when what `Shown` holds changes;
+/// in between, the same glyphs are copied into each redraw.
 #[derive(Default)]
 pub struct Scene {
     clock: f64,

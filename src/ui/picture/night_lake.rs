@@ -190,7 +190,11 @@ pub fn paint(canvas: &mut Canvas, t: f32, weather: &Weather, season: Season) {
     }
 
     // Rings where rain lands on the water.
-    let splashes = (weather.rain * w * 0.05).round() as i64;
+    let splashes = if snowy {
+        0
+    } else {
+        (weather.rain * w * 0.05).round() as i64
+    };
     for splash in 0..splashes {
         let period = 0.6 + hash(splash, 1, 50) * 0.5;
         let cycle = t / period + hash(splash, 2, 50);
