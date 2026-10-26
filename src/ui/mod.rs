@@ -24,6 +24,41 @@ use anim::{Bars, Tween};
 use picture::{Picture, Scene, Weather};
 use theme::Theme;
 
+/// How many keys the bottom bar lists.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum KeyHints {
+    All,
+    /// Play, the command palette, settings, and the key list.
+    #[default]
+    Essentials,
+    Off,
+}
+
+impl KeyHints {
+    pub const ALL: [KeyHints; 3] = [KeyHints::All, KeyHints::Essentials, KeyHints::Off];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            KeyHints::All => "All",
+            KeyHints::Essentials => "Essentials",
+            KeyHints::Off => "Off",
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            KeyHints::All => "all",
+            KeyHints::Essentials => "essentials",
+            KeyHints::Off => "off",
+        }
+    }
+
+    pub fn step(self, by: i8) -> KeyHints {
+        picture::step(&KeyHints::ALL, self, by)
+    }
+}
+
 pub enum Overlay {
     Palette { query: String, selected: usize },
     Prompt { kind: Prompt, input: String },
@@ -393,7 +428,7 @@ impl Ui {
             Constraint::Length(1),
             Constraint::Fill(1),
             Constraint::Length(notice_height),
-            Constraint::Length(1),
+            Constraint::Length(u16::from(app.config.key_hints != KeyHints::Off)),
         ])
         .areas(area);
         let buf = frame.buffer_mut();
@@ -693,6 +728,25 @@ mod tests {
                 .iter()
                 .any(|(_, hit)| { *hit == Hit::Act(Action::RefreshSaved("ytpl:study".into())) })
         );
+    }
+
+    #[test]
+    fn the_bottom_bar_lists_as_many_keys_as_the_setting_asks_for() {
+        let mut app = offline_app();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
+        let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        let mut listed = |key_hints, app: &mut App| {
+            app.config.key_hints = key_hints;
+            terminal.draw(|frame| ui.draw(frame, app)).unwrap();
+            [Action::OpenHelp, Action::OpenDiagnostics].map(|action| {
+                ui.hits
+                    .iter()
+                    .any(|(rect, hit)| rect.height == 1 && *hit == Hit::Act(action.clone()))
+            })
+        };
+        assert_eq!(listed(KeyHints::All, &mut app), [true, true]);
+        assert_eq!(listed(KeyHints::Essentials, &mut app), [true, false]);
+        assert_eq!(listed(KeyHints::Off, &mut app), [false, false]);
     }
 
     #[test]

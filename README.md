@@ -127,7 +127,7 @@ The server is the Worker in [`sync/`](sync/README.md). It stores what syncs as i
 
 ## Configuration
 
-Press `c` for settings: timer lengths, auto-start, the chime, notifications, the picture, the season, and reduced motion. Changes save to `config.toml` right away, keeping anything else you wrote in it. The file is optional and lives in `~/.config/chill/` on macOS and `%APPDATA%\chill\` on Windows. These are the defaults:
+Press `c` for settings: timer lengths, auto-start, the chime, notifications, the picture, the season, reduced motion, and how many keys the bottom bar lists. Changes save to `config.toml` right away, keeping anything else you wrote in it. The file is optional and lives in `~/.config/chill/` on macOS and `%APPDATA%\chill\` on Windows. These are the defaults:
 
 ```toml
 catalog_url = "https://chill-data.aquitano.me/catalog.json"
@@ -137,6 +137,7 @@ reduce_motion = false   # true turns off transitions and the visualizer, and hol
 picture = "cover"       # or "journey", "night-lake", "fuji-dawn", "autumn-pagoda"
 look = "auto"           # how pictures are drawn: "auto", "blocks", "pixels", or "dots"
 season = "auto"         # the calendar's, or "spring", "summer", "autumn", "winter" (say, south of the equator)
+key_hints = "essentials" # the bottom bar: play, commands, settings, keys; or "all", or "off" to hide it
 chime = true            # a soft bell when a focus block or break ends
 notifications = true    # an OS notification at the same moments
 

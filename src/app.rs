@@ -1564,6 +1564,7 @@ impl App {
             Setting::Look => self.config.look.label().to_string(),
             Setting::Season => self.config.season.label().to_string(),
             Setting::ReduceMotion => toggle(self.config.reduce_motion),
+            Setting::KeyHints => self.config.key_hints.label().to_string(),
         }
     }
 
@@ -1592,14 +1593,16 @@ impl App {
             Setting::Look => self.config.look = self.config.look.step(delta),
             Setting::Season => self.config.season = self.config.season.step(delta),
             Setting::ReduceMotion => self.config.reduce_motion = !self.config.reduce_motion,
+            Setting::KeyHints => self.config.key_hints = self.config.key_hints.step(delta),
         }
         self.timer.set_settings(self.config.pomodoro);
-        // How a picture looks depends on each terminal's font, so pictures stay on this machine.
+        // How a picture looks depends on each terminal's font, and room for keys on its width, so
+        // these stay on this machine.
         let synced_as = match setting {
             Setting::Chime => Some("chime"),
             Setting::Notifications => Some("notifications"),
             Setting::ReduceMotion => Some("reduce_motion"),
-            Setting::Picture | Setting::Look | Setting::Season => None,
+            Setting::Picture | Setting::Look | Setting::Season | Setting::KeyHints => None,
             _ => Some("pomodoro"),
         };
         if let Some(name) = synced_as {

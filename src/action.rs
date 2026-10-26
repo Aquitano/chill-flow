@@ -99,10 +99,11 @@ pub enum Setting {
     Look,
     Season,
     ReduceMotion,
+    KeyHints,
 }
 
 impl Setting {
-    pub const ALL: [Setting; 12] = [
+    pub const ALL: [Setting; 13] = [
         Setting::FocusMinutes,
         Setting::BreakMinutes,
         Setting::LongBreakMinutes,
@@ -115,6 +116,7 @@ impl Setting {
         Setting::Look,
         Setting::Season,
         Setting::ReduceMotion,
+        Setting::KeyHints,
     ];
 
     pub fn label(self) -> &'static str {
@@ -131,6 +133,7 @@ impl Setting {
             Setting::Look => "Picture drawn with",
             Setting::Season => "Season",
             Setting::ReduceMotion => "Reduce motion",
+            Setting::KeyHints => "Keys in the bottom bar",
         }
     }
 
@@ -138,7 +141,7 @@ impl Setting {
     pub fn group(self) -> &'static str {
         match self {
             Setting::Chime | Setting::Notifications => "Sound",
-            Setting::Picture | Setting::Look | Setting::Season | Setting::ReduceMotion => "Display",
+            Setting::Picture | Setting::Look | Setting::Season | Setting::ReduceMotion | Setting::KeyHints => "Display",
             _ => "Timer",
         }
     }
