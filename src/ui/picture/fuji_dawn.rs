@@ -4,7 +4,7 @@
 use std::f32::consts::PI;
 
 use super::Weather;
-use super::canvas::{Canvas, Painting, Rgb, fbm, lerp, mix, noise, ramp, rgb, unit};
+use super::canvas::{Canvas, Painting, Rgb, fbm, hash, lerp, mix, noise, ramp, rgb, unit};
 
 pub const WIDTH: usize = 192;
 pub const HEIGHT: usize = 108;
@@ -27,6 +27,11 @@ const INK: Rgb = rgb(0x110f22);
 const DARK: Rgb = rgb(0x2a2440);
 const WHITE: Rgb = rgb(0xfff2ea);
 const GLOW: Rgb = rgb(0xffd48a);
+const WATER: Rgb = rgb(0x2b2f5c);
+const LAMP: Rgb = rgb(0xffb050);
+
+/// Thin clouds drifting across the sky, by the row they sit on, half their thickness, and speed.
+const CLOUDS: [(f32, f32, f32); 4] = [(10.0, 2.5, 0.5), (19.0, 2.0, 0.8), (29.0, 1.6, 1.2), (39.0, 1.2, 1.7)];
 
 /// The pines on the point, by trunk and height.
 const PINES: [(f32, f32); 9] = [
@@ -47,8 +52,9 @@ struct Reed {
     phase: f32,
 }
 
-/// A snow capped volcano glowing at dawn over a mirror lake, with cranes flying past, a boat
-/// poling across, and reeds that sway with the wind.
+/// A snow capped volcano glowing at dawn over a mirror lake, with clouds drifting past and a cap
+/// of cloud on the peak, cranes flying over, a boat poling across, and reeds that sway with the
+/// wind. The lake mirrors everything that moves above it.
 pub struct FujiDawn {
     painting: Option<Painting>,
     reeds: Vec<Reed>,
@@ -152,27 +158,11 @@ fn still() -> Painting {
         let top = 62.0 + 2.0 * (x / 9.0 + 3.0).sin() + 2.0 * fbm(x / 10.0, 5.0, 3, 8);
         (y >= top).then(|| mix(rgb(0x4a4678), rgb(0x3e4280), unit((y - top) / 4.0)))
     });
-    painting.paint((0.0, HORIZON), (width, height), LAKE, |painting, x, y| {
-        let depth = (y - HORIZON) / (height - HORIZON);
-        let mut color = mix(
-            painting.still_at(x, HORIZON - (y - HORIZON) * 1.5),
-            rgb(0x2b2f5c),
-            0.12 + 0.3 * depth,
-        );
-        let from_sun = (x - SUN.0).abs() / (3.0 + depth * 10.0);
-        if from_sun < 1.0 && noise(x / 6.0, y * 0.8, 3) > 0.45 {
-            color = mix(color, GLOW, (1.0 - from_sun) * 0.75);
-        }
-        Some(color)
-    });
+    painting.paint((0.0, HORIZON), (width, height), LAKE, |_, _, _| Some(WATER));
     painting.paint((0.0, 55.0), (62.0, 70.0), POINT, |_, x, y| {
         (y >= point_top(x) && y < 69.0 - x / 30.0).then_some(rgb(0x1c1a33))
     });
     painting.paint((0.0, 30.0), (62.0, 70.0), POINT, |_, x, y| pine(x, y));
-    painting.paint((0.0, HORIZON), (62.0, height), LAKE, |painting, x, y| {
-        let mirrored = HORIZON - (y - HORIZON) * 1.5 + 2.0;
-        (painting.layer_at(x, mirrored) == POINT).then(|| mix(painting.still_at(x, y), INK, 0.75))
-    });
     painting.paint((0.0, 88.0), (width, height), SHORE, |_, x, y| {
         (y >= shore(x)).then(|| if fbm(x / 3.0, y / 3.0, 2, 31) > 0.55 { DARK } else { INK })
     });
@@ -223,6 +213,57 @@ impl FujiDawn {
             },
         );
 
+        for (index, (row, half, speed)) in CLOUDS.into_iter().enumerate() {
+            let k = index as f32;
+            painting.glaze((0.0, row - half - 3.0), (width, row + half + 3.0), SKY, |x, y| {
+                let drifted = x + t * speed * breeze;
+                let across = 1.0 - ((y - row - (drifted / 40.0 + k).sin() * 1.5) / half).abs();
+                let thick = fbm(drifted / 34.0, k * 3.1, 3, 50 + index as i64);
+                let amount = unit((thick - 0.52) * 3.0) * unit(across * 1.5) * 0.65;
+                let lit = unit(1.0 - (x - SUN.0).hypot((y - SUN.1) * 2.0) / 90.0);
+                (amount > 0.02).then(|| (mix(rgb(0xc8a8d0), rgb(0xffd8c0), lit), amount))
+            });
+        }
+
+        // The cap of cloud Fuji wears, swelling and thinning slowly, its layers lit from below.
+        let swell = 0.85 + 0.15 * (t * 0.11).sin() + weather.rain * 0.2;
+        let (cap_x, cap_y, cap_half) = (PEAK_X + 1.0, PEAK_Y - 0.5, 15.0 * swell);
+        painting.glaze(
+            (cap_x - 22.0, cap_y - 6.0),
+            (cap_x + 22.0, cap_y + 5.0),
+            MOUNTAIN,
+            |x, y| {
+                let edge = 1.0 - ((x - cap_x - (t * 0.3).sin()) / cap_half).powi(2) - ((y - cap_y) / 3.2).powi(2);
+                let edge = edge + (fbm(x / 4.0 - t * 0.08, y / 1.5, 2, 61) - 0.5) * 0.5;
+                let layered = 0.75 + 0.25 * ((y - cap_y) * 1.9).cos();
+                (edge > 0.0).then(|| {
+                    let underside = unit((y - cap_y + 1.0) / 3.0);
+                    (
+                        mix(rgb(0xf6e4f0), rgb(0xffc8b0), underside),
+                        unit(edge * 3.0) * 0.85 * layered,
+                    )
+                })
+            },
+        );
+
+        // Snow blowing off the summit with the wind, thinning as it streams away.
+        if weather.wind > 0.0 {
+            for row in (PEAK_Y - 10.0) as usize..(PEAK_Y + 8.0) as usize {
+                let y = row as f32;
+                for column in PEAK_X as usize..(PEAK_X + 70.0) as usize {
+                    let x = column as f32;
+                    let along = (x - PEAK_X) / 70.0;
+                    let middle = PEAK_Y + 1.0 - along * 8.0 + (along * 9.0 - t * 0.6).sin() * along * 2.0;
+                    let across = 1.0 - (y - middle).abs() / (1.0 + along * 6.0);
+                    let gust = fbm((x - t * 16.0 * weather.wind) / 6.0, y / 2.0 + t * 0.2, 3, 71);
+                    let amount = unit(across * 1.5) * unit((gust - 0.35) * 2.5) * (1.0 - along).sqrt() * weather.wind;
+                    if amount > 0.02 {
+                        painting.add(x, y, WHITE, amount);
+                    }
+                }
+            }
+        }
+
         // Mist drifting along the foot of the mountain. It's soft, so whole pixels of it will do.
         for row in 50..HORIZON as usize {
             let y = row as f32;
@@ -261,6 +302,39 @@ impl FujiDawn {
             }
             painting.add(x - 1.0, y + tip / 3.0, WHITE, 1.0);
         }
+
+        // Far birds crossing high while birdsong plays, more of them the louder it is.
+        let birds = (weather.birds * 7.0).round() as i64;
+        let passing = ((t + 3.0) % 26.0) / 26.0;
+        for bird in 0..birds {
+            let x = lerp(-20.0, width + 20.0, passing) + hash(bird, 1, 80) * 26.0 - bird as f32 * 3.0;
+            let y = 24.0 + hash(bird, 2, 80) * 10.0 + (t * 1.3 + bird as f32).sin();
+            let flap = if (t * 7.0 + bird as f32 * 1.7).sin() > 0.0 {
+                -1.0
+            } else {
+                0.0
+            };
+            painting.add(x, y, DARK, 0.9);
+            painting.add(x - 1.0, y + flap, DARK, 0.8);
+            painting.add(x + 1.0, y + flap, DARK, 0.8);
+        }
+
+        // The lake mirrors whatever is above it, swaying more with waves and wind, with the sun's
+        // path glittering on it.
+        let sway = 0.4 + weather.waves * 1.6 + weather.wind * 0.8;
+        painting.repaint((0.0, HORIZON), (width, HEIGHT as f32), LAKE, |painting, x, y| {
+            let depth = (y - HORIZON) / (HEIGHT as f32 - HORIZON);
+            let wobble =
+                ((y * 1.7 + t * 1.3).sin() + (y * 0.6 - t * 0.7 + x * 0.05).sin() * 0.5) * sway * (0.3 + depth * 1.4);
+            let mirrored = HORIZON - (y - HORIZON) * 1.5;
+            let color = mix(painting.frame_at(x + wobble, mirrored), WATER, 0.12 + 0.3 * depth);
+            let from_sun = (x - SUN.0).abs() / (3.0 + depth * 10.0);
+            if from_sun >= 1.0 {
+                return color;
+            }
+            let glitter = noise(x / 2.5 + t * 0.4, y * 0.9 - t * 1.1, 3);
+            mix(color, GLOW, (1.0 - from_sun) * unit((glitter - 0.4) * 3.0) * 0.85)
+        });
 
         // Ripple lines moving toward the shore, longer as they come near.
         for &(across, phase) in &self.ripples {
@@ -327,6 +401,28 @@ impl FujiDawn {
         }
         for j in 1..=6 {
             painting.add_behind(boat_x + 2.0, boat_y + 3.0 + j as f32, INK, 0.35, LAKE);
+        }
+
+        // A lantern at the bow while a fire crackles, flickering, with its light on the water.
+        if weather.fire > 0.0 {
+            let flicker = weather.fire * (0.75 + 0.25 * noise(t * 4.0, 0.0, 91));
+            let (lamp_x, lamp_y) = (boat_x - 13.0, boat_y - 4.0);
+            painting.glaze(
+                (lamp_x - 4.0, lamp_y - 4.0),
+                (lamp_x + 5.0, lamp_y + 5.0),
+                u8::MAX,
+                |x, y| {
+                    let distance = (x - lamp_x - 0.5).hypot(y - lamp_y - 0.5);
+                    (distance < 4.0).then(|| (LAMP, unit(1.0 - distance / 4.0) * 0.5 * flicker))
+                },
+            );
+            painting.add(lamp_x, lamp_y, rgb(0xffe0a0), flicker);
+            painting.add(lamp_x, lamp_y + 1.0, LAMP, flicker);
+            for j in 4..12 {
+                let j = j as f32;
+                let shimmer = (t * 3.0 + j).sin() * 0.8;
+                painting.add_behind(lamp_x + shimmer, boat_y + j, LAMP, (0.6 - j * 0.04) * flicker, LAKE);
+            }
         }
 
         // Reeds on the right shore, swaying with the wind.

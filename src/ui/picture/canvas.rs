@@ -249,12 +249,31 @@ impl Painting {
         self.still[row * self.width + column]
     }
 
-    pub fn layer_at(&self, x: f32, y: f32) -> u8 {
-        self.index(x, y).map_or(0, |index| self.layers[index])
-    }
-
     pub fn begin(&mut self) {
         self.frame.copy_from_slice(&self.still);
+    }
+
+    /// What this frame shows at `x`, `y` so far.
+    pub fn frame_at(&self, x: f32, y: f32) -> Rgb {
+        self.pixel(x.floor() as isize, y.floor() as isize)
+    }
+
+    /// Repaints the pixels whose still layer is `layer` inside the box from `from` to `to`, from
+    /// what the frame shows so far, so water can mirror what moves above it.
+    pub fn repaint(&mut self, from: (f32, f32), to: (f32, f32), layer: u8, color: impl Fn(&Painting, f32, f32) -> Rgb) {
+        let (across, down) = (span(from.0, to.0, self.width), span(from.1, to.1, self.height));
+        let mut painted = Vec::new();
+        for row in down {
+            for column in across.clone() {
+                let index = row * self.width + column;
+                if self.layers[index] == layer {
+                    painted.push((index, color(self, column as f32 + 0.5, row as f32 + 0.5)));
+                }
+            }
+        }
+        for (index, color) in painted {
+            self.frame[index] = color;
+        }
     }
 
     /// Blends `color` over one of the painting's own pixels at `x`, `y`.
