@@ -223,10 +223,10 @@ impl Art {
         }
     }
 
-    fn paint(&mut self, canvas: &mut Canvas, t: f32, weather: &Weather) {
+    fn paint(&mut self, canvas: &mut Canvas, t: f32, weather: &Weather, night: bool) {
         match self {
             Art::NightLake => night_lake::paint(canvas, t, weather),
-            Art::FujiDawn(art) => art.paint(canvas, t, weather),
+            Art::FujiDawn(art) => art.paint(canvas, t, weather, night),
             Art::AutumnPagoda(art) => art.paint(canvas, t, weather),
         }
     }
@@ -297,7 +297,7 @@ impl Scene {
                 Look::Blocks => self.canvas.resize(columns, rows * 2),
                 _ => self.canvas.resize(columns * 2, rows * 4),
             }
-            art.paint(&mut self.canvas, t, &weather);
+            art.paint(&mut self.canvas, t, &weather, shown.night);
             canvas::rain(&mut self.canvas, t, weather.rain, weather.wind);
             canvas::fireflies(&mut self.canvas, t, weather.crickets, picture.fireflies());
             canvas::brighten(&mut self.canvas, canvas::lightning(t, weather.thunder));
