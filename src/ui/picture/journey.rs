@@ -1,9 +1,9 @@
 //! A landscape in plain text that scrolls past in layers, nearer ones faster, in the theme's own
 //! ink on its paper. Each layer says how much ink it wants in a cell, and that is drawn as a
 //! ramp of characters, ordered-dithered so even ground reads as a pattern rather than noise. Clouds
-//! are their contour lines. Everything that moves in it comes from the ambience that's playing,
-//! and the land follows the seasons: blossom in spring, tall grass in summer, falling leaves in
-//! autumn, and snow in winter.
+//! are their contour lines. The weather in it comes from the ambience that's playing, and the land
+//! follows the seasons: blossom in spring, tall grass in summer, falling leaves in autumn, and
+//! snow in winter.
 
 use ratatui::style::Color;
 
@@ -33,7 +33,8 @@ impl Inks {
         self.theme.mix(0.3 + 0.65 * unit(ink))
     }
 
-    /// Snow is the paper's color on a light theme, and the brightest ink on a dark one.
+    /// Snow lying on the ground: the paper's color on a light theme, where the ground is dark, and
+    /// the brightest ink on a dark one.
     fn snow(&self) -> Color {
         if self.theme.is_light() {
             self.theme.background()
@@ -90,7 +91,8 @@ pub fn draw(
     (columns, rows): (usize, usize),
     t: f32,
     weather: &Weather,
-    (night, season): (bool, Season),
+    night: bool,
+    season: Season,
     theme: &Theme,
 ) {
     cells.clear();
@@ -156,18 +158,21 @@ fn hill(world: i64, h: f32) -> f32 {
 fn grass(world: i64, h: f32) -> f32 {
     let x = world as f32;
     let ground = h * 0.87;
-    let mut top = ground - h * 0.03 * fbm(x / 7.0, 2.9, 2, 13) - h * 0.05 * hash(world, 0, 15).powi(5);
+    let top = ground - h * 0.03 * fbm(x / 7.0, 2.9, 2, 13) - h * 0.05 * hash(world, 0, 15).powi(5);
+    pine(world, h).map_or(top, |pine| top.min(ground - pine))
+}
+
+/// How tall a stand of pines is at `world`, if one stands there.
+fn pine(world: i64, h: f32) -> Option<f32> {
     let stand = world.div_euclid(17);
-    if hash(stand, 1, 14) > 0.55 {
-        let middle = stand as f32 * 17.0 + 8.5 + (hash(stand, 4, 14) - 0.5) * 5.0;
-        let half = 3.0 + 3.0 * hash(stand, 3, 14);
-        let tall = h * (0.1 + 0.12 * hash(stand, 2, 14));
-        let off = (x - middle).abs() / half;
-        if off < 1.0 {
-            top = top.min(ground - tall * (1.0 - off) * (0.85 + 0.15 * hash(world, 5, 14)));
-        }
+    if hash(stand, 1, 14) <= 0.55 {
+        return None;
     }
-    top
+    let middle = stand as f32 * 17.0 + 8.5 + (hash(stand, 4, 14) - 0.5) * 5.0;
+    let half = 3.0 + 3.0 * hash(stand, 3, 14);
+    let tall = h * (0.1 + 0.12 * hash(stand, 2, 14));
+    let off = (world as f32 - middle).abs() / half;
+    (off < 1.0).then(|| tall * (1.0 - off) * (0.85 + 0.15 * hash(world, 5, 14)))
 }
 
 /// The ramp character for `ink`, dithered by where the cell sits in its layer.
@@ -322,11 +327,7 @@ fn meadow(frame: &mut Frame, fields: &[f32], front: &[f32], offset: i64, season:
         let wx = world as f32;
         let slope = fields[(x + 1).min(fields.len() - 1)] - fields[x.saturating_sub(1)];
         let first = top.max(0.0) as usize;
-        let crest_ink = if season == Season::Winter {
-            inks.snow()
-        } else {
-            inks.shade(0.6)
-        };
+        let crest_ink = inks.shade(if season == Season::Winter { 0.95 } else { 0.6 });
         frame.set(x as isize, first as isize, (crest(top, slope), crest_ink, None));
         for y in first + 1..(front[x].ceil().max(0.0) as usize).min(frame.rows) {
             let wy = y as f32;
@@ -442,18 +443,19 @@ fn foreground(frame: &mut Frame, front: &[f32], offset: i64, t: f32, weather: &W
             };
             frame.set(x as isize, y as isize, inks.solid(symbol));
         }
-        // Snow lies on the ground and the pines; blossom shows on the pines that stand above it.
         let row = first.round() as isize;
-        let pine = top < front.iter().copied().fold(0.0, f32::max) - 2.0;
         match season {
             Season::Winter => {
-                if let Some(index) = frame.index(x as isize, row) {
-                    let ground = frame.cells[index].and_then(|(_, _, bg)| bg);
-                    frame.cells[index] = Some(('▀', inks.snow(), ground));
+                if first.fract() >= 0.5 {
+                    frame.set(x as isize, first as isize, ('▄', inks.snow(), None));
+                } else if let Some(index) = frame.index(x as isize, row)
+                    && let Some(ground) = frame.cells[index].and_then(|(_, _, bg)| bg)
+                {
+                    frame.cells[index] = Some(('▀', inks.snow(), Some(ground)));
                 }
                 continue;
             }
-            Season::Spring if pine && hash(world, 2, 73) > 0.55 => {
+            Season::Spring if pine(world, frame.rows as f32).is_some() && hash(world, 2, 73) > 0.55 => {
                 frame.over(
                     x as isize,
                     row,
@@ -550,7 +552,7 @@ fn snow(frame: &mut Frame, t: f32, weather: &Weather, inks: &Inks) {
         let drift = (t * 0.8 + flake as f32).sin() * 1.5 + y * weather.wind * 0.8;
         let x = hash(flake, 3, 121) * (w + h * weather.wind) - drift;
         let symbol = if hash(flake, 4, 121) > 0.7 { '*' } else { '.' };
-        frame.over(x as isize, y as isize, symbol, inks.snow(), inks);
+        frame.over(x as isize, y as isize, symbol, inks.shade(0.95), inks);
     }
 }
 
@@ -571,11 +573,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_what_can_be_heard_brings_its_color_into_the_landscape() {
+    fn in_summer_only_what_can_be_heard_brings_its_color_into_the_landscape() {
         let theme = Theme::new(Some(([205, 214, 244], [30, 30, 46])));
         let mut cells = Vec::new();
         let mut colors = |weather: Weather| {
-            draw(&mut cells, (160, 36), 40.0, &weather, (false, Season::Summer), &theme);
+            draw(&mut cells, (160, 36), 40.0, &weather, false, Season::Summer, &theme);
             let shows = |color: Color| cells.iter().flatten().any(|&(_, fg, _)| fg == color);
             [theme.calm, theme.accent, theme.alert].map(shows)
         };

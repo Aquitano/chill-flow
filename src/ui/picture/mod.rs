@@ -344,7 +344,8 @@ impl Scene {
                     (columns, rows),
                     t,
                     &weather,
-                    (shown.night, shown.season),
+                    shown.night,
+                    shown.season,
                     theme,
                 );
                 self.shown = Some(shown);
