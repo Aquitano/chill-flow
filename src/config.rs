@@ -6,7 +6,7 @@ use etcetera::BaseStrategy;
 use serde::Deserialize;
 
 use crate::timer::PomodoroSettings;
-use crate::ui::picture::{Look, Picture};
+use crate::ui::picture::{Look, Picture, Season};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -18,6 +18,7 @@ pub struct Config {
     pub reduce_motion: bool,
     pub picture: Picture,
     pub look: Look,
+    pub season: Season,
     pub chime: bool,
     pub notifications: bool,
     pub pomodoro: PomodoroSettings,
@@ -32,6 +33,7 @@ impl Default for Config {
             reduce_motion: false,
             picture: Picture::default(),
             look: Look::default(),
+            season: Season::default(),
             chime: true,
             notifications: true,
             pomodoro: PomodoroSettings::default(),
@@ -89,6 +91,12 @@ pub fn save(path: &Path, config: &Config) -> Result<()> {
     set(&mut document["reduce_motion"], config.reduce_motion);
     set(&mut document["picture"], config.picture.id());
     set(&mut document["look"], config.look.id());
+    // Left out until someone picks a season, so an older chill that doesn't know it still starts.
+    if config.season == Season::Auto {
+        document.remove("season");
+    } else {
+        set(&mut document["season"], config.season.id());
+    }
     set(&mut document["chime"], config.chime);
     set(&mut document["notifications"], config.notifications);
     if config.catalogs.is_empty() {

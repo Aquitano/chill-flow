@@ -12,6 +12,7 @@ use ratatui::symbols::pixel::OCTANTS;
 use serde::Deserialize;
 
 use super::theme::Theme;
+use crate::config::Config;
 use canvas::{Canvas, Dot, Ink, Rgb, unit};
 
 /// What the player shows above the seek bar.
@@ -149,6 +150,64 @@ impl Look {
     }
 }
 
+/// Which time of year a picture shows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Season {
+    /// The one the calendar is in, for the northern hemisphere.
+    #[default]
+    Auto,
+    Spring,
+    Summer,
+    Autumn,
+    Winter,
+}
+
+impl Season {
+    pub const ALL: [Season; 5] = [
+        Season::Auto,
+        Season::Spring,
+        Season::Summer,
+        Season::Autumn,
+        Season::Winter,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Season::Auto => "Auto",
+            Season::Spring => "Spring",
+            Season::Summer => "Summer",
+            Season::Autumn => "Autumn",
+            Season::Winter => "Winter",
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Season::Auto => "auto",
+            Season::Spring => "spring",
+            Season::Summer => "summer",
+            Season::Autumn => "autumn",
+            Season::Winter => "winter",
+        }
+    }
+
+    pub fn step(self, by: i8) -> Season {
+        step(&Season::ALL, self, by)
+    }
+
+    /// The season to show in `month` (1 to 12): Auto becomes the one the month falls in.
+    fn of(self, month: i8) -> Season {
+        match (self, month) {
+            (Season::Auto, 3..=5) => Season::Spring,
+            (Season::Auto, 6..=8) => Season::Summer,
+            (Season::Auto, 9..=11) => Season::Autumn,
+            (Season::Auto, _) => Season::Winter,
+            (season, _) => season,
+        }
+    }
+}
+
 fn step<T: Copy + PartialEq>(all: &[T], current: T, by: i8) -> T {
     let index = all.iter().position(|item| *item == current).unwrap_or(0) as isize;
     all[(index + isize::from(by.signum())).rem_euclid(all.len() as isize) as usize]
@@ -223,10 +282,10 @@ impl Art {
         }
     }
 
-    fn paint(&mut self, canvas: &mut Canvas, t: f32, weather: &Weather, night: bool) {
+    fn paint(&mut self, canvas: &mut Canvas, t: f32, weather: &Weather, night: bool, season: Season) {
         match self {
             Art::NightLake => night_lake::paint(canvas, t, weather),
-            Art::FujiDawn(art) => art.paint(canvas, t, weather, night),
+            Art::FujiDawn(art) => art.paint(canvas, t, weather, night, season),
             Art::AutumnPagoda(art) => art.paint(canvas, t, weather),
         }
     }
@@ -241,6 +300,7 @@ struct Shown {
     frame: u64,
     weather: Weather,
     night: bool,
+    season: Season,
 }
 
 /// The picture on show. It is painted and turned into glyphs only when its frame, size, look, or
@@ -260,26 +320,20 @@ impl Scene {
         self.clock += f64::from(seconds);
     }
 
-    pub fn draw(
-        &mut self,
-        buf: &mut Buffer,
-        area: Rect,
-        picture: Picture,
-        look: Look,
-        weather: Weather,
-        theme: &Theme,
-    ) {
+    pub fn draw(&mut self, buf: &mut Buffer, area: Rect, config: &Config, weather: Weather, theme: &Theme) {
         if area.is_empty() {
             return;
         }
+        let picture = config.picture;
         let shown = Shown {
             picture,
-            look: look.of(picture, area, theme),
+            look: config.look.of(picture, area, theme),
             columns: area.width,
             rows: area.height,
             frame: (self.clock * FPS) as u64,
             weather,
             night: is_night(),
+            season: config.season.of(jiff::Zoned::now().month()),
         };
         if self.shown.as_ref() != Some(&shown) {
             let t = ((shown.frame % FRAMES_A_DAY) as f64 / FPS) as f32;
@@ -297,8 +351,15 @@ impl Scene {
                 Look::Blocks => self.canvas.resize(columns, rows * 2),
                 _ => self.canvas.resize(columns * 2, rows * 4),
             }
-            art.paint(&mut self.canvas, t, &weather, shown.night);
-            canvas::rain(&mut self.canvas, t, weather.rain, weather.wind);
+            art.paint(&mut self.canvas, t, &weather, shown.night, shown.season);
+            // Fuji paints winter's rain as snow itself.
+            let snows = picture == Picture::FujiDawn && shown.season == Season::Winter;
+            canvas::rain(
+                &mut self.canvas,
+                t,
+                if snows { 0.0 } else { weather.rain },
+                weather.wind,
+            );
             canvas::fireflies(&mut self.canvas, t, weather.crickets, picture.fireflies());
             canvas::brighten(&mut self.canvas, canvas::lightning(t, weather.thunder));
             glyphs(&mut self.glyphs, &self.canvas, shown.look, theme, picture.painted());
@@ -592,6 +653,14 @@ mod tests {
             Look::Blocks.of(Picture::NightLake, window, &Theme::new(None)),
             Look::Dots
         );
+    }
+
+    #[test]
+    fn auto_season_follows_the_month_and_a_chosen_one_stays() {
+        assert_eq!(Season::Auto.of(4), Season::Spring);
+        assert_eq!(Season::Auto.of(10), Season::Autumn);
+        assert_eq!(Season::Auto.of(1), Season::Winter);
+        assert_eq!(Season::Summer.of(1), Season::Summer);
     }
 
     #[test]

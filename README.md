@@ -73,7 +73,7 @@ To update a saved playlist, select it in YouTube and press `R`, click **R refres
 
 The slider between music and ambience at the top of the Ambience panel turns one down against the other, for a loud stream or quiet rain, without touching the volume. A soundscape has no music, so the balance leaves it alone. White, pink, and brown noise sit below the recordings; chill generates them, so they need no download and play offline.
 
-The player shows the cover of what's playing, or `v` swaps it for a moving picture drawn in text that fills the player, with what's playing on a label over it: Journey, Night lake, Fuji at dawn, or Autumn pagoda. A picture moves while something plays and shows the ambience you hear: rain falls while a rain sound plays, thunder lights up the sky, wind sways trees and water, and crickets bring out fireflies, each as strongly as the music and ambience balance lets you hear it. Journey is a landscape in plain characters that scrolls past in layers, and shows more of the ambience: birds fly over, a stream runs through the grass, waves turn the fields to sea, a fire sends up sparks, and the café lights the windows of a village on the hills. On Fuji at dawn the lake mirrors everything above it and sways with waves and wind, wind blows snow off the summit, birdsong sends birds over, and a fire lights a lantern on the boat. From eight in the evening to six in the morning it turns to night, with the moon and stars in place of the sun. Journey and Night lake use your terminal's colors; the other two bring their own. **Settings** chooses the picture and how it is drawn. Auto, the default, draws Night lake in braille dots, and the two paintings in blocks when the player has room and in pixels otherwise. Blocks work in any font. Pixels, and the solid shapes in Night lake, use octant characters from Unicode 16; Ghostty draws them itself, and other terminals need a font that has them.
+The player shows the cover of what's playing, or `v` swaps it for a moving picture drawn in text that fills the player, with what's playing on a label over it: Journey, Night lake, Fuji at dawn, or Autumn pagoda. A picture moves while something plays and shows the ambience you hear: rain falls while a rain sound plays, thunder lights up the sky, wind sways trees and water, and crickets bring out fireflies, each as strongly as the music and ambience balance lets you hear it. Journey is a landscape in plain characters that scrolls past in layers, and shows more of the ambience: birds fly over, a stream runs through the grass, waves turn the fields to sea, a fire sends up sparks, and the café lights the windows of a village on the hills. On Fuji at dawn the lake mirrors everything above it and sways with waves and wind, wind blows snow off the summit, birdsong sends birds over, and a fire lights a lantern on the boat. From eight in the evening to six in the morning it turns to night, with the moon and stars in place of the sun. It also follows the seasons: blossom drifts over pink hills in spring, the snow melts back to the summit in summer, maple leaves fall in autumn, and in winter snow covers the mountain and the pines, and rain falls as snow. Journey and Night lake use your terminal's colors; the other two bring their own. **Settings** chooses the picture and how it is drawn. Auto, the default, draws Night lake in braille dots, and the two paintings in blocks when the player has room and in pixels otherwise. Blocks work in any font. Pixels, and the solid shapes in Night lake, use octant characters from Unicode 16; Ghostty draws them itself, and other terminals need a font that has them.
 
 ![Fuji at dawn filling the player with both sides put away, drawn in blocks](docs/pictures.png)
 
@@ -127,7 +127,7 @@ The server is the Worker in [`sync/`](sync/README.md). It stores what syncs as i
 
 ## Configuration
 
-Press `c` for settings: timer lengths, auto-start, the chime, notifications, the picture, and reduced motion. Changes save to `config.toml` right away, keeping anything else you wrote in it. The file is optional and lives in `~/.config/chill/` on macOS and `%APPDATA%\chill\` on Windows. These are the defaults:
+Press `c` for settings: timer lengths, auto-start, the chime, notifications, the picture, the season, and reduced motion. Changes save to `config.toml` right away, keeping anything else you wrote in it. The file is optional and lives in `~/.config/chill/` on macOS and `%APPDATA%\chill\` on Windows. These are the defaults:
 
 ```toml
 catalog_url = "https://chill-data.aquitano.me/catalog.json"
@@ -136,6 +136,7 @@ sync_url = "https://chill-sync.aquitano.me"
 reduce_motion = false   # true turns off transitions and the visualizer, and holds pictures still
 picture = "cover"       # or "journey", "night-lake", "fuji-dawn", "autumn-pagoda"
 look = "auto"           # how pictures are drawn: "auto", "blocks", "pixels", or "dots"
+season = "auto"         # the calendar's, or "spring", "summer", "autumn", "winter" (say, south of the equator)
 chime = true            # a soft bell when a focus block or break ends
 notifications = true    # an OS notification at the same moments
 

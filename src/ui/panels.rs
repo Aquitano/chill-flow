@@ -574,7 +574,7 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
         let frame = Rect::new(area.x, area.y, area.width, progress_y.saturating_sub(area.y + 1));
         if frame.height >= 3 {
             let weather = ui.weather(app, now);
-            ui.scene.draw(buf, frame, picture, app.config.look, weather, &theme);
+            ui.scene.draw(buf, frame, &app.config, weather, &theme);
         }
         let picker = if inner.width >= 44 {
             picture_picker(buf, Rect::new(inner.x, inner.y, inner.width, 1), picture, ui)
