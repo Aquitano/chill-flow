@@ -192,6 +192,23 @@ mod tests {
         assert_eq!(reloaded.picture, Picture::FujiDawn);
     }
 
+    #[test]
+    fn a_pinned_season_is_saved_and_auto_leaves_the_key_out_for_older_versions() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("config.toml");
+        let mut config = Config {
+            season: Season::Winter,
+            ..Config::default()
+        };
+        save(&path, &config).unwrap();
+        assert_eq!(load(&path).unwrap().season, Season::Winter);
+
+        config.season = Season::Auto;
+        save(&path, &config).unwrap();
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("season"));
+        assert_eq!(load(&path).unwrap().season, Season::Auto);
+    }
+
     #[cfg(unix)]
     #[test]
     fn saving_keeps_restrictive_permissions() {
