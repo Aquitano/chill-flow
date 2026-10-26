@@ -222,10 +222,13 @@ fn bridge(painting: &mut Painting, snowy: bool) {
 fn still(night: bool, season: Season) -> Painting {
     let (width, height) = (WIDTH as f32, HEIGHT as f32);
     let (colors, snowy) = (crowns(season), season == Season::Winter);
-    let snowed = |color: Rgb, x: f32, y: f32| {
-        let drifts = unit((fbm(x / 9.0, y / 5.0, 3, 43) - 0.3) * 3.0);
-        if snowy {
-            mix(color, SNOW, 0.35 + 0.5 * drifts)
+    // Winter's snow lies along the top of each hill and bank, `deep` pixels of it, jagged, with
+    // streaks running further down, the way it caps Fuji.
+    let capped = |color: Rgb, x: f32, below: f32, deep: f32| {
+        let streak = unit((x * 0.9).sin() * (x * 0.23).sin() * 2.0);
+        let line = deep * (0.6 + 0.6 * fbm(x / 3.0, deep, 3, 43) + streak);
+        if snowy && below < line {
+            mix(SNOW, color, unit(below / line) * 0.35)
         } else {
             color
         }
@@ -249,7 +252,14 @@ fn still(night: bool, season: Season) -> Painting {
     });
     painting.paint((0.0, 45.0), (width, WATERLINE), HILL, |_, x, y| {
         let top = 56.0 + 4.0 * (x / 31.0 + 2.0).sin() + 3.0 * fbm(x / 14.0, 3.0, 3, 4);
-        (y >= top).then(|| snowed(mix(rgb(0x7a5470), rgb(0x3a2a44), unit((y - top) / 10.0)), x, y))
+        (y >= top).then(|| {
+            capped(
+                mix(rgb(0x7a5470), rgb(0x3a2a44), unit((y - top) / 10.0)),
+                x,
+                y - top,
+                4.0,
+            )
+        })
     });
     canopy(&mut painting, (100.0, 60.0), (14.0, 9.0), 3, 0.15, colors);
     canopy(&mut painting, (166.0, 58.0), (16.0, 10.0), 5, 0.15, colors);
@@ -263,7 +273,7 @@ fn still(night: bool, season: Season) -> Painting {
             } else {
                 rgb(0x2a2026)
             };
-            snowed(ground, x, y)
+            capped(ground, x, y - top, 1.5)
         })
     });
     canopy(&mut painting, (106.0, 76.0), (13.0, 7.0), 11, 0.0, colors);
@@ -280,14 +290,18 @@ fn still(night: bool, season: Season) -> Painting {
         (162.0, height),
         (width, height),
     ];
+    let on_bank = |x: f32, y: f32| inside(x, y, &left_bank) || inside(x, y, &right_bank);
     painting.paint((0.0, 80.0), (width, height), BANK, |_, x, y| {
-        (inside(x, y, &left_bank) || inside(x, y, &right_bank)).then(|| {
+        on_bank(x, y).then(|| {
             let ground = if fbm(x / 3.0, y / 3.0, 2, 41) > 0.55 {
                 rgb(0x3a2a2a)
             } else {
                 rgb(0x261e2e)
             };
-            snowed(ground, x, y)
+            let below = (1..4)
+                .find(|up| !on_bank(x, y - *up as f32))
+                .map_or(3.0, |up| up as f32 - 1.0);
+            capped(ground, x, below, 1.5)
         })
     });
     if night {
