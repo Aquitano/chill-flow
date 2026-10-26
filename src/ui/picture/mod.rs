@@ -284,9 +284,9 @@ impl Art {
 
     fn paint(&mut self, canvas: &mut Canvas, t: f32, weather: &Weather, night: bool, season: Season) {
         match self {
-            Art::NightLake => night_lake::paint(canvas, t, weather),
+            Art::NightLake => night_lake::paint(canvas, t, weather, season),
             Art::FujiDawn(art) => art.paint(canvas, t, weather, night, season),
-            Art::AutumnPagoda(art) => art.paint(canvas, t, weather),
+            Art::AutumnPagoda(art) => art.paint(canvas, t, weather, night, season),
         }
     }
 }
@@ -303,8 +303,8 @@ struct Shown {
     season: Season,
 }
 
-/// The picture on show. It is painted and turned into glyphs only when its frame, size, look, or
-/// weather changes; in between, the same glyphs are copied into each redraw.
+/// The picture on show. It is painted and turned into glyphs only when what `Shown` holds changes;
+/// in between, the same glyphs are copied into each redraw.
 #[derive(Default)]
 pub struct Scene {
     clock: f64,
@@ -360,14 +360,18 @@ impl Scene {
                 _ => self.canvas.resize(columns * 2, rows * 4),
             }
             art.paint(&mut self.canvas, t, &weather, shown.night, shown.season);
-            // Fuji paints winter's rain as snow itself.
-            let snows = picture == Picture::FujiDawn && shown.season == Season::Winter;
+            // Rain falls as snow in winter, with the rest of what drifts down. A painting draws
+            // its own, in pixels of its own.
+            let winter = shown.season == Season::Winter;
             canvas::rain(
                 &mut self.canvas,
                 t,
-                if snows { 0.0 } else { weather.rain },
+                if winter { 0.0 } else { weather.rain },
                 weather.wind,
             );
+            if !picture.painted() {
+                canvas::drift(&mut self.canvas, t, shown.season, &weather);
+            }
             canvas::fireflies(&mut self.canvas, t, weather.crickets, picture.fireflies());
             canvas::brighten(&mut self.canvas, canvas::lightning(t, weather.thunder));
             glyphs(&mut self.glyphs, &self.canvas, shown.look, theme, picture.painted());

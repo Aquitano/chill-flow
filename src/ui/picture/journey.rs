@@ -593,4 +593,16 @@ mod tests {
         };
         assert_eq!(colors(heard), [true; 3]);
     }
+
+    #[test]
+    fn spring_blossom_and_autumn_leaves_bring_color_without_a_sound() {
+        let theme = Theme::new(Some(([205, 214, 244], [30, 30, 46])));
+        let mut cells = Vec::new();
+        let mut shows = |season: Season, color: Color| {
+            draw(&mut cells, (160, 36), 40.0, &Weather::default(), false, season, &theme);
+            cells.iter().flatten().any(|&(_, fg, _)| fg == color)
+        };
+        assert!(shows(Season::Spring, theme.alert));
+        assert!(shows(Season::Autumn, theme.accent));
+    }
 }

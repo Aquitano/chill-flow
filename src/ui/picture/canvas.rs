@@ -1,3 +1,5 @@
+use super::{Season, Weather};
+
 pub type Rgb = [f32; 3];
 
 pub const fn rgb(hex: u32) -> Rgb {
@@ -71,6 +73,74 @@ pub fn fbm(x: f32, y: f32, octaves: u32, seed: i64) -> f32 {
         frequency *= 2.0;
     }
     sum / total
+}
+
+/// The same color by moonlight: cooler, and darker the darker it was, so snow still stands out.
+pub fn moonlit(color: Rgb) -> Rgb {
+    let light = luma(color);
+    let cool = [light * 150.0, light * 175.0, light * 255.0];
+    mix(color, cool, 0.8).map(|channel| channel * (0.25 + 0.4 * light))
+}
+
+pub const SNOW: Rgb = rgb(0xf4f2fa);
+
+/// Snow lying along the top of a hill or bank, `below` pixels under its top: about `deep` pixels
+/// of it, jagged, with streaks running further down, the way it caps a mountain.
+pub fn snowcap(color: Rgb, x: f32, below: f32, deep: f32) -> Rgb {
+    let streak = unit((x * 0.9).sin() * (x * 0.23).sin() * 2.0);
+    let line = deep * (0.6 + 0.6 * fbm(x / 3.0, deep, 3, 43) + streak);
+    if below < line {
+        mix(SNOW, color, unit(below / line) * 0.35)
+    } else {
+        color
+    }
+}
+
+/// What a season sends drifting down through a picture.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Drifting {
+    Petals,
+    Leaves,
+    Snow,
+}
+
+impl Drifting {
+    pub fn of(season: Season) -> Option<Drifting> {
+        match season {
+            Season::Spring => Some(Drifting::Petals),
+            Season::Summer => None,
+            Season::Auto | Season::Autumn => Some(Drifting::Leaves),
+            Season::Winter => Some(Drifting::Snow),
+        }
+    }
+
+    /// Its color, and the color of its other side.
+    fn colors(self) -> (Rgb, Rgb) {
+        match self {
+            Drifting::Petals => (rgb(0xffd6e6), rgb(0xf0a0c4)),
+            Drifting::Leaves => (rgb(0xf0a040), rgb(0xc8402a)),
+            Drifting::Snow => (rgb(0xffffff), rgb(0xdcdcf0)),
+        }
+    }
+
+    /// Where each piece is at `t`, as fractions across and down the picture, and whether it shows
+    /// its other side. A picture 192 dots wide gets a few dozen; in winter rain falls as snow.
+    fn pieces(self, t: f32, weather: &Weather, width: f32) -> impl Iterator<Item = (f32, f32, bool)> {
+        let (count, speed, flutter) = match self {
+            Drifting::Petals => (30.0, 0.05, 2.5),
+            Drifting::Leaves => (22.0, 0.07, 4.0),
+            Drifting::Snow => (40.0 + weather.rain * 140.0, 0.06, 1.2),
+        };
+        let breeze = 0.5 + 1.5 * weather.wind;
+        let pieces = (count * width / 192.0).round() as i64;
+        (0..pieces).map(move |piece| {
+            let k = piece as f32;
+            let fall = (t * speed * (0.7 + 0.6 * hash(piece, 1, 95)) + hash(piece, 2, 95)) % 1.0;
+            let across =
+                (hash(piece, 3, 95) * 1.2 + fall * 0.16 * breeze) % 1.2 - 0.1 + (t * 0.9 + k).sin() * flutter / 192.0;
+            (across, fall * 1.06 - 0.03, (t * 3.0 + k).sin() > 0.0)
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -199,6 +269,8 @@ pub struct Painting {
     still: Vec<Rgb>,
     layers: Vec<u8>,
     frame: Vec<Rgb>,
+    /// Where `repaint` gathers a frame's new colors, kept so each frame doesn't allocate it again.
+    repainted: Vec<(usize, Rgb)>,
 }
 
 impl Painting {
@@ -210,6 +282,7 @@ impl Painting {
             still: vec![[0.0; 3]; pixels],
             layers: vec![0; pixels],
             frame: vec![[0.0; 3]; pixels],
+            repainted: Vec::new(),
         }
     }
 
@@ -243,12 +316,6 @@ impl Painting {
         }
     }
 
-    pub fn still_at(&self, x: f32, y: f32) -> Rgb {
-        let column = (x as usize).min(self.width - 1);
-        let row = (y.max(0.0) as usize).min(self.height - 1);
-        self.still[row * self.width + column]
-    }
-
     /// Recolors every still pixel, for the same scene in another light.
     pub fn grade(&mut self, grade: impl Fn(Rgb) -> Rgb) {
         for color in &mut self.still {
@@ -269,18 +336,20 @@ impl Painting {
     /// what the frame shows so far, so water can mirror what moves above it.
     pub fn repaint(&mut self, from: (f32, f32), to: (f32, f32), layer: u8, color: impl Fn(&Painting, f32, f32) -> Rgb) {
         let (across, down) = (span(from.0, to.0, self.width), span(from.1, to.1, self.height));
-        let mut painted = Vec::new();
+        let mut repainted = std::mem::take(&mut self.repainted);
+        repainted.clear();
         for row in down {
             for column in across.clone() {
                 let index = row * self.width + column;
                 if self.layers[index] == layer {
-                    painted.push((index, color(self, column as f32 + 0.5, row as f32 + 0.5)));
+                    repainted.push((index, color(self, column as f32 + 0.5, row as f32 + 0.5)));
                 }
             }
         }
-        for (index, color) in painted {
+        for &(index, color) in &repainted {
             self.frame[index] = color;
         }
+        self.repainted = repainted;
     }
 
     /// Blends `color` over one of the painting's own pixels at `x`, `y`.
@@ -316,6 +385,45 @@ impl Painting {
                 if let Some((color, amount)) = glaze(column as f32 + 0.5, row as f32 + 0.5) {
                     self.frame[index] = mix(self.frame[index], color, amount);
                 }
+            }
+        }
+    }
+
+    /// Stars twinkling over the sky, above `horizon`.
+    pub fn stars(&mut self, t: f32, horizon: f32, layer: u8) {
+        let width = self.width as f32;
+        for star in 0..(90.0 * width / 192.0) as i64 {
+            let (x, y) = (hash(star, 1, 90) * width, hash(star, 2, 90).powf(1.4) * horizon);
+            let twinkle = 0.55 + 0.45 * (t * (0.8 + hash(star, 3, 90) * 2.0) + star as f32).sin();
+            self.add_behind(x, y, rgb(0xeef0ff), twinkle * (0.4 + 0.6 * hash(star, 4, 90)), layer);
+        }
+    }
+
+    /// A full moon with a faint halo.
+    pub fn moon(&mut self, (cx, cy): (f32, f32), radius: f32, layer: u8) {
+        let halo = radius * 2.5;
+        self.glaze((cx - halo, cy - halo), (cx + halo, cy + halo), layer, |x, y| {
+            let distance = (x - cx).hypot(y - cy);
+            if distance < radius {
+                let crater = noise(x / 2.0, y / 2.0, 92) * 0.15;
+                Some((mix(rgb(0xf4f2e4), rgb(0xb8bccc), crater), 1.0))
+            } else {
+                (distance < halo).then(|| (rgb(0x8890c0), unit(1.0 - distance / halo) * 0.35))
+            }
+        });
+    }
+
+    /// Blossom, leaves, or snow drifting down through the picture, as whole pixels of it.
+    pub fn drift(&mut self, t: f32, season: Season, weather: &Weather) {
+        let Some(drifting) = Drifting::of(season) else { return };
+        let (front, back) = drifting.colors();
+        let (width, height) = (self.width as f32, self.height as f32);
+        for (across, down, turned) in drifting.pieces(t, weather, width) {
+            let (x, y) = (across * width, down * height);
+            self.add(x, y, if turned { back } else { front }, 0.95);
+            if drifting != Drifting::Snow {
+                let (dx, dy) = if turned { (1.0, 0.0) } else { (0.0, 1.0) };
+                self.add(x + dx, y + dy, if turned { back } else { front }, 0.7);
             }
         }
     }
@@ -401,6 +509,27 @@ pub fn rain(canvas: &mut Canvas, t: f32, level: f32, wind: f32) {
     }
 }
 
+/// Blossom, leaves, or snow drifting down a picture in the theme's colors, leaves in its yellow
+/// and red.
+pub fn drift(canvas: &mut Canvas, t: f32, season: Season, weather: &Weather) {
+    let Some(drifting) = Drifting::of(season) else { return };
+    let (width, height) = (canvas.width as f32, canvas.height as f32);
+    let size = (height / 64.0).round().max(1.0) as usize;
+    for (across, down, turned) in drifting.pieces(t, weather, width) {
+        let dot = match (drifting, turned) {
+            (Drifting::Leaves, false) => Dot::figure(Ink::Accent),
+            (Drifting::Leaves, true) => Dot::figure(Ink::Alert),
+            (Drifting::Petals, _) => Dot::solid(0.8),
+            (Drifting::Snow, _) => Dot::solid(0.95),
+        };
+        for row in 0..size {
+            for column in 0..size {
+                canvas.set_behind(across * width + column as f32, down * height + row as f32, dot);
+            }
+        }
+    }
+}
+
 /// Fireflies drifting and blinking between `band.0` and `band.1` of the height.
 pub fn fireflies(canvas: &mut Canvas, t: f32, level: f32, band: (f32, f32)) {
     let (width, height) = (canvas.width as f32, canvas.height as f32);
@@ -454,6 +583,19 @@ pub fn brighten(canvas: &mut Canvas, amount: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repainting_reads_the_frame_from_before_it_and_leaves_other_layers_alone() {
+        let mut painting = Painting::new(3, 1);
+        painting.paint((0.0, 0.0), (3.0, 1.0), 0, |_, x, _| Some([x * 10.0; 3]));
+        painting.paint((2.0, 0.0), (3.0, 1.0), 1, |_, _, _| Some([99.0; 3]));
+        painting.begin();
+        painting.repaint((0.0, 0.0), (3.0, 1.0), 0, |painting, x, y| {
+            painting.frame_at(x - 1.0, y).map(|channel| channel + 1.0)
+        });
+        let reds = [0.5, 1.5, 2.5].map(|x| painting.frame_at(x, 0.0)[0]);
+        assert_eq!(reds, [6.0, 6.0, 99.0]);
+    }
 
     #[test]
     fn shrinking_weighs_each_pixel_by_how_much_of_it_is_covered() {

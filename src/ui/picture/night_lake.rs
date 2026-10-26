@@ -1,5 +1,5 @@
-use super::Weather;
 use super::canvas::{Canvas, Dot, Ink, fbm, hash, noise};
+use super::{Season, Weather};
 
 /// Puts someone in the boat, fishing. Off for now; the boat drifts empty.
 const FISHER: bool = false;
@@ -23,8 +23,10 @@ const BOAT: [&str; 14] = [
     ".....hhhhhhhhhhhhhhhh.....",
 ];
 
-/// A moonlit lake between pines, drawn in the theme's own colors at whatever size it's given.
-pub fn paint(canvas: &mut Canvas, t: f32, weather: &Weather) {
+/// A moonlit lake between pines, drawn in the theme's own colors at whatever size it's given. In
+/// winter snow lies on the hills and the pines.
+pub fn paint(canvas: &mut Canvas, t: f32, weather: &Weather, season: Season) {
+    let snowy = season == Season::Winter;
     let (width, height) = (canvas.width, canvas.height);
     let (w, h) = (width as f32, height as f32);
     let horizon = (h * 0.6).round();
@@ -41,7 +43,8 @@ pub fn paint(canvas: &mut Canvas, t: f32, weather: &Weather) {
         for (x, hill_top) in hill_tops.iter().enumerate() {
             let fx = x as f32;
             let light = if fy >= *hill_top {
-                (0.2 + 0.1 * fbm(fx / (h * 0.03), fy / (h * 0.03), 2, 4)
+                (if snowy { 0.28 } else { 0.2 }
+                    + 0.1 * fbm(fx / (h * 0.03), fy / (h * 0.03), 2, 4)
                     + 0.12 * (-(fx - moon_x).abs() / (h * 0.7)).exp())
                     * (1.0 - overcast * 0.4)
             } else {
@@ -74,7 +77,12 @@ pub fn paint(canvas: &mut Canvas, t: f32, weather: &Weather) {
                 let edge = trunk + lit_side * half;
                 let mut x = trunk - half;
                 while x <= trunk + half {
-                    let rim = if (x - edge).abs() < 1.5 { 0.5 * moonlight } else { 0.0 };
+                    let shaded = trunk - lit_side * half;
+                    let rim = match ((x - edge).abs() < 1.5, snowy && (x - shaded).abs() < 1.0) {
+                        (true, _) => (if snowy { 0.8 } else { 0.5 }) * moonlight,
+                        (false, true) => 0.35 * moonlight,
+                        (false, false) => 0.0,
+                    };
                     canvas.set(x + sway, horizon - j, Dot::shade(rim));
                     x += 1.0;
                 }
@@ -182,7 +190,11 @@ pub fn paint(canvas: &mut Canvas, t: f32, weather: &Weather) {
     }
 
     // Rings where rain lands on the water.
-    let splashes = (weather.rain * w * 0.05).round() as i64;
+    let splashes = if snowy {
+        0
+    } else {
+        (weather.rain * w * 0.05).round() as i64
+    };
     for splash in 0..splashes {
         let period = 0.6 + hash(splash, 1, 50) * 0.5;
         let cycle = t / period + hash(splash, 2, 50);
