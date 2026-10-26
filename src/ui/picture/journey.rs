@@ -1,12 +1,14 @@
 //! A landscape in plain text that scrolls past in layers, nearer ones faster, in the theme's own
 //! ink on its paper. Each layer says how much ink it wants in a cell, and that is drawn as a
 //! ramp of characters, ordered-dithered so even ground reads as a pattern rather than noise. Clouds
-//! are their contour lines. Everything that moves in it comes from the ambience that's playing.
+//! are their contour lines. Everything that moves in it comes from the ambience that's playing,
+//! and the land follows the seasons: blossom in spring, tall grass in summer, falling leaves in
+//! autumn, and snow in winter.
 
 use ratatui::style::Color;
 
 use super::canvas::{fbm, hash, lightning, noise, unit};
-use super::{Glyph, Weather, threshold};
+use super::{Glyph, Season, Weather, threshold};
 use crate::ui::theme::Theme;
 
 /// How fast each layer scrolls by, in cells a second, from the clouds to the grass in front. A
@@ -29,6 +31,15 @@ struct Inks {
 impl Inks {
     fn shade(&self, ink: f32) -> Color {
         self.theme.mix(0.3 + 0.65 * unit(ink))
+    }
+
+    /// Snow is the paper's color on a light theme, and the brightest ink on a dark one.
+    fn snow(&self) -> Color {
+        if self.theme.is_light() {
+            self.theme.background()
+        } else {
+            self.shade(0.95)
+        }
     }
 
     /// Paper on the ground color. Without the theme's colors a cell can't swap them, so it's drawn
@@ -76,11 +87,10 @@ impl Frame<'_> {
 
 pub fn draw(
     cells: &mut Vec<Option<Glyph>>,
-    columns: usize,
-    rows: usize,
+    (columns, rows): (usize, usize),
     t: f32,
     weather: &Weather,
-    night: bool,
+    (night, season): (bool, Season),
     theme: &Theme,
 ) {
     cells.clear();
@@ -116,17 +126,21 @@ pub fn draw(
     if weather.waves > 0.02 {
         sea(&mut frame, &fields, &front, scroll(FIELDS), t, weather, &inks);
     } else {
-        meadow(&mut frame, &fields, &front, scroll(FIELDS), &inks);
+        meadow(&mut frame, &fields, &front, scroll(FIELDS), season, &inks);
     }
     if weather.stream > 0.02 {
         creek(&mut frame, &front, t, weather, &inks);
     }
     birds(&mut frame, t, weather, &inks);
     fireflies(&mut frame, t, weather, &inks);
-    foreground(&mut frame, &front, scroll(FRONT), t, weather, &inks);
-    leaves(&mut frame, t, weather, &inks);
+    foreground(&mut frame, &front, scroll(FRONT), t, weather, season, &inks);
+    leaves(&mut frame, t, weather, season, &inks);
     sparks(&mut frame, t, weather, &inks);
-    rain(&mut frame, t, weather, &inks);
+    if season == Season::Winter {
+        snow(&mut frame, t, weather, &inks);
+    } else {
+        rain(&mut frame, t, weather, &inks);
+    }
     if flash >= 0.7 {
         bolt(&mut frame, &hills, t, &inks);
     }
@@ -295,14 +309,25 @@ fn far_hills(frame: &mut Frame, hills: &[f32], fields: &[f32], offset: i64, weat
 }
 
 /// The fields between the hills and the grass: furrowed, heavier toward the front, with a dark
-/// hedge here and there.
-fn meadow(frame: &mut Frame, fields: &[f32], front: &[f32], offset: i64, inks: &Inks) {
+/// hedge here and there. Blossom dots them in spring, autumn's are harvested and lighter, and
+/// winter's lie under snow with only a trace of their furrows.
+fn meadow(frame: &mut Frame, fields: &[f32], front: &[f32], offset: i64, season: Season, inks: &Inks) {
+    let (base, deepen, furrows) = match season {
+        Season::Winter => (0.04, 0.12, 0.08),
+        Season::Autumn => (0.26, 0.22, 0.22),
+        Season::Auto | Season::Spring | Season::Summer => (0.34, 0.3, 0.18),
+    };
     for (x, &top) in fields.iter().enumerate() {
         let world = x as i64 + offset;
         let wx = world as f32;
         let slope = fields[(x + 1).min(fields.len() - 1)] - fields[x.saturating_sub(1)];
         let first = top.max(0.0) as usize;
-        frame.set(x as isize, first as isize, (crest(top, slope), inks.shade(0.6), None));
+        let crest_ink = if season == Season::Winter {
+            inks.snow()
+        } else {
+            inks.shade(0.6)
+        };
+        frame.set(x as isize, first as isize, (crest(top, slope), crest_ink, None));
         for y in first + 1..(front[x].ceil().max(0.0) as usize).min(frame.rows) {
             let wy = y as f32;
             let depth = unit((wy - top) / (front[x] - top).max(1.0));
@@ -310,8 +335,13 @@ fn meadow(frame: &mut Frame, fields: &[f32], front: &[f32], offset: i64, inks: &
                 frame.set(x as isize, y as isize, inks.solid(' '));
                 continue;
             }
+            if season == Season::Spring && hash(world, y as i64, 57) < 0.025 {
+                let symbol = if hash(world, y as i64, 58) > 0.5 { '*' } else { 'o' };
+                frame.set(x as isize, y as isize, (symbol, inks.theme.alert, None));
+                continue;
+            }
             let furrow = 0.5 + 0.5 * (wy * 1.6 + 4.0 * fbm(wx / 18.0, wy / 5.0, 2, 52)).sin();
-            let ink = 0.34 + 0.3 * depth + 0.18 * furrow;
+            let ink = base + deepen * depth + furrows * furrow;
             if let Some(symbol) = ramp(ink, world, y) {
                 frame.set(x as isize, y as isize, (symbol, inks.shade(ink), None));
             }
@@ -387,14 +417,20 @@ fn fireflies(frame: &mut Frame, t: f32, weather: &Weather, inks: &Inks) {
 }
 
 /// The grass in front, solid but for a few light blades, topped by blades that lean with the wind.
-fn foreground(frame: &mut Frame, front: &[f32], offset: i64, t: f32, weather: &Weather, inks: &Inks) {
+/// Summer grows more of them, spring puts blossom on the pines, and winter lays snow over it all.
+fn foreground(frame: &mut Frame, front: &[f32], offset: i64, t: f32, weather: &Weather, season: Season, inks: &Inks) {
+    let (blades, tufts) = if season == Season::Summer {
+        (0.8, 0.45)
+    } else {
+        (0.92, 0.6)
+    };
     for (x, &top) in front.iter().enumerate() {
         let world = x as i64 + offset;
         let first = top.max(0.0);
         if first.fract() >= 0.5 {
             frame.set(x as isize, first as isize, ('▄', inks.ground, None));
         }
-        let blade = hash(world, 1, 72) > 0.92;
+        let blade = hash(world, 1, 72) > blades;
         for y in first.round() as usize..frame.rows {
             let below = y as f32 - first;
             let seed = hash(world, y as i64, 71);
@@ -406,7 +442,30 @@ fn foreground(frame: &mut Frame, front: &[f32], offset: i64, t: f32, weather: &W
             };
             frame.set(x as isize, y as isize, inks.solid(symbol));
         }
-        if noise(world as f32 * 1.3, 0.2, 72) > 0.6 && first >= 1.0 {
+        // Snow lies on the ground and the pines; blossom shows on the pines that stand above it.
+        let row = first.round() as isize;
+        let pine = top < front.iter().copied().fold(0.0, f32::max) - 2.0;
+        match season {
+            Season::Winter => {
+                if let Some(index) = frame.index(x as isize, row) {
+                    let ground = frame.cells[index].and_then(|(_, _, bg)| bg);
+                    frame.cells[index] = Some(('▀', inks.snow(), ground));
+                }
+                continue;
+            }
+            Season::Spring if pine && hash(world, 2, 73) > 0.55 => {
+                frame.over(
+                    x as isize,
+                    row,
+                    if hash(world, 3, 73) > 0.5 { '*' } else { 'o' },
+                    inks.theme.alert,
+                    inks,
+                );
+                continue;
+            }
+            _ => {}
+        }
+        if noise(world as f32 * 1.3, 0.2, 72) > tufts && first >= 1.0 {
             let lean = (t * 1.8 + world as f32 * 0.4).sin() * weather.wind;
             let symbol = match lean {
                 lean if lean > 0.15 => '/',
@@ -421,18 +480,25 @@ fn foreground(frame: &mut Frame, front: &[f32], offset: i64, t: f32, weather: &W
     }
 }
 
-fn leaves(frame: &mut Frame, t: f32, weather: &Weather, inks: &Inks) {
-    if weather.wind <= 0.25 {
-        return;
-    }
+/// Leaves blown past by the wind. Autumn's fall even on a still day and in its own color, spring
+/// blows blossom petals instead, and winter has none.
+fn leaves(frame: &mut Frame, t: f32, weather: &Weather, season: Season, inks: &Inks) {
+    let gusts = ((weather.wind - 0.2) * 14.0).max(0.0);
+    let (count, color) = match season {
+        Season::Winter => return,
+        Season::Autumn => (4.0 + gusts, inks.theme.accent),
+        Season::Spring => (3.0 + gusts, inks.theme.alert),
+        Season::Auto | Season::Summer if weather.wind > 0.25 => (gusts, inks.shade(0.7)),
+        Season::Auto | Season::Summer => return,
+    };
     let (w, h) = (frame.columns as f32, frame.rows as f32);
-    let count = ((weather.wind - 0.2) * 14.0).round() as i64;
+    let count = count.round() as i64;
     for leaf in 0..count {
         let speed = 7.0 + 5.0 * hash(leaf, 1, 81);
         let x = (hash(leaf, 2, 81) * (w + 20.0) - t * speed).rem_euclid(w + 20.0) - 10.0;
         let y = h * (0.35 + 0.4 * hash(leaf, 3, 81)) + (t * 2.0 + leaf as f32).sin() * 1.5;
         let symbol = if (t * 5.0 + leaf as f32).sin() > 0.0 { ',' } else { '`' };
-        frame.over(x as isize, y as isize, symbol, inks.shade(0.7), inks);
+        frame.over(x as isize, y as isize, symbol, color, inks);
     }
 }
 
@@ -474,6 +540,20 @@ fn rain(frame: &mut Frame, t: f32, weather: &Weather, inks: &Inks) {
     }
 }
 
+/// Winter's flakes drifting down, a few always and many more while rain plays, blown by the wind.
+fn snow(frame: &mut Frame, t: f32, weather: &Weather, inks: &Inks) {
+    let (w, h) = (frame.columns as f32, frame.rows as f32);
+    let flakes = (w * (0.12 + weather.rain * 0.3)).round() as i64;
+    for flake in 0..flakes {
+        let speed = 0.12 + 0.08 * hash(flake, 1, 121);
+        let y = ((t * speed + hash(flake, 2, 121)) % 1.05) * h - h * 0.03;
+        let drift = (t * 0.8 + flake as f32).sin() * 1.5 + y * weather.wind * 0.8;
+        let x = hash(flake, 3, 121) * (w + h * weather.wind) - drift;
+        let symbol = if hash(flake, 4, 121) > 0.7 { '*' } else { '.' };
+        frame.over(x as isize, y as isize, symbol, inks.snow(), inks);
+    }
+}
+
 fn bolt(frame: &mut Frame, hills: &[f32], t: f32, inks: &Inks) {
     let slot = (t * 0.8).floor() as i64;
     let mut x = (hash(slot, 5, 111) * frame.columns as f32) as isize;
@@ -495,7 +575,7 @@ mod tests {
         let theme = Theme::new(Some(([205, 214, 244], [30, 30, 46])));
         let mut cells = Vec::new();
         let mut colors = |weather: Weather| {
-            draw(&mut cells, 160, 36, 40.0, &weather, false, &theme);
+            draw(&mut cells, (160, 36), 40.0, &weather, (false, Season::Summer), &theme);
             let shows = |color: Color| cells.iter().flatten().any(|&(_, fg, _)| fg == color);
             [theme.calm, theme.accent, theme.alert].map(shows)
         };
