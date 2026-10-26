@@ -187,6 +187,8 @@ pub struct App {
     /// Where the current stream started, so `position` minus this is how much of it has played.
     stream_from: f64,
     resume_at: Option<f64>,
+    /// The music a soundscape replaced and where it was, so `M` can bring it back.
+    music_before: Option<(Playback, f64)>,
     pending_seek: Option<(f64, Instant)>,
     pending_resolve: Option<(String, f64, Instant)>,
     next_inspection: u64,
@@ -292,6 +294,7 @@ impl App {
             reconnecting: None,
             stream_from: 0.0,
             resume_at: (session.position > 1.0).then_some(session.position),
+            music_before: None,
             pending_seek: None,
             pending_resolve: None,
             next_inspection: 0,
@@ -795,6 +798,9 @@ impl App {
     }
 
     fn enter_soundscape(&mut self) {
+        if self.source != Source::Soundscape {
+            self.music_before = Some((self.playback(), self.position()));
+        }
         self.choices += 1;
         self.stop_stream();
         self.queue.replace(Vec::new(), None);
@@ -833,6 +839,10 @@ impl App {
         if self.is_playing() {
             return self.engine.set_paused(true);
         }
+        self.resume();
+    }
+
+    fn resume(&mut self) {
         if self.stream == Stream::Idle
             && let Some(item) = self.current().cloned()
         {
@@ -841,6 +851,21 @@ impl App {
             self.start(item, at);
         }
         self.engine.set_paused(false);
+    }
+
+    /// Keeps the ambience as it is set and drops the music, or brings the music back where it was.
+    fn toggle_music(&mut self) {
+        if self.source != Source::Soundscape {
+            if self.levels.is_empty() {
+                return self.toast(Tone::Info, "Turn up a sound first to hear it without music");
+            }
+            return self.enter_soundscape();
+        }
+        let (playback, at) = self.music_before.take().unwrap_or_default();
+        self.resume_at = (at > 0.0).then_some(at);
+        self.restore_playback(&playback);
+        self.choices += 1;
+        self.resume();
     }
 
     fn set_timer_running(&mut self, running: bool) {
@@ -896,6 +921,7 @@ impl App {
     pub fn dispatch(&mut self, action: Action) {
         match action {
             Action::TogglePlay => self.toggle_play(),
+            Action::ToggleMusic => self.toggle_music(),
             Action::Next => self.skip(true),
             Action::Previous => self.skip(false),
             Action::SeekBy(delta) => self.seek_to(self.position() + delta),
@@ -2719,6 +2745,28 @@ mod tests {
             app.dispatch(Action::TogglePlay);
             assert_eq!((app.is_playing(), app.timer.is_running()), (false, timing));
         }
+    }
+
+    #[test]
+    fn music_steps_aside_for_the_ambience_and_comes_back_where_it_was() {
+        let mut app = app();
+        let track = app.current().cloned();
+        app.dispatch(Action::ToggleMusic);
+        assert_eq!((&app.source, app.current()), (&Source::Tracks, track.as_ref()));
+
+        app.dispatch(Action::SetLevel("noise-brown".into(), 40));
+        app.resume_at = Some(42.0);
+        app.dispatch(Action::ToggleMusic);
+        assert_eq!(
+            (&app.source, app.current(), app.is_playing()),
+            (&Source::Soundscape, None, true)
+        );
+        assert_eq!(app.levels.get("noise-brown"), Some(&40));
+
+        app.dispatch(Action::ToggleMusic);
+        assert_eq!((&app.source, app.current()), (&Source::Tracks, track.as_ref()));
+        assert_eq!(app.position(), 42.0);
+        assert_eq!(app.levels.get("noise-brown"), Some(&40));
     }
 
     #[test]

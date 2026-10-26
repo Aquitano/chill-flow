@@ -819,7 +819,7 @@ pub fn queue(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
     ui.hit(area, Hit::Panel(Panel::Queue));
     if upcoming.is_empty() {
         let message = if app.source == Source::Soundscape {
-            "Pick a track to bring the music back"
+            "Press M or pick a track to bring the music back"
         } else {
             "Press a on a track to queue it"
         };

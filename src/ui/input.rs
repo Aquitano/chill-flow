@@ -212,6 +212,7 @@ fn key_pressed(app: &mut App, ui: &mut Ui, key: KeyEvent) {
         KeyCode::Char('T') => Some(Action::TimerReset),
         KeyCode::Char('x') => Some(Action::TimerSkip),
         KeyCode::Char('m') => Some(Action::CycleTimerMode),
+        KeyCode::Char('M') => Some(Action::ToggleMusic),
         KeyCode::Char('F') => Some(Action::ToggleTimerPanel),
         KeyCode::Char('H') => Some(Action::ToggleLibraryPanel),
         KeyCode::Char('L') => Some(Action::ToggleSidePanel),

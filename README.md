@@ -35,7 +35,7 @@ After a winget install, open a new terminal so the tools are on `PATH`. When a t
 
 ## Use
 
-`chill` opens with your last scene loaded and paused. Space starts the music and the ambience, and `t` starts the focus timer. Each runs without the other, so you can just listen.
+`chill` opens with your last scene loaded and paused. Space starts the music and the ambience, and `t` starts the focus timer. Each runs without the other, so you can just listen. For ambience alone, `M` turns the music off and keeps the sounds you set; press it again and the music picks up where it stopped.
 
 `F` hides or shows the timer panel. While it is hidden, a running or paused timer stays in the header, and clicking it pauses or resumes. `H` and `L` put away the library on the left and the ambience and timer on the right, so the player fills the window. A side you put away leaves a thin edge with an arrow; click it, or press the same key, to bring the side back.
 
@@ -54,6 +54,7 @@ An error stays in a small notice until you dismiss it. Click the notice or press
 | Key | Does |
 | --- | --- |
 | `space` | play or pause the music and ambience |
+| `M` | turn the music off and keep the ambience, or bring the music back |
 | `n` / `p` | next / previous |
 | `f` | like what's playing |
 | `<` / `>` | turn the music or the ambience up against the other |
