@@ -18,10 +18,10 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Aquitano/chill-flow/rel
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/Aquitano/chill-flow/releases/latest/download/chill-installer.ps1 | iex"
 ```
 
-Both put `chill` in `~/.cargo/bin` and add it to `PATH`. Run `chill update` in your terminal to install the latest stable release. It uses the installer receipt to update the same installation, including custom install locations. Older versions without this command can rerun the installer. On any other platform, build it with the Rust toolchain from [rustup.rs](https://rustup.rs) (on Windows that also needs the Visual Studio C++ build tools):
+Both put `chill` in `~/.cargo/bin` and add it to `PATH`. `chill update` installs the latest release over an installation made this way; versions before 0.4.0 rerun the installer instead. On any other platform, build it with the Rust toolchain from [rustup.rs](https://rustup.rs) (on Windows that also needs the Visual Studio C++ build tools):
 
 ```bash
-cargo install --git https://github.com/Aquitano/chill-flow
+cargo install --git https://github.com/Aquitano/chill-flow          # add --force to update
 ```
 
 chill plays the catalog, the ambience, and the generated noise on its own. YouTube links also need three tools chill doesn't ship: ffmpeg decodes their audio, yt-dlp resolves them, and deno lets yt-dlp read YouTube's player. If Node.js 22 or newer is already installed, yt-dlp uses it in place of deno.
@@ -31,17 +31,13 @@ brew install ffmpeg yt-dlp deno                          # macOS, or Linux with 
 winget install Gyan.FFmpeg yt-dlp.yt-dlp DenoLand.Deno   # Windows
 ```
 
-After a winget install, open a new terminal so the tools are on `PATH`. When a tool is missing, opening or playing a YouTube link names it and the command that installs it, with winget on Windows and Homebrew on macOS or on Linux where Homebrew is installed. `chill doctor` checks all three with a five-second limit per tool. It reports installed, missing, or broken tools, their versions and paths, and install or update commands. It also prints the config, library, cache, and diagnostic log paths, and exits unsuccessfully for broken tools or an invalid config. It never installs dependencies. YouTube changes often enough that an old yt-dlp stops working, so chill mentions it at startup once your yt-dlp is more than 60 days old; update it with `brew upgrade yt-dlp` or `winget upgrade yt-dlp.yt-dlp`.
-
-`chill update` supports the official Apple Silicon macOS and x64 Windows installers. It requires their receipt to match the running executable and the official release repository. Copies and source builds without a matching installer receipt get instructions instead, as do unsupported platforms. For a Cargo installation, use `cargo install --git https://github.com/Aquitano/chill-flow --force`; for another package manager, use its update command. No update checks run at startup or in the TUI.
+After a winget install, open a new terminal so the tools are on `PATH`. When a tool is missing, a YouTube link names it and the command that installs it. `chill doctor` checks all three tools, prints the config, library, and cache paths, and never installs anything. An old yt-dlp stops working when YouTube changes, so chill reminds you at startup once yours is more than 60 days old.
 
 ## Use
 
 `chill` opens with your last scene loaded and paused. Space starts the music and the ambience, and `t` starts the focus timer. Each runs without the other, so you can just listen.
 
-`F` hides or shows the timer panel. Starting, pausing, resetting, skipping, or changing the timer mode preserves your panel visibility. Showing the timer with `F` also reveals the right side if it was hidden. `H` and `L` put away the library on the left and the ambience and timer on the right, so the player fills the window. A side you put away leaves a thin edge with an arrow; click it, or press the same key, to bring the side back.
-
-A running or paused in-progress timer stays visible in the header when its panel is hidden. Click that clock to pause or resume. At medium widths, showing the timer while Queue or Ambience has focus can leave the timer in the header until the full panel has room. When a paused timer appears in the compact header, it is labeled **paused**.
+`F` hides or shows the timer panel. While it is hidden, a running or paused timer stays in the header, and clicking it pauses or resumes. `H` and `L` put away the library on the left and the ambience and timer on the right, so the player fills the window. A side you put away leaves a thin edge with an arrow; click it, or press the same key, to bring the side back.
 
 ```bash
 chill                                   # resume where you left off
@@ -53,7 +49,7 @@ chill update                            # update an official installation
 
 Paste a YouTube link anywhere in the app to add it to the library and play it. Everything responds to the mouse: click rows and buttons, drag the sliders, scroll the lists. Press `?` for every key, or `ctrl+p` to search all commands.
 
-Errors and dependency notices stay in a compact notice until dismissed, which shows the one that happened last. Click the notice, press `D`, or search for **Recent errors and diagnostics** in the palette. Use left and right to choose an entry, up and down to read long messages, and Enter to dismiss it. Dismissed entries remain in the history. The cache holds up to 100 entries in `diagnostics.json`, with URLs and sync keys redacted. Repeated failures share an entry and a count, and move to the end of the list. When all entries are unresolved, an explicit overflow count records further failures until you dismiss some entries. Quiet successful toasts still disappear on their own.
+An error stays in a small notice until you dismiss it. Click the notice or press `D` to read the latest errors and dismiss them. chill keeps the last 100 in `diagnostics.json` in the cache folder, with URLs and sync keys removed.
 
 | Key | Does |
 | --- | --- |
@@ -77,7 +73,7 @@ To update a saved playlist, select it in YouTube and press `R`, click **R refres
 
 The slider between music and ambience at the top of the Ambience panel turns one down against the other, for a loud stream or quiet rain, without touching the volume. A soundscape has no music, so the balance leaves it alone. White, pink, and brown noise sit below the recordings; chill generates them, so they need no download and play offline.
 
-The player shows the cover of what's playing, or `v` swaps it for a moving picture drawn in text that fills the player, with what's playing on a label over it: Journey, Night lake, Fuji at dawn, or Autumn pagoda. A picture moves while something plays and shows the ambience you hear: rain falls while a rain sound plays, thunder lights up the sky, wind sways trees and water, and crickets bring out fireflies, each as strongly as the music and ambience balance lets you hear it. Journey is a landscape in plain characters that scrolls past in layers, and shows more of the ambience: birds fly over, a stream runs through the grass, waves turn the fields to sea, a fire sends up sparks, and the café lights the windows of a village on the hills. Journey and Night lake use your terminal's colors; the other two bring their own. **Settings** chooses the picture and, for all but Journey, what draws it. Auto, the default, draws Night lake in braille dots. Fuji at dawn and Autumn pagoda get blocks once the player has room for each of their pixels, as when both sides are put away, and crisp pixels before that. Blocks show each pixel as a solid cell with a thin seam beside it and work in any font. Pixels keep a painting crisp at eight to a cell. They, and the solid shapes among the dots such as Night lake's boat, use octant characters from Unicode 16; Ghostty draws them itself, and other terminals need a font that has them.
+The player shows the cover of what's playing, or `v` swaps it for a moving picture drawn in text that fills the player, with what's playing on a label over it: Journey, Night lake, Fuji at dawn, or Autumn pagoda. A picture moves while something plays and shows the ambience you hear: rain falls while a rain sound plays, thunder lights up the sky, wind sways trees and water, and crickets bring out fireflies, each as strongly as the music and ambience balance lets you hear it. Journey is a landscape in plain characters that scrolls past in layers, and shows more of the ambience: birds fly over, a stream runs through the grass, waves turn the fields to sea, a fire sends up sparks, and the café lights the windows of a village on the hills. Journey and Night lake use your terminal's colors; the other two bring their own. **Settings** chooses the picture and how it is drawn. Auto, the default, draws Night lake in braille dots, and the two paintings in blocks when the player has room and in pixels otherwise. Blocks work in any font. Pixels, and the solid shapes in Night lake, use octant characters from Unicode 16; Ghostty draws them itself, and other terminals need a font that has them.
 
 ![Fuji at dawn filling the player with both sides put away, drawn in blocks](docs/pictures.png)
 
@@ -168,9 +164,7 @@ To review the UI without starting audio or fetching media, render the real UI th
 cargo test --offline -p chill ui::review::export_ui_review -- --ignored --exact --nocapture
 ```
 
-Open `target/ui-review/index.html` in a browser, or open the individual SVG files in that directory. The export covers wide, split and stacked medium, and narrow layouts, hidden panels, a paused compact timer, and the Night lake picture. Artifacts stay under the ignored `target/` directory.
-
-The exporter uses fixed sample data and does not read your library or config. Colors use a fixed ANSI palette; glyphs depend on your browser's monospace font. Cargo's offline mode requires dependencies to be cached already.
+Open `target/ui-review/index.html` in a browser. The export covers wide, medium, and narrow layouts with fixed sample data and a fixed ANSI palette, and never reads your library or config.
 
 On Linux the build needs `libasound2-dev`. CI runs the checks on Linux, macOS, and Windows. Pushing a version tag such as `v0.1.0` builds the binaries and installers and publishes them as a GitHub release; bump `version` in `Cargo.toml` to match first.
 
