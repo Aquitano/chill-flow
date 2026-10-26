@@ -31,7 +31,7 @@ pub enum Overlay {
     Help { scroll: usize },
     Stats,
     Diagnostics { selected: usize, scroll: usize },
-    Settings { selected: usize },
+    Settings { selected: usize, query: Option<String> },
 }
 
 struct Toast {
@@ -617,7 +617,10 @@ mod tests {
         let mut app = offline_app();
         let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
         let volume = app.volume;
-        ui.open(Overlay::Settings { selected: 0 });
+        ui.open(Overlay::Settings {
+            selected: 0,
+            query: None,
+        });
         ui.hits.push((Rect::new(0, 0, 10, 1), Hit::Slider(Slider::Volume)));
         for kind in [MouseEventKind::ScrollDown, MouseEventKind::ScrollUp] {
             for _ in 0..Setting::ALL.len() + 2 {
@@ -637,12 +640,45 @@ mod tests {
             } else {
                 0
             };
-            assert!(matches!(&ui.overlay, Some(Overlay::Settings { selected }) if *selected == expected));
+            assert!(matches!(&ui.overlay, Some(Overlay::Settings { selected, .. }) if *selected == expected));
             let mut terminal = Terminal::new(TestBackend::new(80, 12)).unwrap();
             terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
             assert!(ui.hits.iter().any(|(_, hit)| *hit == Hit::Setting(expected)));
         }
         assert_eq!(app.volume, volume);
+    }
+
+    #[test]
+    fn a_settings_search_narrows_the_list_and_changes_what_it_finds() {
+        assert_eq!(overlay::matching_settings("TIMER break"), [1, 2, 3, 4]);
+        let mut app = offline_app();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
+        let reduce_motion = app.config.reduce_motion;
+        input::apply(&mut app, &mut ui, Action::OpenSettings);
+        let keys = [
+            KeyCode::Char('/'),
+            KeyCode::Char('m'),
+            KeyCode::Char('o'),
+            KeyCode::Char('t'),
+            KeyCode::Enter,
+        ];
+        for code in keys {
+            input::handle(&mut app, &mut ui, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+        }
+        assert_eq!(app.config.reduce_motion, !reduce_motion);
+
+        input::handle(
+            &mut app,
+            &mut ui,
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
+        assert!(matches!(&ui.overlay, Some(Overlay::Settings { query: None, .. })));
+        input::handle(
+            &mut app,
+            &mut ui,
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
+        assert!(ui.overlay.is_none());
     }
 
     #[test]

@@ -127,7 +127,7 @@ The server is the Worker in [`sync/`](sync/README.md). It stores what syncs as i
 
 ## Configuration
 
-Press `c` for settings: timer lengths, auto-start, the chime, notifications, the picture, the season, and reduced motion. Changes save to `config.toml` right away, keeping anything else you wrote in it. The file is optional and lives in `~/.config/chill/` on macOS and `%APPDATA%\chill\` on Windows. These are the defaults:
+Press `c` for settings: timer lengths, auto-start, the chime, notifications, the picture, the season, and reduced motion. `/` searches them. Changes save to `config.toml` right away, keeping anything else you wrote in it. The file is optional and lives in `~/.config/chill/` on macOS and `%APPDATA%\chill\` on Windows. These are the defaults:
 
 ```toml
 catalog_url = "https://chill-data.aquitano.me/catalog.json"
