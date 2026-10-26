@@ -35,7 +35,6 @@ struct Light {
     cloud: Rgb,
     cloud_lit: Rgb,
     cap: Rgb,
-    cap_under: Rgb,
     mist: Rgb,
     shine: Rgb,
     ripple: Rgb,
@@ -45,7 +44,6 @@ const DAWN: Light = Light {
     cloud: rgb(0xc8a8d0),
     cloud_lit: rgb(0xffd8c0),
     cap: rgb(0xf6e4f0),
-    cap_under: rgb(0xffc8b0),
     mist: rgb(0xf0c0c8),
     shine: GLOW,
     ripple: rgb(0x8a6c98),
@@ -55,7 +53,6 @@ const NIGHT: Light = Light {
     cloud: rgb(0x3a4068),
     cloud_lit: rgb(0x9aa4cc),
     cap: rgb(0xb8c0e0),
-    cap_under: rgb(0x6a7098),
     mist: rgb(0x7880a8),
     shine: rgb(0xdde2f4),
     ripple: rgb(0x3c4470),
@@ -356,26 +353,22 @@ impl FujiDawn {
             });
         }
 
-        // The cap of cloud Fuji wears, swelling and thinning slowly, its layers lit from below.
-        let swell = 0.85 + 0.15 * (t * 0.11).sin() + weather.rain * 0.2;
-        let (cap_x, cap_y, cap_half) = (PEAK_X + 1.0, PEAK_Y - 0.5, 15.0 * swell);
-        painting.glaze(
-            (cap_x - 22.0, cap_y - 6.0),
-            (cap_x + 22.0, cap_y + 5.0),
-            MOUNTAIN,
-            |x, y| {
-                let edge = 1.0 - ((x - cap_x - (t * 0.3).sin()) / cap_half).powi(2) - ((y - cap_y) / 3.2).powi(2);
-                let edge = edge + (fbm(x / 4.0 - t * 0.08, y / 1.5, 2, 61) - 0.5) * 0.5;
-                let layered = 0.75 + 0.25 * ((y - cap_y) * 1.9).cos();
-                (edge > 0.0).then(|| {
-                    let underside = unit((y - cap_y + 1.0) / 3.0);
-                    (
-                        mix(light.cap, light.cap_under, underside),
-                        unit(edge * 3.0) * 0.85 * layered,
-                    )
-                })
-            },
-        );
+        // A wisp of cap cloud gathers on the summit while wind or rain plays.
+        let gathered = weather.wind.max(weather.rain);
+        if gathered > 0.0 {
+            let (cap_x, cap_y) = (PEAK_X + 1.0 + (t * 0.3).sin(), PEAK_Y - 0.5);
+            painting.glaze(
+                (cap_x - 26.0, cap_y - 3.0),
+                (cap_x + 26.0, cap_y + 3.0),
+                MOUNTAIN,
+                |x, y| {
+                    let across = 1.0 - ((x - cap_x) / 24.0).powi(2) - ((y - cap_y) / 1.8).powi(2);
+                    let strands = fbm(x / 6.0 - t * 0.15, y / 0.9, 3, 61);
+                    let amount = unit(across * 2.0) * unit((strands - 0.45) * 3.0) * 0.55 * gathered;
+                    (amount > 0.02).then(|| (light.cap, amount))
+                },
+            );
+        }
 
         // Snow blowing off the summit with the wind, thinning as it streams away.
         if weather.wind > 0.0 {
