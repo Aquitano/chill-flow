@@ -655,15 +655,15 @@ mod tests {
         let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), false);
         let reduce_motion = app.config.reduce_motion;
         input::apply(&mut app, &mut ui, Action::OpenSettings);
-        let keys = [
-            KeyCode::Char('/'),
-            KeyCode::Char('m'),
-            KeyCode::Char('o'),
-            KeyCode::Char('t'),
-            KeyCode::Enter,
-        ];
-        for code in keys {
-            input::handle(&mut app, &mut ui, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+        let press = |code| Event::Key(KeyEvent::new(code, KeyModifiers::NONE));
+        // Fast typing arrives as a paste once coalesced.
+        for event in [
+            press(KeyCode::Char('/')),
+            press(KeyCode::Char('m')),
+            Event::Paste("ot".into()),
+            press(KeyCode::Enter),
+        ] {
+            input::handle(&mut app, &mut ui, event);
         }
         assert_eq!(app.config.reduce_motion, !reduce_motion);
 

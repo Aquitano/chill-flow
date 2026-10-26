@@ -159,6 +159,15 @@ fn pasted(app: &mut App, ui: &mut Ui, text: &str) {
             query.push_str(text.trim());
             *selected = 0;
         }
+        Some(Overlay::Settings {
+            selected,
+            query: Some(query),
+        }) => {
+            query.push_str(text);
+            if let Some(first) = overlay::matching_settings(query).first() {
+                *selected = *first;
+            }
+        }
         Some(_) => {}
         None if ui.filtering => app.filter.push_str(text.trim()),
         None if youtube::looks_like_url(text) => app.open_url(text.trim()),
