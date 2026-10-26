@@ -4,7 +4,7 @@
 use std::f32::consts::PI;
 
 use super::Weather;
-use super::canvas::{Canvas, Painting, Rgb, fbm, hash, lerp, mix, noise, ramp, rgb, unit};
+use super::canvas::{Canvas, Painting, Rgb, fbm, hash, lerp, luma, mix, noise, ramp, rgb, unit};
 
 pub const WIDTH: usize = 192;
 pub const HEIGHT: usize = 108;
@@ -30,6 +30,37 @@ const GLOW: Rgb = rgb(0xffd48a);
 const WATER: Rgb = rgb(0x2b2f5c);
 const LAMP: Rgb = rgb(0xffb050);
 
+/// The colors that change between dawn and night.
+struct Light {
+    cloud: Rgb,
+    cloud_lit: Rgb,
+    cap: Rgb,
+    cap_under: Rgb,
+    mist: Rgb,
+    shine: Rgb,
+    ripple: Rgb,
+}
+
+const DAWN: Light = Light {
+    cloud: rgb(0xc8a8d0),
+    cloud_lit: rgb(0xffd8c0),
+    cap: rgb(0xf6e4f0),
+    cap_under: rgb(0xffc8b0),
+    mist: rgb(0xf0c0c8),
+    shine: GLOW,
+    ripple: rgb(0x8a6c98),
+};
+
+const NIGHT: Light = Light {
+    cloud: rgb(0x3a4068),
+    cloud_lit: rgb(0x9aa4cc),
+    cap: rgb(0xb8c0e0),
+    cap_under: rgb(0x6a7098),
+    mist: rgb(0x7880a8),
+    shine: rgb(0xdde2f4),
+    ripple: rgb(0x3c4470),
+};
+
 /// Thin clouds drifting across the sky, by the row they sit on, half their thickness, and speed.
 const CLOUDS: [(f32, f32, f32); 4] = [(10.0, 2.5, 0.5), (19.0, 2.0, 0.8), (29.0, 1.6, 1.2), (39.0, 1.2, 1.7)];
 
@@ -54,9 +85,10 @@ struct Reed {
 
 /// A snow capped volcano glowing at dawn over a mirror lake, with clouds drifting past and a cap
 /// of cloud on the peak, cranes flying over, a boat poling across, and reeds that sway with the
-/// wind. The lake mirrors everything that moves above it.
+/// wind. The lake mirrors everything that moves above it. At night the moon takes the sun's place
+/// among stars.
 pub struct FujiDawn {
-    painting: Option<Painting>,
+    painting: Option<(bool, Painting)>,
     reeds: Vec<Reed>,
     ripples: Vec<(f32, f32)>,
 }
@@ -142,8 +174,15 @@ fn pine(x: f32, y: f32) -> Option<Rgb> {
     shade
 }
 
+/// The same scene by moonlight: cooler, and darker the darker it was, so the snow still stands out.
+fn moonlit(color: Rgb) -> Rgb {
+    let light = luma(color);
+    let cool = [light * 150.0, light * 175.0, light * 255.0];
+    mix(color, cool, 0.8).map(|channel| channel * (0.25 + 0.4 * light))
+}
+
 /// The parts that never move, painted once.
-fn still() -> Painting {
+fn still(night: bool) -> Painting {
     let (width, height) = (WIDTH as f32, HEIGHT as f32);
     let mut painting = Painting::new(WIDTH, HEIGHT);
     painting.paint((0.0, 0.0), (width, HORIZON), SKY, |_, x, y| Some(sky(x, y)));
@@ -166,6 +205,9 @@ fn still() -> Painting {
     painting.paint((0.0, 88.0), (width, height), SHORE, |_, x, y| {
         (y >= shore(x)).then(|| if fbm(x / 3.0, y / 3.0, 2, 31) > 0.55 { DARK } else { INK })
     });
+    if night {
+        painting.grade(moonlit);
+    }
     painting
 }
 
@@ -191,27 +233,57 @@ impl FujiDawn {
         }
     }
 
-    pub fn paint(&mut self, canvas: &mut Canvas, t: f32, weather: &Weather) {
-        let painting = self.painting.get_or_insert_with(still);
+    pub fn paint(&mut self, canvas: &mut Canvas, t: f32, weather: &Weather, night: bool) {
+        if self.painting.as_ref().is_none_or(|(painted, _)| *painted != night) {
+            self.painting = Some((night, still(night)));
+        }
+        let Some((_, painting)) = &mut self.painting else {
+            return;
+        };
+        let light = if night { &NIGHT } else { &DAWN };
         let breeze = 0.5 + 1.5 * weather.wind;
         let width = WIDTH as f32;
         painting.begin();
 
-        let reach = SUN_RADIUS + 1.0;
-        painting.glaze(
-            (SUN.0 - reach, SUN.1 - reach),
-            (SUN.0 + reach, SUN.1 + reach),
-            SKY,
-            |x, y| {
-                let distance = (x - SUN.0).hypot(y - SUN.1);
-                let color = if distance < SUN_RADIUS - 1.5 {
-                    rgb(0xfff8e0)
-                } else {
-                    rgb(0xffeab0)
-                };
-                (distance < SUN_RADIUS).then_some((color, 1.0))
-            },
-        );
+        if night {
+            for star in 0..90 {
+                let (x, y) = (hash(star, 1, 90) * width, hash(star, 2, 90).powf(1.4) * (HORIZON - 8.0));
+                let twinkle = 0.55 + 0.45 * (t * (0.8 + hash(star, 3, 90) * 2.0) + star as f32).sin();
+                painting.add_behind(x, y, rgb(0xeef0ff), twinkle * (0.4 + 0.6 * hash(star, 4, 90)), SKY);
+            }
+            painting.glaze(
+                (SUN.0 - 16.0, SUN.1 - 16.0),
+                (SUN.0 + 16.0, SUN.1 + 16.0),
+                SKY,
+                |x, y| {
+                    let distance = (x - SUN.0).hypot(y - SUN.1);
+                    match distance {
+                        distance if distance < SUN_RADIUS - 2.0 => {
+                            let crater = noise(x / 2.0, y / 2.0, 92) * 0.15;
+                            Some((mix(rgb(0xf4f2e4), rgb(0xb8bccc), crater), 1.0))
+                        }
+                        distance if distance < 16.0 => Some((rgb(0x8890c0), unit(1.0 - distance / 16.0) * 0.35)),
+                        _ => None,
+                    }
+                },
+            );
+        } else {
+            let reach = SUN_RADIUS + 1.0;
+            painting.glaze(
+                (SUN.0 - reach, SUN.1 - reach),
+                (SUN.0 + reach, SUN.1 + reach),
+                SKY,
+                |x, y| {
+                    let distance = (x - SUN.0).hypot(y - SUN.1);
+                    let color = if distance < SUN_RADIUS - 1.5 {
+                        rgb(0xfff8e0)
+                    } else {
+                        rgb(0xffeab0)
+                    };
+                    (distance < SUN_RADIUS).then_some((color, 1.0))
+                },
+            );
+        }
 
         for (index, (row, half, speed)) in CLOUDS.into_iter().enumerate() {
             let k = index as f32;
@@ -221,7 +293,7 @@ impl FujiDawn {
                 let thick = fbm(drifted / 34.0, k * 3.1, 3, 50 + index as i64);
                 let amount = unit((thick - 0.52) * 3.0) * unit(across * 1.5) * 0.65;
                 let lit = unit(1.0 - (x - SUN.0).hypot((y - SUN.1) * 2.0) / 90.0);
-                (amount > 0.02).then(|| (mix(rgb(0xc8a8d0), rgb(0xffd8c0), lit), amount))
+                (amount > 0.02).then(|| (mix(light.cloud, light.cloud_lit, lit), amount))
             });
         }
 
@@ -239,7 +311,7 @@ impl FujiDawn {
                 (edge > 0.0).then(|| {
                     let underside = unit((y - cap_y + 1.0) / 3.0);
                     (
-                        mix(rgb(0xf6e4f0), rgb(0xffc8b0), underside),
+                        mix(light.cap, light.cap_under, underside),
                         unit(edge * 3.0) * 0.85 * layered,
                     )
                 })
@@ -272,15 +344,20 @@ impl FujiDawn {
                 let thick = fbm(x / 26.0 - t * 0.05 * breeze, y / 3.5, 3, 7);
                 let amount = unit((thick - 0.45) * 2.4) * 0.55 * ((y - 50.0) / 16.0 * PI).sin();
                 if amount > 0.03 {
-                    painting.add_behind(x, y, rgb(0xf0c0c8), amount, MOUNTAIN);
+                    painting.add_behind(x, y, light.mist, amount, MOUNTAIN);
                 }
             }
         }
 
-        // Three cranes crossing, long necks out, slow wingbeats.
+        // Three cranes crossing, long necks out, slow wingbeats. They roost at night.
         let crossing = ((t + 8.0) % 34.0) / 34.0;
         let (flock_x, flock_y) = (lerp(width + 30.0, -30.0, crossing), 9.0 + (crossing * 5.0).sin() * 2.0);
-        for (index, (offset_x, offset_y)) in [(0.0, 0.0), (11.0, 4.0), (21.0, -2.0)].into_iter().enumerate() {
+        let flock: &[(f32, f32)] = if night {
+            &[]
+        } else {
+            &[(0.0, 0.0), (11.0, 4.0), (21.0, -2.0)]
+        };
+        for (index, &(offset_x, offset_y)) in flock.iter().enumerate() {
             let k = index as f32;
             let x = flock_x + offset_x;
             let y = flock_y + offset_y + (t * 0.9 + k).sin() * 0.8;
@@ -333,7 +410,11 @@ impl FujiDawn {
                 return color;
             }
             let glitter = noise(x / 2.5 + t * 0.4, y * 0.9 - t * 1.1, 3);
-            mix(color, GLOW, (1.0 - from_sun) * unit((glitter - 0.4) * 3.0) * 0.85)
+            mix(
+                color,
+                light.shine,
+                (1.0 - from_sun) * unit((glitter - 0.4) * 3.0) * 0.85,
+            )
         });
 
         // Ripple lines moving toward the shore, longer as they come near.
@@ -343,9 +424,9 @@ impl FujiDawn {
             let length = 3.0 + 22.0 * near;
             let middle = across * (width + 30.0) - 15.0 + (t * 0.2 + across * 9.0).sin() * 4.0;
             let color = if (middle - SUN.0).abs() < 14.0 + near * 10.0 {
-                GLOW
+                light.shine
             } else {
-                rgb(0x8a6c98)
+                light.ripple
             };
             let mut x = middle - length / 2.0;
             while x < middle + length / 2.0 {
@@ -361,8 +442,8 @@ impl FujiDawn {
         for j in 1..14 {
             let j = j as f32;
             let x = boat_x - 12.0 - j * 1.6;
-            painting.add_behind(x, boat_y + 1.0 + (j / 3.0).floor(), rgb(0x8a6c98), 0.7 - j * 0.04, LAKE);
-            painting.add_behind(x, boat_y - (j / 4.0).floor(), rgb(0x8a6c98), 0.5 - j * 0.03, LAKE);
+            painting.add_behind(x, boat_y + 1.0 + (j / 3.0).floor(), light.ripple, 0.7 - j * 0.04, LAKE);
+            painting.add_behind(x, boat_y - (j / 4.0).floor(), light.ripple, 0.5 - j * 0.03, LAKE);
         }
         for offset in -11_i32..=11 {
             let x = boat_x + offset as f32;

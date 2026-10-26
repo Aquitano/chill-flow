@@ -249,6 +249,13 @@ impl Painting {
         self.still[row * self.width + column]
     }
 
+    /// Recolors every still pixel, for the same scene in another light.
+    pub fn grade(&mut self, grade: impl Fn(Rgb) -> Rgb) {
+        for color in &mut self.still {
+            *color = grade(*color);
+        }
+    }
+
     pub fn begin(&mut self) {
         self.frame.copy_from_slice(&self.still);
     }
