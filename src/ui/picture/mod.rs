@@ -339,7 +339,15 @@ impl Scene {
             let t = ((shown.frame % FRAMES_A_DAY) as f64 / FPS) as f32;
             let (columns, rows) = (usize::from(area.width), usize::from(area.height));
             if picture == Picture::Journey {
-                journey::draw(&mut self.glyphs, columns, rows, t, &weather, shown.night, theme);
+                journey::draw(
+                    &mut self.glyphs,
+                    (columns, rows),
+                    t,
+                    &weather,
+                    shown.night,
+                    shown.season,
+                    theme,
+                );
                 self.shown = Some(shown);
                 return self.blit(buf, area);
             }
