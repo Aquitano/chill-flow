@@ -585,6 +585,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn repainting_reads_the_frame_from_before_it_and_leaves_other_layers_alone() {
+        let mut painting = Painting::new(3, 1);
+        painting.paint((0.0, 0.0), (3.0, 1.0), 0, |_, x, _| Some([x * 10.0; 3]));
+        painting.paint((2.0, 0.0), (3.0, 1.0), 1, |_, _, _| Some([99.0; 3]));
+        painting.begin();
+        painting.repaint((0.0, 0.0), (3.0, 1.0), 0, |painting, x, y| {
+            painting.frame_at(x - 1.0, y).map(|channel| channel + 1.0)
+        });
+        let reds = [0.5, 1.5, 2.5].map(|x| painting.frame_at(x, 0.0)[0]);
+        assert_eq!(reds, [6.0, 6.0, 99.0]);
+    }
+
+    #[test]
     fn shrinking_weighs_each_pixel_by_how_much_of_it_is_covered() {
         let mut painting = Painting::new(4, 4);
         painting.paint((0.0, 0.0), (4.0, 4.0), 0, |_, x, _| {
