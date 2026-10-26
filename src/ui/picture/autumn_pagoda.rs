@@ -3,7 +3,7 @@
 
 use std::f32::consts::PI;
 
-use super::canvas::{Canvas, Painting, Rgb, fbm, lerp, mix, moonlit, ramp, rgb, unit};
+use super::canvas::{Canvas, Painting, Rgb, SNOW, fbm, lerp, mix, moonlit, ramp, rgb, snowcap, unit};
 use super::{Season, Weather};
 
 pub const WIDTH: usize = 192;
@@ -62,7 +62,6 @@ const SNOWY: [Rgb; 7] = [
     rgb(0x56506a),
     rgb(0x34303e),
 ];
-const SNOW: Rgb = rgb(0xf4f2fa);
 const POND_WATER: Rgb = rgb(0x46344a);
 
 fn crowns(season: Season) -> &'static [Rgb; 7] {
@@ -222,16 +221,8 @@ fn bridge(painting: &mut Painting, snowy: bool) {
 fn still(night: bool, season: Season) -> Painting {
     let (width, height) = (WIDTH as f32, HEIGHT as f32);
     let (colors, snowy) = (crowns(season), season == Season::Winter);
-    // Winter's snow lies along the top of each hill and bank, `deep` pixels of it, jagged, with
-    // streaks running further down, the way it caps Fuji.
     let capped = |color: Rgb, x: f32, below: f32, deep: f32| {
-        let streak = unit((x * 0.9).sin() * (x * 0.23).sin() * 2.0);
-        let line = deep * (0.6 + 0.6 * fbm(x / 3.0, deep, 3, 43) + streak);
-        if snowy && below < line {
-            mix(SNOW, color, unit(below / line) * 0.35)
-        } else {
-            color
-        }
+        if snowy { snowcap(color, x, below, deep) } else { color }
     };
     let mut painting = Painting::new(WIDTH, HEIGHT);
     let sky = [
@@ -298,10 +289,12 @@ fn still(night: bool, season: Season) -> Painting {
             } else {
                 rgb(0x261e2e)
             };
+            // Snow settles on the banks' tops, not down the sides they drop into the pond by.
+            let level = on_bank(x - 1.5, y) && on_bank(x + 1.5, y);
             let below = (1..4)
                 .find(|up| !on_bank(x, y - *up as f32))
-                .map_or(3.0, |up| up as f32 - 1.0);
-            capped(ground, x, below, 1.5)
+                .map_or(f32::INFINITY, |up| up as f32 - 1.0);
+            if level { capped(ground, x, below, 1.5) } else { ground }
         })
     });
     if night {

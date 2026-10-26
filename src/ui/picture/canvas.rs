@@ -82,6 +82,20 @@ pub fn moonlit(color: Rgb) -> Rgb {
     mix(color, cool, 0.8).map(|channel| channel * (0.25 + 0.4 * light))
 }
 
+pub const SNOW: Rgb = rgb(0xf4f2fa);
+
+/// Snow lying along the top of a hill or bank, `below` pixels under its top: about `deep` pixels
+/// of it, jagged, with streaks running further down, the way it caps a mountain.
+pub fn snowcap(color: Rgb, x: f32, below: f32, deep: f32) -> Rgb {
+    let streak = unit((x * 0.9).sin() * (x * 0.23).sin() * 2.0);
+    let line = deep * (0.6 + 0.6 * fbm(x / 3.0, deep, 3, 43) + streak);
+    if below < line {
+        mix(SNOW, color, unit(below / line) * 0.35)
+    } else {
+        color
+    }
+}
+
 /// What a season sends drifting down through a picture.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Drifting {

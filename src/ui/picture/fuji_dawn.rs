@@ -3,7 +3,7 @@
 
 use std::f32::consts::PI;
 
-use super::canvas::{Canvas, Painting, Rgb, fbm, hash, lerp, mix, moonlit, noise, ramp, rgb, unit};
+use super::canvas::{Canvas, Painting, Rgb, fbm, hash, lerp, mix, moonlit, noise, ramp, rgb, snowcap, unit};
 use super::{Season, Weather};
 
 pub const WIDTH: usize = 192;
@@ -65,32 +65,33 @@ const NIGHT: Light = Light {
 struct Seasonal {
     /// How much farther down the mountain the snow reaches than at the picture's own time of year.
     snow: f32,
-    /// The colors over the hills, lit and shaded, and how much of the hills they cover.
-    hills: (Rgb, Rgb, f32),
+    /// The colors over the hills, lit and shaded, and how much of the hills they cover; none when
+    /// snow caps them instead.
+    hills: Option<(Rgb, Rgb, f32)>,
     snowy_pines: bool,
 }
 
 const SPRING: Seasonal = Seasonal {
     snow: 0.0,
-    hills: (rgb(0xffc4dc), rgb(0xd88ab0), 0.75),
+    hills: Some((rgb(0xffc4dc), rgb(0xd88ab0), 0.75)),
     snowy_pines: false,
 };
 
 const SUMMER: Seasonal = Seasonal {
     snow: -10.0,
-    hills: (rgb(0x6aa070), rgb(0x2e6250), 0.6),
+    hills: Some((rgb(0x6aa070), rgb(0x2e6250), 0.6)),
     snowy_pines: false,
 };
 
 const AUTUMN: Seasonal = Seasonal {
     snow: -7.0,
-    hills: (rgb(0xf09040), rgb(0xb83820), 0.6),
+    hills: Some((rgb(0xf09040), rgb(0xb83820), 0.6)),
     snowy_pines: false,
 };
 
 const WINTER: Seasonal = Seasonal {
-    snow: 24.0,
-    hills: (rgb(0xf4f2fa), rgb(0xb4b4d4), 0.75),
+    snow: 15.0,
+    hills: None,
     snowy_pines: true,
 };
 
@@ -210,8 +211,8 @@ fn pine(x: f32, y: f32, snowy: bool) -> Option<Rgb> {
         let across = x - trunk - 0.5;
         if across.abs() <= half + 0.5 {
             let lit = across > half - 0.5 && half > 1.0;
-            let tier_top = (up / 3.0).fract() > 0.75 && noise(x / 1.5, y, 43) > 0.45;
-            shade = Some(match (snowy && (lit || tier_top), lit) {
+            let tip = (up / 3.0).fract() > 0.75 && across.abs() > half - 2.0 && noise(x / 1.5, y, 43) > 0.45;
+            shade = Some(match (snowy && (lit || tip), lit) {
                 (true, _) => rgb(0xb4b8d4),
                 (false, true) => rgb(0x2c3a48),
                 (false, false) => rgb(0x1e2a3a),
@@ -222,8 +223,10 @@ fn pine(x: f32, y: f32, snowy: bool) -> Option<Rgb> {
 }
 
 /// A hill's own color under the season's leaves, blossom, or snow, thinner far away.
-fn clad(color: Rgb, x: f32, y: f32, seasonal: &Seasonal, far: bool) -> Rgb {
-    let (lit, shaded, cover) = seasonal.hills;
+fn clad(color: Rgb, (x, y): (f32, f32), below: f32, seasonal: &Seasonal, far: bool) -> Rgb {
+    let Some((lit, shaded, cover)) = seasonal.hills else {
+        return snowcap(color, x, below, if far { 3.0 } else { 2.0 });
+    };
     let patch = fbm(x / 2.5, y / 2.0, 3, 41);
     let cover = cover * unit((patch - 0.3) * 2.5) * if far { 0.55 } else { 1.0 };
     mix(color, mix(shaded, lit, unit((patch - 0.45) * 3.0)), cover)
@@ -240,8 +243,8 @@ fn still(night: bool, season: Season) -> Painting {
         (y >= top).then(|| {
             clad(
                 mix(rgb(0x7a6aa0), rgb(0x5c5490), unit((y - top) / 8.0)),
-                x,
-                y,
+                (x, y),
+                y - top,
                 seasonal,
                 true,
             )
@@ -255,8 +258,8 @@ fn still(night: bool, season: Season) -> Painting {
         (y >= top).then(|| {
             clad(
                 mix(rgb(0x4a4678), rgb(0x3e4280), unit((y - top) / 4.0)),
-                x,
-                y,
+                (x, y),
+                y - top,
                 seasonal,
                 false,
             )
