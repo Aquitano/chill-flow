@@ -3,7 +3,7 @@
 
 use std::f32::consts::PI;
 
-use super::canvas::{Canvas, Painting, Rgb, fbm, hash, lerp, luma, mix, noise, ramp, rgb, unit};
+use super::canvas::{Canvas, Painting, Rgb, fbm, hash, lerp, mix, moonlit, noise, ramp, rgb, unit};
 use super::{Season, Weather};
 
 pub const WIDTH: usize = 192;
@@ -61,14 +61,6 @@ const NIGHT: Light = Light {
     ripple: rgb(0x3c4470),
 };
 
-/// What drifts down through the picture.
-#[derive(Clone, Copy, PartialEq)]
-enum Falling {
-    Petals,
-    Leaves,
-    Snow,
-}
-
 /// How the scene changes through the year.
 struct Seasonal {
     /// How much farther down the mountain the snow reaches than at the picture's own time of year.
@@ -76,36 +68,30 @@ struct Seasonal {
     /// The colors over the hills, lit and shaded, and how much of the hills they cover.
     hills: (Rgb, Rgb, f32),
     snowy_pines: bool,
-    /// What drifts down, in which colors, and how much of it.
-    falling: Option<(Falling, Rgb, Rgb, f32)>,
 }
 
 const SPRING: Seasonal = Seasonal {
     snow: 0.0,
     hills: (rgb(0xffc4dc), rgb(0xd88ab0), 0.75),
     snowy_pines: false,
-    falling: Some((Falling::Petals, rgb(0xffd6e6), rgb(0xf0a0c4), 30.0)),
 };
 
 const SUMMER: Seasonal = Seasonal {
     snow: -10.0,
     hills: (rgb(0x6aa070), rgb(0x2e6250), 0.6),
     snowy_pines: false,
-    falling: None,
 };
 
 const AUTUMN: Seasonal = Seasonal {
     snow: -7.0,
     hills: (rgb(0xf09040), rgb(0xb83820), 0.6),
     snowy_pines: false,
-    falling: Some((Falling::Leaves, rgb(0xf0a040), rgb(0xc8402a), 22.0)),
 };
 
 const WINTER: Seasonal = Seasonal {
     snow: 24.0,
     hills: (rgb(0xf4f2fa), rgb(0xb4b4d4), 0.75),
     snowy_pines: true,
-    falling: Some((Falling::Snow, rgb(0xffffff), rgb(0xdcdcf0), 40.0)),
 };
 
 fn seasonal(season: Season) -> &'static Seasonal {
@@ -235,13 +221,6 @@ fn pine(x: f32, y: f32, snowy: bool) -> Option<Rgb> {
     shade
 }
 
-/// The same scene by moonlight: cooler, and darker the darker it was, so the snow still stands out.
-fn moonlit(color: Rgb) -> Rgb {
-    let light = luma(color);
-    let cool = [light * 150.0, light * 175.0, light * 255.0];
-    mix(color, cool, 0.8).map(|channel| channel * (0.25 + 0.4 * light))
-}
-
 /// A hill's own color under the season's leaves, blossom, or snow, thinner far away.
 fn clad(color: Rgb, x: f32, y: f32, seasonal: &Seasonal, far: bool) -> Rgb {
     let (lit, shaded, cover) = seasonal.hills;
@@ -338,27 +317,8 @@ impl FujiDawn {
         painting.begin();
 
         if night {
-            for star in 0..90 {
-                let (x, y) = (hash(star, 1, 90) * width, hash(star, 2, 90).powf(1.4) * (HORIZON - 8.0));
-                let twinkle = 0.55 + 0.45 * (t * (0.8 + hash(star, 3, 90) * 2.0) + star as f32).sin();
-                painting.add_behind(x, y, rgb(0xeef0ff), twinkle * (0.4 + 0.6 * hash(star, 4, 90)), SKY);
-            }
-            painting.glaze(
-                (SUN.0 - 16.0, SUN.1 - 16.0),
-                (SUN.0 + 16.0, SUN.1 + 16.0),
-                SKY,
-                |x, y| {
-                    let distance = (x - SUN.0).hypot(y - SUN.1);
-                    match distance {
-                        distance if distance < SUN_RADIUS - 2.0 => {
-                            let crater = noise(x / 2.0, y / 2.0, 92) * 0.15;
-                            Some((mix(rgb(0xf4f2e4), rgb(0xb8bccc), crater), 1.0))
-                        }
-                        distance if distance < 16.0 => Some((rgb(0x8890c0), unit(1.0 - distance / 16.0) * 0.35)),
-                        _ => None,
-                    }
-                },
-            );
+            painting.stars(t, HORIZON - 8.0, SKY);
+            painting.moon(SUN, SUN_RADIUS - 2.0, SKY);
         } else {
             let reach = SUN_RADIUS + 1.0;
             painting.glaze(
@@ -611,37 +571,7 @@ impl FujiDawn {
             }
         }
 
-        // Blossom, leaves, or snow drifting down. Rain falls as snow in winter.
-        if let Some((kind, light_color, dark_color, amount)) = seasonal(season).falling {
-            let rain = if kind == Falling::Snow {
-                weather.rain * 140.0
-            } else {
-                0.0
-            };
-            let (speed, flutter) = match kind {
-                Falling::Petals => (0.05, 2.5),
-                Falling::Leaves => (0.07, 4.0),
-                Falling::Snow => (0.06, 1.2),
-            };
-            for flake in 0..(amount + rain) as i64 {
-                let k = flake as f32;
-                let fall = (t * speed * (0.7 + 0.6 * hash(flake, 1, 95)) + hash(flake, 2, 95)) % 1.0;
-                let y = fall * (HEIGHT as f32 + 6.0) - 3.0;
-                let drift = hash(flake, 3, 95) * (width + 40.0) + fall * 30.0 * breeze;
-                let x = drift % (width + 40.0) - 20.0 + (t * 0.9 + k).sin() * flutter;
-                let turned = (t * 3.0 + k).sin() > 0.0;
-                let color = if turned { dark_color } else { light_color };
-                painting.add(x, y, color, 0.95);
-                if kind != Falling::Snow {
-                    painting.add(
-                        x + if turned { 1.0 } else { 0.0 },
-                        y + if turned { 0.0 } else { 1.0 },
-                        color,
-                        0.7,
-                    );
-                }
-            }
-        }
+        painting.drift(t, season, weather);
 
         painting.overcast(weather.rain);
         painting.cover(canvas, FOCUS);
