@@ -365,7 +365,7 @@ impl FujiDawn {
                     let across = 1.0 - ((x - cap_x) / 24.0).powi(2) - ((y - cap_y) / 1.8).powi(2);
                     let strands = fbm(x / 6.0 - t * 0.15, y / 0.9, 3, 61);
                     let amount = unit(across * 2.0) * unit((strands - 0.45) * 3.0) * 0.55 * gathered;
-                    (amount > 0.02).then(|| (light.cap, amount))
+                    (amount > 0.02).then_some((light.cap, amount))
                 },
             );
         }
