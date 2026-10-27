@@ -171,6 +171,8 @@ pub enum Removal {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
     TogglePlay,
+    /// Ambience on its own, or the music back.
+    ToggleMusic,
     Next,
     Previous,
     SeekBy(f64),
