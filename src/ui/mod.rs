@@ -708,6 +708,17 @@ mod tests {
             Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
         );
         assert!(matches!(&ui.overlay, Some(Overlay::Settings { query: None, .. })));
+        input::handle(&mut app, &mut ui, Event::Paste("/timer break".into()));
+        assert!(matches!(
+            &ui.overlay,
+            Some(Overlay::Settings { selected: 1, query: Some(query) }) if query == "timer break"
+        ));
+
+        input::handle(
+            &mut app,
+            &mut ui,
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
         input::handle(
             &mut app,
             &mut ui,

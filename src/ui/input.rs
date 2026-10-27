@@ -159,12 +159,18 @@ fn pasted(app: &mut App, ui: &mut Ui, text: &str) {
             query.push_str(text.trim());
             *selected = 0;
         }
-        Some(Overlay::Settings {
-            selected,
-            query: Some(query),
-        }) => {
-            query.push_str(text);
-            if let Some(first) = overlay::matching_settings(query).first() {
+        Some(Overlay::Settings { selected, query }) => {
+            let typed = match query {
+                Some(open) => {
+                    open.push_str(text);
+                    open
+                }
+                None => match text.strip_prefix('/') {
+                    Some(rest) => query.insert(rest.to_owned()),
+                    None => return,
+                },
+            };
+            if let Some(first) = overlay::matching_settings(typed).first() {
                 *selected = *first;
             }
         }
