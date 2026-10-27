@@ -6,6 +6,7 @@ use etcetera::BaseStrategy;
 use serde::Deserialize;
 
 use crate::timer::PomodoroSettings;
+use crate::ui::KeyHints;
 use crate::ui::picture::{Look, Picture, Season};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -19,6 +20,7 @@ pub struct Config {
     pub picture: Picture,
     pub look: Look,
     pub season: Season,
+    pub key_hints: KeyHints,
     pub chime: bool,
     pub notifications: bool,
     pub pomodoro: PomodoroSettings,
@@ -34,6 +36,7 @@ impl Default for Config {
             picture: Picture::default(),
             look: Look::default(),
             season: Season::default(),
+            key_hints: KeyHints::default(),
             chime: true,
             notifications: true,
             pomodoro: PomodoroSettings::default(),
@@ -96,6 +99,11 @@ pub fn save(path: &Path, config: &Config) -> Result<()> {
         document.remove("season");
     } else {
         set(&mut document["season"], config.season.id());
+    }
+    if config.key_hints == KeyHints::default() {
+        document.remove("key_hints");
+    } else {
+        set(&mut document["key_hints"], config.key_hints.id());
     }
     set(&mut document["chime"], config.chime);
     set(&mut document["notifications"], config.notifications);
