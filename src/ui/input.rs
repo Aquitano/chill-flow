@@ -104,7 +104,10 @@ pub fn apply(app: &mut App, ui: &mut Ui, action: Action) {
             scroll: 0,
         }),
         Action::OpenStats => ui.open(Overlay::Stats),
-        Action::OpenSettings => ui.open(Overlay::Settings { selected: 0 }),
+        Action::OpenSettings => ui.open(Overlay::Settings {
+            selected: 0,
+            query: None,
+        }),
         Action::RemoveRow(index) => {
             if let Some((removal, title)) = app.removal(index) {
                 let message = format!("Remove \"{title}\" from {}?", app.tab.label());
@@ -155,6 +158,21 @@ fn pasted(app: &mut App, ui: &mut Ui, text: &str) {
         Some(Overlay::Palette { query, selected }) => {
             query.push_str(text.trim());
             *selected = 0;
+        }
+        Some(Overlay::Settings { selected, query }) => {
+            let typed = match query {
+                Some(open) => {
+                    open.push_str(text);
+                    open
+                }
+                None => match text.strip_prefix('/') {
+                    Some(rest) => query.insert(rest.to_owned()),
+                    None => return,
+                },
+            };
+            if let Some(first) = overlay::matching_settings(typed).first() {
+                *selected = *first;
+            }
         }
         Some(_) => {}
         None if ui.filtering => app.filter.push_str(text.trim()),
@@ -449,19 +467,52 @@ fn overlay_key(app: &mut App, ui: &mut Ui, key: KeyEvent) {
             KeyCode::Down | KeyCode::Char('j') => *scroll = (*scroll + 1).min(crate::diagnostics::MESSAGE_LIMIT),
             _ => {}
         },
-        Overlay::Settings { selected } => {
+        Overlay::Settings { selected, query } => {
             let setting = Setting::ALL[(*selected).min(Setting::ALL.len() - 1)];
+            let shown = overlay::matching_settings(query.as_deref().unwrap_or_default());
+            let typing = query.is_some();
             match key.code {
-                KeyCode::Esc | KeyCode::Char('q' | 'c') => ui.close(),
-                KeyCode::Up | KeyCode::Char('k') => *selected = selected.saturating_sub(1),
-                KeyCode::Down | KeyCode::Char('j') => *selected = (*selected + 1).min(Setting::ALL.len() - 1),
-                KeyCode::Left | KeyCode::Char('h') => app.dispatch(Action::AdjustSetting(setting, -1)),
-                KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ') => {
+                KeyCode::Esc if typing => *query = None,
+                KeyCode::Esc => ui.close(),
+                KeyCode::Up => *selected = settings_step(*selected, query.as_deref(), -1),
+                KeyCode::Down => *selected = settings_step(*selected, query.as_deref(), 1),
+                KeyCode::Left if shown.contains(selected) => app.dispatch(Action::AdjustSetting(setting, -1)),
+                KeyCode::Right | KeyCode::Enter if shown.contains(selected) => {
                     app.dispatch(Action::AdjustSetting(setting, 1))
                 }
+                KeyCode::Backspace if typing => {
+                    if query.as_mut().and_then(String::pop).is_none() {
+                        *query = None;
+                    }
+                }
+                KeyCode::Char(ch) if typing && !ctrl => {
+                    let text = query.get_or_insert_default();
+                    text.push(ch);
+                    if let Some(first) = overlay::matching_settings(text).first() {
+                        *selected = *first;
+                    }
+                }
+                KeyCode::Char('/') => *query = Some(String::new()),
+                KeyCode::Char('q' | 'c') => ui.close(),
+                KeyCode::Char('k') => *selected = settings_step(*selected, None, -1),
+                KeyCode::Char('j') => *selected = settings_step(*selected, None, 1),
+                KeyCode::Char('h') => app.dispatch(Action::AdjustSetting(setting, -1)),
+                KeyCode::Char('l' | ' ') => app.dispatch(Action::AdjustSetting(setting, 1)),
                 _ => {}
             }
         }
+    }
+}
+
+/// The setting `step` rows from `selected` among those the search shows.
+fn settings_step(selected: usize, query: Option<&str>, step: isize) -> usize {
+    let shown = overlay::matching_settings(query.unwrap_or_default());
+    let Some(last) = shown.len().checked_sub(1) else {
+        return selected;
+    };
+    match shown.iter().position(|index| *index == selected) {
+        Some(at) => shown[at.saturating_add_signed(step).min(last)],
+        None => shown[0],
     }
 }
 
@@ -578,7 +629,7 @@ fn click(app: &mut App, ui: &mut Ui, rect: Rect, hit: Hit, x: u16) {
             }
         }
         Hit::Setting(index) => {
-            if let Some(Overlay::Settings { selected }) = &mut ui.overlay {
+            if let Some(Overlay::Settings { selected, .. }) = &mut ui.overlay {
                 *selected = index;
             }
             if let Some(setting) = Setting::ALL.get(index).filter(|setting| setting.is_toggle()) {
@@ -618,8 +669,8 @@ fn scrolled(app: &mut App, ui: &mut Ui, x: u16, y: u16, step: isize) {
                     .min(crate::diagnostics::MESSAGE_LIMIT);
             }
             Overlay::Help { scroll } => *scroll = scroll.saturating_add_signed(step),
-            Overlay::Settings { selected } => {
-                *selected = selected.saturating_add_signed(step).min(Setting::ALL.len() - 1);
+            Overlay::Settings { selected, query } => {
+                *selected = settings_step(*selected, query.as_deref(), step);
             }
             _ => {}
         }

@@ -276,7 +276,7 @@ pub fn draw(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant
         Overlay::Help { scroll } => help(&mut layer, screen, app, ui, scroll),
         Overlay::Diagnostics { selected, scroll } => diagnostics(&mut layer, screen, app, ui, *selected, scroll),
         Overlay::Stats => stats(&mut layer, screen, app, ui, now),
-        Overlay::Settings { selected } => settings(&mut layer, screen, app, ui, *selected),
+        Overlay::Settings { selected, query } => settings(&mut layer, screen, app, ui, *selected, query.as_deref()),
     }
     if let Some(area) = ui.dialog_area.take() {
         for y in area.top()..area.bottom() {
@@ -544,26 +544,50 @@ fn stats(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant) {
     );
 }
 
-fn settings(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, selected: usize) {
+/// The settings whose group and label hold every word of `query`, in their usual order.
+pub fn matching_settings(query: &str) -> Vec<usize> {
+    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    Setting::ALL
+        .iter()
+        .enumerate()
+        .filter(|(_, setting)| {
+            let text = format!("{} {}", setting.group(), setting.label()).to_lowercase();
+            words.iter().all(|word| text.contains(word.as_str()))
+        })
+        .map(|(index, _)| index)
+        .collect()
+}
+
+fn settings(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, selected: usize, query: Option<&str>) {
     enum Line {
         Group(&'static str),
         Gap,
         Row(usize, Setting),
     }
     let theme = ui.theme;
-    let mut lines = Vec::new();
-    for (index, setting) in Setting::ALL.into_iter().enumerate() {
-        if index == 0 || setting.group() != Setting::ALL[index - 1].group() {
-            if index > 0 {
-                lines.push(Line::Gap);
+    let lines_for = |shown: &[usize]| {
+        let mut lines = Vec::new();
+        let mut group = None;
+        for &index in shown {
+            let setting = Setting::ALL[index];
+            if group != Some(setting.group()) {
+                if group.is_some() {
+                    lines.push(Line::Gap);
+                }
+                lines.push(Line::Group(setting.group()));
+                group = Some(setting.group());
             }
-            lines.push(Line::Group(setting.group()));
+            lines.push(Line::Row(index, setting));
         }
-        lines.push(Line::Row(index, setting));
-    }
-    let content = dialog(buf, screen, 64, lines.len() as u16 + 8, None, "Settings", ui);
+        lines
+    };
+    // Sized for every setting, so the dialog holds still while a search narrows the list.
+    let every: Vec<usize> = (0..Setting::ALL.len()).collect();
+    let height = lines_for(&every).len() as u16 + 8;
+    let lines = lines_for(&matching_settings(query.unwrap_or_default()));
+    let content = dialog(buf, screen, 64, height, None, "Settings", ui);
     // On a short terminal the path line gives up its rows and the list scrolls to the selection.
-    let fits = usize::from(content.height) >= lines.len() + 4;
+    let fits = usize::from(content.height) >= usize::from(height) - 4;
     let view = usize::from(content.height.saturating_sub(if fits { 4 } else { 2 }));
     let selected_line = lines
         .iter()
@@ -617,13 +641,32 @@ fn settings(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, selected: us
             Style::new().fg(theme.muted()),
         );
     }
-    key_hints(
-        buf,
-        content.x,
-        content.bottom().saturating_sub(1),
-        &[("↑↓", "choose"), ("←→", "change")],
-        ui,
-    );
+    if lines.is_empty() {
+        put(
+            buf,
+            content.x + 1,
+            content.y,
+            "No setting matches",
+            Style::new().fg(theme.muted()),
+        );
+    }
+    let bottom = content.bottom().saturating_sub(1);
+    match query {
+        Some(query) => field(
+            buf,
+            Rect::new(content.x, bottom, content.width, 1),
+            query,
+            "search settings",
+            ui,
+        ),
+        None => key_hints(
+            buf,
+            content.x,
+            bottom,
+            &[("↑↓", "choose"), ("←→", "change"), ("/", "search")],
+            ui,
+        ),
+    }
 }
 
 pub fn toasts(buf: &mut Buffer, footer: Rect, ui: &mut Ui, now: Instant) {
