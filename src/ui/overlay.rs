@@ -13,6 +13,7 @@ use super::widgets::{self, fill, fit, put, wrap};
 use super::{BACKDROP_DIM, Hit, Overlay, Ui};
 use crate::action::{Action, Prompt, Removal, Setting};
 use crate::app::{App, Tone};
+use crate::model::Source;
 use crate::timer::TimerMode;
 use crate::ui::picture::Picture;
 
@@ -33,6 +34,15 @@ pub fn commands(app: &App) -> Vec<Command> {
             if app.is_playing() { "Pause" } else { "Play" },
             "space",
             Action::TogglePlay,
+        ),
+        command(
+            if app.source == Source::Soundscape {
+                "Music: back on"
+            } else {
+                "Music: off, ambience only"
+            },
+            "M",
+            Action::ToggleMusic,
         ),
         command("Next", "n", Action::Next),
         command("Previous", "p", Action::Previous),
@@ -391,8 +401,9 @@ fn confirm(buf: &mut Buffer, screen: Rect, ui: &mut Ui, message: &str) {
     );
 }
 
-const KEYS: [(&str, &str); 32] = [
+const KEYS: [(&str, &str); 33] = [
     ("space", "play or pause the sound"),
+    ("M", "music off or back on"),
     ("n / p", "next / previous"),
     (", / .", "back / forward 10 s"),
     ("- / +", "volume"),

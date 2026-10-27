@@ -35,7 +35,7 @@ After a winget install, open a new terminal so the tools are on `PATH`. When a t
 
 ## Use
 
-`chill` opens with your last scene loaded and paused. Space starts the music and the ambience, and `t` starts the focus timer. Each runs without the other, so you can just listen.
+`chill` opens with your last scene loaded and paused. Space starts the music and the ambience, and `t` starts the focus timer. Each runs without the other, so you can just listen. For ambience alone, `M` turns the music off and keeps the sounds you set; press it again and the music picks up where it stopped.
 
 `F` hides or shows the timer panel. While it is hidden, a running or paused timer stays in the header, and clicking it pauses or resumes. `H` and `L` put away the library on the left and the ambience and timer on the right, so the player fills the window. A side you put away leaves a thin edge with an arrow; click it, or press the same key, to bring the side back.
 
@@ -54,6 +54,7 @@ An error stays in a small notice until you dismiss it. Click the notice or press
 | Key | Does |
 | --- | --- |
 | `space` | play or pause the music and ambience |
+| `M` | turn the music off and keep the ambience, or bring the music back |
 | `n` / `p` | next / previous |
 | `f` | like what's playing |
 | `<` / `>` | turn the music or the ambience up against the other |
@@ -127,7 +128,7 @@ The server is the Worker in [`sync/`](sync/README.md). It stores what syncs as i
 
 ## Configuration
 
-Press `c` for settings: timer lengths, auto-start, the chime, notifications, the picture, the season, and reduced motion. `/` searches them. Changes save to `config.toml` right away, keeping anything else you wrote in it. The file is optional and lives in `~/.config/chill/` on macOS and `%APPDATA%\chill\` on Windows. These are the defaults:
+Press `c` for settings: timer lengths, auto-start, the chime, notifications, the picture, the season, reduced motion, and how many keys the bottom bar lists. `/` searches them. Changes save to `config.toml` right away, keeping anything else you wrote in it. The file is optional and lives in `~/.config/chill/` on macOS and `%APPDATA%\chill\` on Windows. These are the defaults:
 
 ```toml
 catalog_url = "https://chill-data.aquitano.me/catalog.json"
@@ -137,6 +138,7 @@ reduce_motion = false   # true turns off transitions and the visualizer, and hol
 picture = "cover"       # or "journey", "night-lake", "fuji-dawn", "autumn-pagoda"
 look = "auto"           # how pictures are drawn: "auto", "blocks", "pixels", or "dots"
 season = "auto"         # the calendar's, or "spring", "summer", "autumn", "winter" (say, south of the equator)
+key_hints = "essentials" # the bottom bar: play, commands, settings, keys; or "all", or "off" to hide it
 chime = true            # a soft bell when a focus block or break ends
 notifications = true    # an OS notification at the same moments
 

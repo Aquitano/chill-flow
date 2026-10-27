@@ -208,7 +208,7 @@ impl Season {
     }
 }
 
-fn step<T: Copy + PartialEq>(all: &[T], current: T, by: i8) -> T {
+pub(super) fn step<T: Copy + PartialEq>(all: &[T], current: T, by: i8) -> T {
     let index = all.iter().position(|item| *item == current).unwrap_or(0) as isize;
     all[(index + isize::from(by.signum())).rem_euclid(all.len() as isize) as usize]
 }

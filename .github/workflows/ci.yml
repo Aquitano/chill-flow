@@ -29,12 +29,15 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       # Some tests start real playback, which runs ffmpeg like the app does.
-      # A stalled mirror once held this step for half an hour; time out and retry instead.
+      # The Ubuntu mirror sometimes serves ffmpeg's 90 packages at a few KB/s, so apt only
+      # fetches the ALSA headers and ffmpeg comes as one static build from GitHub.
       - if: runner.os == 'Linux'
-        timeout-minutes: 10
+        timeout-minutes: 5
         run: |
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y libasound2-dev ffmpeg
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends libasound2-dev
+          curl -fsSL --retry 3 https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz | tar -xJ -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/ffmpeg-n8.1-latest-linux64-gpl-8.1/bin" >> "$GITHUB_PATH"
       - if: runner.os == 'macOS'
         run: brew install ffmpeg
       - if: runner.os == 'Windows'

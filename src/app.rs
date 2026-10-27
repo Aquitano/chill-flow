@@ -187,6 +187,8 @@ pub struct App {
     /// Where the current stream started, so `position` minus this is how much of it has played.
     stream_from: f64,
     resume_at: Option<f64>,
+    /// The music a soundscape replaced and where it was, so `M` can bring it back.
+    music_before: Option<(Source, Queue, f64)>,
     pending_seek: Option<(f64, Instant)>,
     pending_resolve: Option<(String, f64, Instant)>,
     next_inspection: u64,
@@ -292,6 +294,7 @@ impl App {
             reconnecting: None,
             stream_from: 0.0,
             resume_at: (session.position > 1.0).then_some(session.position),
+            music_before: None,
             pending_seek: None,
             pending_resolve: None,
             next_inspection: 0,
@@ -795,6 +798,9 @@ impl App {
     }
 
     fn enter_soundscape(&mut self) {
+        if self.source != Source::Soundscape {
+            self.music_before = Some((self.source.clone(), self.queue.clone(), self.position()));
+        }
         self.choices += 1;
         self.stop_stream();
         self.queue.replace(Vec::new(), None);
@@ -833,6 +839,10 @@ impl App {
         if self.is_playing() {
             return self.engine.set_paused(true);
         }
+        self.resume();
+    }
+
+    fn resume(&mut self) {
         if self.stream == Stream::Idle
             && let Some(item) = self.current().cloned()
         {
@@ -841,6 +851,29 @@ impl App {
             self.start(item, at);
         }
         self.engine.set_paused(false);
+    }
+
+    /// Keeps the ambience as it is set and drops the music, or brings the music back where it was.
+    fn toggle_music(&mut self) {
+        if self.source != Source::Soundscape {
+            if self.levels.is_empty() {
+                return self.toast(Tone::Info, "Turn up a sound first to hear it without music");
+            }
+            return self.enter_soundscape();
+        }
+        match self.music_before.take() {
+            Some((source, queue, at)) => {
+                self.source = source;
+                self.queue = queue;
+                self.resume_at = (at > 0.0).then_some(at);
+                self.refresh_ambience();
+                self.events.push(Event::TrackChanged);
+                self.load_cover();
+            }
+            None => self.restore_playback(&Playback::default()),
+        }
+        self.choices += 1;
+        self.resume();
     }
 
     fn set_timer_running(&mut self, running: bool) {
@@ -896,6 +929,7 @@ impl App {
     pub fn dispatch(&mut self, action: Action) {
         match action {
             Action::TogglePlay => self.toggle_play(),
+            Action::ToggleMusic => self.toggle_music(),
             Action::Next => self.skip(true),
             Action::Previous => self.skip(false),
             Action::SeekBy(delta) => self.seek_to(self.position() + delta),
@@ -1564,6 +1598,7 @@ impl App {
             Setting::Look => self.config.look.label().to_string(),
             Setting::Season => self.config.season.label().to_string(),
             Setting::ReduceMotion => toggle(self.config.reduce_motion),
+            Setting::KeyHints => self.config.key_hints.label().to_string(),
         }
     }
 
@@ -1592,14 +1627,16 @@ impl App {
             Setting::Look => self.config.look = self.config.look.step(delta),
             Setting::Season => self.config.season = self.config.season.step(delta),
             Setting::ReduceMotion => self.config.reduce_motion = !self.config.reduce_motion,
+            Setting::KeyHints => self.config.key_hints = self.config.key_hints.step(delta),
         }
         self.timer.set_settings(self.config.pomodoro);
-        // How a picture looks depends on each terminal's font, so pictures stay on this machine.
+        // How a picture looks depends on each terminal's font, and room for keys on its width, so
+        // these stay on this machine.
         let synced_as = match setting {
             Setting::Chime => Some("chime"),
             Setting::Notifications => Some("notifications"),
             Setting::ReduceMotion => Some("reduce_motion"),
-            Setting::Picture | Setting::Look | Setting::Season => None,
+            Setting::Picture | Setting::Look | Setting::Season | Setting::KeyHints => None,
             _ => Some("pomodoro"),
         };
         if let Some(name) = synced_as {
@@ -2719,6 +2756,31 @@ mod tests {
             app.dispatch(Action::TogglePlay);
             assert_eq!((app.is_playing(), app.timer.is_running()), (false, timing));
         }
+    }
+
+    #[test]
+    fn music_steps_aside_for_the_ambience_and_comes_back_where_it_was() {
+        let mut app = app();
+        let track = app.current().cloned();
+        let added = playlist().items.remove(0);
+        app.queue.enqueue(added.clone());
+        app.dispatch(Action::ToggleMusic);
+        assert_eq!((&app.source, app.current()), (&Source::Tracks, track.as_ref()));
+
+        app.dispatch(Action::SetLevel("noise-brown".into(), 40));
+        app.resume_at = Some(42.0);
+        app.dispatch(Action::ToggleMusic);
+        assert_eq!(
+            (&app.source, app.current(), app.is_playing()),
+            (&Source::Soundscape, None, true)
+        );
+        assert_eq!(app.levels.get("noise-brown"), Some(&40));
+
+        app.dispatch(Action::ToggleMusic);
+        assert_eq!((&app.source, app.current()), (&Source::Tracks, track.as_ref()));
+        assert_eq!(app.position(), 42.0);
+        assert_eq!(app.levels.get("noise-brown"), Some(&40));
+        assert!(app.queue.upcoming().any(|item| *item == added));
     }
 
     #[test]

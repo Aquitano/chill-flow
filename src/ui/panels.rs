@@ -8,7 +8,7 @@ use ratatui::widgets::{Block, BorderType, Widget};
 use unicode_width::UnicodeWidthStr;
 
 use super::widgets::{self, fill, fit, meter, put, wrap};
-use super::{Hit, Slider, Ui};
+use super::{Hit, KeyHints, Slider, Ui};
 use crate::action::{Action, Panel, Prompt, Setting, Tab};
 use crate::app::{App, Stream, format_clock};
 use crate::model::{Item, Repeat, Source};
@@ -190,52 +190,61 @@ pub fn header(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant
 }
 
 pub fn footer(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
+    if area.height == 0 {
+        return;
+    }
     let theme = ui.theme;
     let play = if app.is_playing() { "pause" } else { "play " };
-    let mut hints: Vec<(&str, &str, Option<Action>)> = vec![
-        ("space", play, Some(Action::TogglePlay)),
-        ("n", "next", Some(Action::Next)),
-        ("t", "timer", Some(Action::TimerToggle)),
-    ];
-    if app.library_hidden {
-        hints.push(("H", "library", Some(Action::ToggleLibraryPanel)));
+    let all = app.config.key_hints == KeyHints::All;
+    let mut hints: Vec<(&str, &str, Option<Action>)> = vec![("space", play, Some(Action::TogglePlay))];
+    if all {
+        hints.extend([
+            ("n", "next", Some(Action::Next)),
+            ("t", "timer", Some(Action::TimerToggle)),
+        ]);
+        if app.library_hidden {
+            hints.push(("H", "library", Some(Action::ToggleLibraryPanel)));
+        }
+        if app.side_hidden {
+            hints.push(("L", "ambience", Some(Action::ToggleSidePanel)));
+        }
+        hints.extend(match ui.focus {
+            Panel::Library => [("enter", "play", None), ("a", "queue", None), ("/", "filter", None)],
+            Panel::Queue => [("enter", "jump", None), ("J/K", "move", None), ("d", "remove", None)],
+            Panel::Ambience => [
+                ("h/l", "level", None),
+                ("0", "mute", None),
+                ("[ ]", "mix", Some(Action::CycleMix(1))),
+            ],
+        });
     }
-    if app.side_hidden {
-        hints.push(("L", "ambience", Some(Action::ToggleSidePanel)));
-    }
-    hints.extend(match ui.focus {
-        Panel::Library => [("enter", "play", None), ("a", "queue", None), ("/", "filter", None)],
-        Panel::Queue => [("enter", "jump", None), ("J/K", "move", None), ("d", "remove", None)],
-        Panel::Ambience => [
-            ("h/l", "level", None),
-            ("0", "mute", None),
-            ("[ ]", "mix", Some(Action::CycleMix(1))),
-        ],
-    });
+    // The bar is the only place to click a playlist refresh, so it stays with fewer keys too.
     if ui.focus == Panel::Library
         && let Some(saved) = app.playlist_for_row(ui.selected[app.tab.index()])
     {
         hints.insert(0, ("R", "refresh", Some(Action::RefreshSaved(saved.id.clone()))));
     }
-    hints.push(("o", "open link", Some(Action::OpenPrompt(Prompt::OpenUrl))));
     let mut pinned = vec![
         ("^p", "commands", Action::OpenPalette),
         ("c", "settings", Action::OpenSettings),
         ("?", "keys", Action::OpenHelp),
-        ("D", "diagnostics", Action::OpenDiagnostics),
     ];
+    if all {
+        hints.push(("o", "open link", Some(Action::OpenPrompt(Prompt::OpenUrl))));
+        pinned.push(("D", "diagnostics", Action::OpenDiagnostics));
+    }
     if area.width < 80 {
         pinned.drain(..2);
-        if let Some((_, label, _)) = pinned.last_mut() {
+        if all && let Some((_, label, _)) = pinned.last_mut() {
             *label = "errors";
         }
     }
     if area.width < 60 {
         pinned.remove(0);
-        hints = vec![
-            ("space", play, Some(Action::TogglePlay)),
-            ("t", "timer", Some(Action::TimerToggle)),
-        ];
+        hints = vec![("space", play, Some(Action::TogglePlay))];
+        if all {
+            hints.push(("t", "timer", Some(Action::TimerToggle)));
+        }
     }
     // Typing goes into the filter, so the usual keys would only add letters to it.
     if ui.filtering {
@@ -819,7 +828,7 @@ pub fn queue(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
     ui.hit(area, Hit::Panel(Panel::Queue));
     if upcoming.is_empty() {
         let message = if app.source == Source::Soundscape {
-            "Pick a track to bring the music back"
+            "Press M or pick a track to bring the music back"
         } else {
             "Press a on a track to queue it"
         };
