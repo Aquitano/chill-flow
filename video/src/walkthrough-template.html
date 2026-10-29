@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>chill: a world made of sound</title>
+  <style>
+    :root { color-scheme:dark; --foreground:#eeeeec; --muted-foreground:#a7aaa8; --border:#41433f; --primary:#d3d7e4; --card:#242622; --radius:10px; --font-sans:system-ui,sans-serif; }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--foreground); font:14px/1.5 var(--font-sans); }
+    main { max-width:1000px; margin:0 auto; }
+    .stage { background:var(--card); padding:16px; border-radius:var(--radius); }
+    .frame { position:relative; }
+    canvas { display:block; width:100%; height:auto; }
+    #initial-poster { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
+    .controls { display:flex; align-items:center; gap:12px; margin-top:12px; }
+    button { background:transparent; border:1px solid var(--border); border-radius:5px; padding:7px 12px; color:inherit; font:inherit; cursor:pointer; }
+    button:hover,button[aria-pressed="true"] { border-color:var(--primary); }
+    button:focus-visible,input:focus-visible { outline:2px solid var(--primary); outline-offset:3px; }
+    button:disabled { opacity:.5; cursor:wait; }
+    #play { min-width:123px; }
+    #scrub { min-width:0; flex:1; accent-color:var(--primary); }
+    output { white-space:nowrap; color:var(--muted-foreground); font-size:12px; font-variant-numeric:tabular-nums; }
+    .notes { display:flex; gap:12px; align-items:center; margin:10px 0 18px; }
+    .notes button { font-size:12px; padding:5px 9px; white-space:nowrap; }
+    #status { color:var(--muted-foreground); font-size:12px; margin:0; }
+    .chapters { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:6px; }
+    .chapters button { font-size:11px; padding:8px 4px; }
+    .chapters span { display:block; font-size:10px; color:var(--muted-foreground); }
+    @media(max-width:480px) { .stage{padding:8px} .controls{gap:6px} #play{min-width:112px;padding:7px} .chapters{grid-template-columns:repeat(3,minmax(0,1fr))} .notes{align-items:flex-start} }
+  </style>
+</head>
+<body>
+  <script type="application/octet-stream" id="recording">__RECORDING__</script>
+  <div hidden><span id="font" data-source="__FONT__"></span><span id="terminal-font" data-source="__TERMINAL_FONT__"></span></div>
+  <audio id="music" src="assets/music.mp3" preload="metadata"></audio><audio id="rain" src="assets/rain.mp3" preload="metadata"></audio>
+  <main>
+    <div class="stage"><div class="frame"><canvas id="film" width="1920" height="1080" role="img" aria-label="chill: a world made of sound"></canvas><img id="initial-poster" src="out/walkthrough-poster.png" alt="chill app walkthrough"></div></div>
+    <div class="controls"><button id="play" type="button" disabled>Play from start</button><input id="scrub" type="range" min="0" max="899" value="630" step="1" aria-label="Film frame"><output id="clock" for="scrub">0.0 / 30s</output></div>
+    <div class="notes"><button id="sound" type="button" disabled aria-pressed="true">Sound on</button><p id="status">Loading the film.</p></div>
+    <div class="chapters">
+      <button type="button" data-frame="0">Raster opening<span>0–3.6s</span></button>
+      <button type="button" data-frame="108">Find music<span>3.6–8s</span></button>
+      <button type="button" data-frame="243">Mix rain<span>8–13s</span></button>
+      <button type="button" data-frame="390">Start focus<span>13–17s</span></button>
+      <button type="button" data-frame="504">Your space<span>17–22s</span></button>
+      <button type="button" data-frame="672">Settle in<span>22–30s</span></button>
+    </div>
+  </main>
+  <script>/* WORLD_SCRIPT */</script>
+</body>
+</html>

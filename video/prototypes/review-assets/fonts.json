@@ -1,0 +1,22 @@
+[
+  {
+    "family": "Geist",
+    "file": "review-assets/quiet_type-0.woff2"
+  },
+  {
+    "family": "Geist Mono",
+    "file": "review-assets/quiet_type-1.woff2"
+  },
+  {
+    "family": "Horizon Sans",
+    "file": "review-assets/single_horizon-0.woff2"
+  },
+  {
+    "family": "Manrope",
+    "file": "review-assets/raster_to_print-0.woff2"
+  },
+  {
+    "family": "Chill Terminal",
+    "file": "review-assets/one_key-0.woff2"
+  }
+]

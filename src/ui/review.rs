@@ -416,3 +416,6 @@ fn export_ui_review() -> std::io::Result<()> {
     println!("Open {}", directory.join("index.html").display());
     Ok(())
 }
+
+#[path = "../../video/capture.rs"]
+mod walkthrough;
