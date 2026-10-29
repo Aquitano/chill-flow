@@ -253,6 +253,46 @@ fn review_layouts_keep_the_timer_visible_without_restoring_hidden_panels() {
     }
 }
 
+#[test]
+fn landscape_controls_keep_the_scene_close_and_empty_queue_compact() {
+    use crate::action::Action;
+    for tracks in [1, 2] {
+        let mut app = TestApp::offline();
+        app.config.picture = Picture::FujiDawn;
+        app.config.look = super::picture::Look::Pixels;
+        app.library_hidden = true;
+        app.side_hidden = true;
+        app.queue.replace(
+            (0..tracks)
+                .map(|i| Item {
+                    key: format!("capture-{i}"),
+                    title: format!("Track {i}"),
+                    artist: String::new(),
+                    duration: Some(900),
+                    cover: None,
+                    play: Playable::File { url: String::new() },
+                })
+                .collect(),
+            None,
+        );
+        let mut ui = Ui::new(Theme::new(Some((FOREGROUND, BACKGROUND))), Picker::halfblocks(), true);
+        let mut terminal = Terminal::new(TestBackend::new(144, 40)).unwrap();
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        let rect = |wanted: Hit| ui.hits.iter().rev().find(|(_, hit)| *hit == wanted).unwrap().0;
+        let seek = rect(Hit::Seek);
+        let play = rect(Hit::Act(Action::TogglePlay));
+        let queue = rect(Hit::Panel(crate::action::Panel::Queue));
+        assert_eq!(
+            play.y,
+            seek.y + 1,
+            "playback should sit immediately below the progress bar"
+        );
+        assert_eq!(queue.y, play.y + 1, "the queue should follow playback without padding");
+        assert_eq!(queue.height, if tracks == 1 { 1 } else { 3 });
+        assert_ne!(terminal.backend().buffer()[(70, seek.y - 1)].bg, Color::Reset);
+    }
+}
+
 fn color(color: Color, default: [u8; 3]) -> String {
     let rgb = match color {
         Color::Reset => default,
