@@ -50,9 +50,16 @@ pub fn coalesce(events: Vec<Event>) -> Vec<Event> {
 
 pub fn handle(app: &mut App, ui: &mut Ui, event: Event) {
     match event {
-        Event::Key(key) if key.kind != KeyEventKind::Release => key_pressed(app, ui, key),
+        Event::Key(key) if key.kind != KeyEventKind::Release => {
+            // A key can move the selection or refilter the rows, so the next click starts over.
+            ui.last_click = None;
+            key_pressed(app, ui, key);
+        }
         Event::Mouse(mouse) => mouse_event(app, ui, mouse),
-        Event::Paste(text) => pasted(app, ui, &text),
+        Event::Paste(text) => {
+            ui.last_click = None;
+            pasted(app, ui, &text);
+        }
         _ => {}
     }
 }

@@ -453,7 +453,7 @@ const KEYS: [(&str, &str); 34] = [
     ("↑↓ / j k", "move"),
     ("← → / h l", "tabs, or a sound's level"),
     ("enter", "play the selection"),
-    ("a", "queue it / mix it with music"),
+    ("a", "queue it / mix it in"),
     ("R", "refresh a YouTube playlist"),
     ("right click", "same as a, on a row"),
     ("d", "remove the selection"),

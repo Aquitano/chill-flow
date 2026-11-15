@@ -810,7 +810,7 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(160, 30)).unwrap();
         for (tab, hints) in [
             (Tab::Tracks, "enter play   a queue   / filter"),
-            (Tab::Sounds, "enter ambience only   a with music   / filter"),
+            (Tab::Sounds, "enter ambience only   a mix in   / filter"),
             (Tab::Scenes, "enter load   / filter"),
         ] {
             app.tab = tab;
@@ -950,6 +950,28 @@ mod tests {
                 .iter()
                 .any(|(rect, hit)| { rect.height == 2 && *hit == Hit::Act(Action::OpenDiagnostics) })
         );
+    }
+
+    #[test]
+    fn a_key_between_two_clicks_on_a_row_makes_the_second_a_first_click() {
+        let mut app = offline_app();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), true);
+        let mut terminal = Terminal::new(TestBackend::new(160, 40)).unwrap();
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        let row = ui.hits.iter().find(|(_, hit)| *hit == Hit::Row(0)).unwrap().0;
+        let click = Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: row.x,
+            row: row.y,
+            modifiers: KeyModifiers::NONE,
+        });
+        let key = Event::Key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+
+        input::handle(&mut app, &mut ui, click.clone());
+        input::handle(&mut app, &mut ui, key);
+        input::handle(&mut app, &mut ui, click);
+
+        assert_eq!(ui.last_click, Some(Hit::Row(0)));
     }
 
     #[test]

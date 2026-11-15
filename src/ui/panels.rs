@@ -215,7 +215,7 @@ pub fn footer(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
         hints.extend(match (ui.focus, app.tab) {
             (Panel::Library, Tab::Sounds) => vec![
                 ("enter", "ambience only", None),
-                ("a", "with music", None),
+                ("a", "mix in", None),
                 ("/", "filter", None),
             ],
             (Panel::Library, Tab::Scenes) => vec![("enter", "load", None), ("/", "filter", None)],
