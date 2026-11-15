@@ -8,7 +8,7 @@ All bodies are UTF-8 JSON. Errors are `{"error": "<sentence>"}` with the status 
 
 - `POST /v1/spaces` returns `201 {"token": "<spaceId>.<signature>"}`.
 - `POST /v1/sync` with `Authorization: Bearer <token>` and `{"cursor": 0, "changes": [Record]}` returns `200 {"cursor": n, "changes": [Record], "more": bool}`.
-- `DELETE /v1/space` with the bearer token wipes the space and closes it for good, returning `204`. Every later sync with that token gets `410`, so a machine that still holds it learns the space is gone instead of filling it again.
+- `DELETE /v1/space` with the bearer token wipes the space and closes it for good, returning `204`. Every later sync with that token gets `410`, so a machine that still holds it learns the space is gone instead of filling it again. A space that never stored a change has nothing to wipe, so deleting it changes nothing.
 
 A record is `{"kind", "id", "updatedAt", "deleted", "body"}`. `kind` is one of `like`, `saved`, `scene`, `mix`, `focus`, `setting`. `updatedAt` is milliseconds since the epoch. A deleted record keeps its key with `body: null`, and a record that isn't deleted must have a body other than `null`. A sync changes each `(kind, id)` at most once.
 
@@ -19,9 +19,9 @@ The server keeps the record with the greater `updatedAt` for each `(kind, id)`. 
 ## Cost safeguards
 
 - A token is the space id plus an HMAC-SHA256 signature made with `SYNC_SECRET`. The Worker checks it before anything else, so a bad token never reaches a Durable Object.
-- Creating a space only signs a token. The Durable Object first exists when that space syncs.
-- Each request makes at most one RPC call to one Durable Object. There are no alarms, WebSockets, or outbound fetches.
-- New spaces: 5 per minute per IP address (429), and `DAILY_NEW_SPACES` per UTC day across every address (503), counted in one small `Admission` Durable Object that only space creation touches. Since every space has its own limits below, this daily cap is what bounds how fast storage and writes can grow overall.
+- Creating a space only signs a token, at most 5 per minute per IP address (429). Nothing is stored until the space's first sync that carries changes; a sync without changes before then answers with an empty page.
+- Each request makes at most one RPC call to one Durable Object, except a space's first stored change, where the space also asks the `Admission` Durable Object. There are no alarms, WebSockets, or outbound fetches.
+- A space counts as new on the UTC day it first stores a change, not the day its token was signed, so tokens kept unused buy nothing. `Admission` lets in `DAILY_NEW_SPACES` new spaces per UTC day across every address (503 after that) and `DAILY_NEW_SPACES_PER_ADDRESS` per IP address, with each IPv6 /64 counted as one address (429 after that). Spaces already in use are never turned away by these caps. Since every space has its own limits below, the daily cap is what bounds how fast storage and writes can grow overall.
 - Each space may write `DAILY_CHANGES_PER_SPACE` changes per UTC day, counted inside its Durable Object; past that a sync with changes gets 429 until the next day. Rows written are billed even when they don't grow the space, so this is the limit on writes. Pulling with no changes is not counted.
 - 30 syncs per minute per space. Cloudflare counts this per location and only roughly, so it only filters bursts before they reach a Durable Object.
 - Request bodies are capped at 2 MiB (413). A sync carries at most 2000 records, ids up to 200 characters, and bodies up to 256 KiB of JSON each (400).
@@ -29,7 +29,7 @@ The server keeps the record with the greater `updatedAt` for each `(kind, id)`. 
 
 ## Privacy
 
-A space holds what chill syncs, readable by whoever runs the Worker: likes and saved YouTube links with their titles, scene and mix names, focus blocks with their start times and lengths, and settings including added catalog links. It holds no names, email addresses, or IP addresses. The rate limiters see the client's IP address but keep only counters, and the Worker's logs keep its own error lines without request headers. "Delete sync data" in chill deletes everything a space holds.
+A space holds what chill syncs, readable by whoever runs the Worker: likes and saved YouTube links with their titles, scene and mix names, focus blocks with their start times and lengths, and settings including added catalog links. It holds no names, email addresses, or IP addresses. The rate limiters see the client's IP address but keep only counters. For the current UTC day only, `Admission` keeps a count per address that started a space, keyed by an HMAC of the day and the address made with `SYNC_SECRET` rather than the address itself. The Worker's logs keep its own error lines without request headers. "Delete sync data" in chill deletes everything a space holds.
 
 ## Development
 

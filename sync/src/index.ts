@@ -8,6 +8,8 @@ export { SyncSpace } from "./space";
 
 const fail = (status: number, error: string) => Response.json({ error }, { status });
 
+const clientAddress = (request: Request) => request.headers.get("CF-Connecting-IP") ?? "unknown";
+
 export default {
   async fetch(request, env) {
     const route = `${request.method} ${new URL(request.url).pathname}`;
@@ -36,11 +38,8 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 async function createSpace(request: Request, env: Env) {
-  const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
-  const { success } = await env.SPACE_CREATION_LIMITER.limit({ key: ip });
+  const { success } = await env.SPACE_CREATION_LIMITER.limit({ key: clientAddress(request) });
   if (!success) return fail(429, "too many sync spaces were created from this address, try again in a minute");
-  const admitted = await exports.Admission.getByName("spaces").admit(Number(env.DAILY_NEW_SPACES));
-  if (!admitted) return fail(503, "sync is not taking new spaces today, try again tomorrow");
   return Response.json({ token: await mintToken(env.SYNC_SECRET) }, { status: 201 });
 }
 
@@ -55,11 +54,20 @@ async function sync(request: Request, env: Env) {
   const keys = new Set(parsed.changes.map(({ kind, id }) => `${kind}\u0000${id}`));
   if (keys.size < parsed.changes.length) return fail(400, "the sync request changes the same record twice");
 
-  const result = await space.sync(parsed.cursor, parsed.changes);
+  const result = await space.sync(parsed.cursor, parsed.changes, clientAddress(request));
   if (result instanceof Response) return result;
-  if (result.type === "full") return fail(507, "this sync space is full");
-  if (result.type === "over budget") return fail(429, "this sync space changed too much today, try again tomorrow");
-  return fail(410, "this sync space was deleted");
+  switch (result.type) {
+    case "full":
+      return fail(507, "this sync space is full");
+    case "over budget":
+      return fail(429, "this sync space changed too much today, try again tomorrow");
+    case "deleted":
+      return fail(410, "this sync space was deleted");
+    case "closed today":
+      return fail(503, "sync is not taking new spaces today, try again tomorrow");
+    case "address over limit":
+      return fail(429, "too many sync spaces were started from this address today, try again tomorrow");
+  }
 }
 
 async function deleteSpace(request: Request, env: Env) {

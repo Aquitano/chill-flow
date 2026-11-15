@@ -26,6 +26,7 @@ export default defineConfig({
     },
     env: {
       DAILY_NEW_SPACES: bindings.text("100"),
+      DAILY_NEW_SPACES_PER_ADDRESS: bindings.text("3"),
       DAILY_CHANGES_PER_SPACE: bindings.text("20000"),
       SYNC_SECRET: bindings.secret(),
       // Rate-limit namespaces must be unique in the account; change them if 1001 or 1002 is taken.
