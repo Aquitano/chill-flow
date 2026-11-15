@@ -72,6 +72,12 @@ impl Tool {
         }
     }
 
+    /// Runs the program the tool check finds. `Command` alone only looks for `.exe` on Windows,
+    /// so it would miss the `.cmd` and `.bat` shims the check accepts.
+    pub fn command(self) -> Command {
+        Command::new(which::which(self.name()).unwrap_or_else(|_| self.name().into()))
+    }
+
     pub fn inspect(self) -> Inspection {
         let path = which::which(self.name()).ok();
         let state = match &path {
