@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, ErrorKind, FromSample, SampleFormat, SizedSample, StreamConfig};
+use rubato::audioadapter_buffers::direct::InterleavedSlice;
+use rubato::{Fft, FixedSync, Resampler};
 
 use super::EngineEvent;
 use super::mixer::{BLOCK_FRAMES, Mixer};
@@ -19,10 +21,13 @@ pub(super) fn device_rate() -> Result<u32, String> {
         .default_output_device()
         .ok_or("no audio output device")?;
     let default = device.default_output_config().map_err(|error| error.to_string())?;
-    let supports_preferred = device.supported_output_configs().map_or(true, |mut configs| {
-        configs.any(|range| (range.min_sample_rate()..=range.max_sample_rate()).contains(&PREFERRED_RATE))
-    });
-    Ok(session_rate(default.sample_rate(), supports_preferred))
+    Ok(session_rate(default.sample_rate(), plays_at(&device, PREFERRED_RATE)))
+}
+
+fn plays_at(device: &cpal::Device, rate: u32) -> bool {
+    device.supported_output_configs().map_or(true, |mut configs| {
+        configs.any(|range| (range.min_sample_rate()..=range.max_sample_rate()).contains(&rate))
+    })
 }
 
 const PREFERRED_RATE: u32 = 48_000;
@@ -121,7 +126,11 @@ impl Supervisor {
         let supported = device.default_output_config().map_err(|error| error.to_string())?;
         let config = StreamConfig {
             channels: supported.channels(),
-            sample_rate: self.rate,
+            sample_rate: if plays_at(&device, self.rate) {
+                self.rate
+            } else {
+                supported.sample_rate()
+            },
             buffer_size: BufferSize::Default,
         };
         let stream = match supported.sample_format() {
@@ -155,14 +164,18 @@ impl Supervisor {
         let channels = usize::from(config.channels);
         let mixer = Arc::clone(&self.mixer);
         let mut stereo = vec![0.0; BLOCK_FRAMES * 2];
+        let mut to_device = (config.sample_rate != self.rate)
+            .then(|| ToDevice::new(self.rate, config.sample_rate))
+            .transpose()?;
         let lost = Arc::clone(lost);
         let supervisor = thread::current();
         device
             .build_output_stream::<T, _, _>(
                 config,
                 move |out: &mut [T], _| match mixer.try_lock() {
-                    Ok(mut mixer) => write_frames(out, channels, &mut stereo, |mix| {
-                        mixer.render(mix);
+                    Ok(mut mixer) => write_frames(out, channels, &mut stereo, |mix| match &mut to_device {
+                        Some(to_device) => to_device.render(mix, |input| mixer.render(input)),
+                        None => mixer.render(mix),
                     }),
                     Err(_) => out.fill(T::EQUILIBRIUM),
                 },
@@ -199,6 +212,54 @@ impl Supervisor {
                 next = now;
             }
         }
+    }
+}
+
+/// Carries the mix from the session rate to an output that can't play it, such as a headset
+/// that joins mid-session in its call mode.
+struct ToDevice {
+    resampler: Fft<f32>,
+    input: Vec<f32>,
+    output: Vec<f32>,
+    played: usize,
+}
+
+impl ToDevice {
+    fn new(from: u32, to: u32) -> Result<Self, String> {
+        let resampler = Fft::new(from as usize, to as usize, BLOCK_FRAMES, 2, FixedSync::Output)
+            .map_err(|error| error.to_string())?;
+        Ok(Self {
+            input: vec![0.0; resampler.input_frames_max() * 2],
+            output: vec![0.0; BLOCK_FRAMES * 2],
+            played: BLOCK_FRAMES * 2,
+            resampler,
+        })
+    }
+
+    fn render(&mut self, mut out: &mut [f32], mut mix: impl FnMut(&mut [f32])) {
+        while !out.is_empty() {
+            if self.played == self.output.len() {
+                self.resample(&mut mix);
+            }
+            let count = out.len().min(self.output.len() - self.played);
+            let (now, rest) = out.split_at_mut(count);
+            now.copy_from_slice(&self.output[self.played..self.played + count]);
+            self.played += count;
+            out = rest;
+        }
+    }
+
+    fn resample(&mut self, mix: &mut impl FnMut(&mut [f32])) {
+        let frames = self.resampler.input_frames_next();
+        mix(&mut self.input[..frames * 2]);
+        let resampled = InterleavedSlice::new(&self.input[..], 2, frames)
+            .ok()
+            .zip(InterleavedSlice::new_mut(&mut self.output[..], 2, BLOCK_FRAMES).ok())
+            .and_then(|(input, mut output)| self.resampler.process_into_buffer(&input, &mut output, None).ok());
+        if resampled.is_none() {
+            self.output.fill(0.0);
+        }
+        self.played = 0;
     }
 }
 
@@ -242,6 +303,21 @@ mod tests {
         assert_eq!(session_rate(24_000, false), 48_000);
         assert_eq!(session_rate(44_100, true), 48_000);
         assert_eq!(session_rate(44_100, false), 44_100);
+    }
+
+    #[test]
+    fn an_output_at_another_rate_plays_the_mix_at_its_own_speed() {
+        let mut to_device = ToDevice::new(48_000, 16_000).unwrap();
+        let mut mixed = 0;
+        let mut out = vec![0.0; 16_000 * 2];
+        for buffer in out.chunks_mut(441 * 2) {
+            to_device.render(buffer, |input| {
+                input.fill(0.5);
+                mixed += input.len() / 2;
+            });
+        }
+        assert!(mixed.abs_diff(48_000) < BLOCK_FRAMES * 3, "mixed {mixed} frames");
+        assert!(out[out.len() - 2..].iter().all(|sample| (sample - 0.5).abs() < 0.01));
     }
 
     #[test]
