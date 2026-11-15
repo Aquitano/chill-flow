@@ -87,6 +87,7 @@ pub enum LoopSource {
 struct AmbientSlot {
     source: LoopSource,
     level: Arc<LaneLevel>,
+    target: f32,
 }
 
 impl Engine {
@@ -178,11 +179,15 @@ impl Engine {
 
     pub fn set_ambient(&mut self, id: &str, source: LoopSource, level: f32, gain: f32) {
         let target = perceptual(level) * gain.max(0.0);
-        if let Some(slot) = self.ambient.get(id)
+        if let Some(slot) = self.ambient.get_mut(id)
             && slot.source == source
-            && slot.level.set(target)
         {
-            return;
+            let was_on = std::mem::replace(&mut slot.target, target) > 0.0;
+            // A failed load retires its level while the sound is on, and it stays failed until the
+            // sound is turned off and on again; one given up on while off loads again at once.
+            if slot.level.set(target) || was_on {
+                return;
+            }
         }
         self.stop_ambient(id);
         if target <= 0.0 {
@@ -197,7 +202,7 @@ impl Engine {
             level: Arc::clone(&level),
         };
         ambient::spawn_load(request, self.loaded.clone(), self.events.clone());
-        let slot = AmbientSlot { source, level };
+        let slot = AmbientSlot { source, level, target };
         self.ambient.insert(id.to_owned(), slot);
     }
 
