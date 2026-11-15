@@ -95,7 +95,6 @@ fn cached_file(url: &str, cache_dir: &Path) -> Result<PathBuf, String> {
     }
     let io_error = |error: io::Error| format!("could not cache {name}: {error}");
     fs::create_dir_all(&dir).map_err(io_error)?;
-    remove_abandoned_downloads(&dir);
     let response = ureq::get(url)
         .config()
         .timeout_global(Some(DOWNLOAD_TIMEOUT))
@@ -112,8 +111,18 @@ fn cached_file(url: &str, cache_dir: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-/// Deletes partial files that chill quit in the middle of, which no destructor got to. One older
-/// than the download timeout can't belong to a download still running, in this chill or another.
+/// Deletes, once the download timeout has passed, partial files that an earlier chill quit in the
+/// middle of, which no destructor got to.
+pub(super) fn remove_abandoned_downloads_later(cache_dir: &Path) {
+    let dir = cache_dir.join("ambient");
+    thread::spawn(move || {
+        thread::sleep(DOWNLOAD_TIMEOUT);
+        remove_abandoned_downloads(&dir);
+    });
+}
+
+/// One older than the download timeout can't belong to a download still running, in this chill
+/// or another.
 fn remove_abandoned_downloads(dir: &Path) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for entry in entries.flatten() {

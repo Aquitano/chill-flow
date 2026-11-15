@@ -94,6 +94,7 @@ impl Engine {
     pub fn start(cache_dir: PathBuf) -> Engine {
         let device = output::device_rate();
         let rate = device.as_ref().copied().unwrap_or(FALLBACK_RATE);
+        ambient::remove_abandoned_downloads_later(&cache_dir);
         let (mut engine, mixer) = Self::build(cache_dir, rate);
         engine._output = Some(Output::start(mixer, rate, device.map(|_| ()), engine.events.clone()));
         engine

@@ -72,14 +72,23 @@ impl Tool {
         }
     }
 
-    /// Runs the program the tool check finds. `Command` alone only looks for `.exe` on Windows,
-    /// so it would miss the `.cmd` and `.bat` shims the check accepts.
+    /// Where the program is. On Windows chill runs ffmpeg and yt-dlp only as `.exe`: stopping a
+    /// `.cmd` shim stops its shell and leaves the tool running. yt-dlp starts deno itself, so
+    /// any form of deno it can find counts.
+    fn path(self) -> Option<PathBuf> {
+        match self {
+            Tool::Ffmpeg | Tool::YtDlp if cfg!(windows) => which::which(format!("{}.exe", self.name())).ok(),
+            _ => which::which(self.name()).ok(),
+        }
+    }
+
+    /// Runs the program the tool check finds.
     pub fn command(self) -> Command {
-        Command::new(which::which(self.name()).unwrap_or_else(|_| self.name().into()))
+        Command::new(self.path().unwrap_or_else(|| self.name().into()))
     }
 
     pub fn inspect(self) -> Inspection {
-        let path = which::which(self.name()).ok();
+        let path = self.path();
         let state = match &path {
             None => State::Missing,
             Some(path) => {
@@ -150,7 +159,7 @@ fn has_brew() -> bool {
 pub fn missing_for_youtube() -> Option<String> {
     let missing: Vec<Tool> = Tool::ALL
         .into_iter()
-        .filter(|&tool| which::which(tool.name()).is_err() && !(tool == Tool::Deno && node_stands_in()))
+        .filter(|&tool| tool.path().is_none() && !(tool == Tool::Deno && node_stands_in()))
         .collect();
     youtube_hint(&missing, install_command(&missing), has_brew())
 }
