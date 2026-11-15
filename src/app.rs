@@ -110,6 +110,16 @@ struct FocusBlock {
     before: Duration,
 }
 
+/// The music a soundscape replaced and where it was, so `M` can bring it back.
+#[derive(Debug, Clone)]
+struct MusicBefore {
+    source: Source,
+    queue: Queue,
+    at: f64,
+    /// The source's items when it stepped aside, so what changed since reaches the queue.
+    items: Vec<Item>,
+}
+
 /// A stream that dropped partway through, retried from where it stopped until it plays again.
 #[derive(Debug, Clone, Copy)]
 struct Reconnect {
@@ -187,8 +197,7 @@ pub struct App {
     /// Where the current stream started, so `position` minus this is how much of it has played.
     stream_from: f64,
     resume_at: Option<f64>,
-    /// The music a soundscape replaced and where it was, so `M` can bring it back.
-    music_before: Option<(Source, Queue, f64)>,
+    music_before: Option<MusicBefore>,
     pending_seek: Option<(f64, Instant)>,
     pending_resolve: Option<(String, f64, Instant)>,
     next_inspection: u64,
@@ -799,7 +808,12 @@ impl App {
 
     fn enter_soundscape(&mut self) {
         if self.source != Source::Soundscape {
-            self.music_before = Some((self.source.clone(), self.queue.clone(), self.position()));
+            self.music_before = Some(MusicBefore {
+                source: self.source.clone(),
+                queue: self.queue.clone(),
+                at: self.position(),
+                items: self.items_for(&self.source),
+            });
         }
         self.choices += 1;
         self.stop_stream();
@@ -862,13 +876,19 @@ impl App {
             return self.enter_soundscape();
         }
         match self.music_before.take() {
-            Some((source, queue, at)) => {
-                self.source = source;
-                self.queue = queue;
-                self.resume_at = (at > 0.0).then_some(at);
+            Some(before) => {
+                let (shuffle, repeat) = (self.queue.shuffle, self.queue.repeat);
+                self.source = before.source;
+                self.queue = before.queue;
+                self.queue.repeat = repeat;
+                if self.queue.shuffle != shuffle {
+                    self.queue.set_shuffle(shuffle);
+                }
+                self.resume_at = (before.at > 0.0).then_some(before.at);
                 self.refresh_ambience();
                 self.events.push(Event::TrackChanged);
                 self.load_cover();
+                self.reconcile_queue(&before.items);
             }
             None => self.restore_playback(&Playback::default()),
         }
@@ -2779,15 +2799,18 @@ mod tests {
 
         app.dispatch(Action::SetLevel("noise-brown".into(), 40));
         app.resume_at = Some(42.0);
+        let repeat = app.queue.repeat;
         app.dispatch(Action::ToggleMusic);
         assert_eq!(
             (&app.source, app.current(), app.is_playing()),
             (&Source::Soundscape, None, true)
         );
         assert_eq!(app.levels.get("noise-brown"), Some(&40));
+        app.dispatch(Action::CycleRepeat);
 
         app.dispatch(Action::ToggleMusic);
         assert_eq!((&app.source, app.current()), (&Source::Tracks, track.as_ref()));
+        assert_eq!(app.queue.repeat, repeat.cycled());
         assert_eq!(app.position(), 42.0);
         assert_eq!(app.levels.get("noise-brown"), Some(&40));
         assert!(app.queue.upcoming().any(|item| *item == added));
