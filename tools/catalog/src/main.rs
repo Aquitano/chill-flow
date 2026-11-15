@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail, ensure};
 use catalog_schema::{AmbientSound, Catalog, CatalogTrack};
 use clap::{Args, Parser, Subcommand};
+use url::Url;
 
 use bucket::{Bucket, IMMUTABLE, SHORT_LIVED, Upload};
 
@@ -303,14 +304,26 @@ fn validate(catalog: &Catalog) -> Result<()> {
     Ok(())
 }
 
-/// Reads a catalog file. Only the main catalog may leave out `url`: any other file without one
-/// would upload to the bucket root and replace the main catalog's files.
+/// Reads a catalog file. Only the main catalog may leave out `url` or point it at the main
+/// catalog: any other file doing so would upload to the bucket root and replace the main
+/// catalog's files.
 fn load(path: &Path) -> Result<Catalog> {
     let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let malformed = || format!("{} is malformed", path.display());
     let catalog = Catalog::parse(&text, catalog_schema::DEFAULT_URL).with_context(malformed)?;
     match &catalog.url {
-        Some(url) => Catalog::parse(&text, url).with_context(malformed),
+        Some(url) => {
+            let catalog = Catalog::parse(&text, url).with_context(malformed)?;
+            // Compared as parsed URLs, since the bucket's upload URL resolves `.` and `..` too.
+            let replaces_main = Url::parse(&catalog.url(url)).ok() == Url::parse(catalog_schema::DEFAULT_URL).ok();
+            ensure!(
+                !replaces_main || is_main(path),
+                "{}'s url is the main catalog's, so publishing it would replace the main catalog; start it with \
+                 `chill-catalog new`",
+                path.display()
+            );
+            Ok(catalog)
+        }
         None if is_main(path) => Ok(catalog),
         None => bail!(
             "{} has no url, so it would replace the main catalog; start it with `chill-catalog new`",
@@ -470,6 +483,13 @@ mod tests {
         assert!(
             load(&path).is_err(),
             "a file without a url would publish over the main catalog"
+        );
+        let mut main_url = catalog.clone();
+        main_url.url = Some(format!("{}c/../catalog.json", public_base()));
+        std::fs::write(&path, main_url.to_json()).unwrap();
+        assert!(
+            load(&path).is_err(),
+            "a file with the main catalog's url would publish over it"
         );
         std::fs::write(&path, catalog.to_json()).unwrap();
         catalog = load(&path).unwrap();
