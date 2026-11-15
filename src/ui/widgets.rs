@@ -286,30 +286,28 @@ pub fn dim(buf: &mut Buffer, area: Rect, amount: f32, theme: &Theme, keep: Optio
                 continue;
             }
             let Some(cell) = buf.cell_mut((x, y)) else { continue };
-            if theme.has_rgb() {
-                let fg = toward_background(cell.fg, amount, theme);
-                let bg = toward_background(cell.bg, amount, theme);
-                cell.set_fg(fg).set_bg(bg);
-            } else if amount > 0.3 {
-                cell.modifier.insert(Modifier::DIM);
+            if let Some(bg) = toward_background(cell.bg, theme.background(), amount, theme) {
+                cell.set_bg(bg);
+            }
+            match toward_background(cell.fg, theme.text(), amount, theme) {
+                Some(fg) => {
+                    cell.set_fg(fg);
+                }
+                None if amount > 0.3 => cell.modifier.insert(Modifier::DIM),
+                None => {}
             }
         }
     }
 }
 
-fn toward_background(color: Color, amount: f32, theme: &Theme) -> Color {
-    let (Color::Rgb(r, g, b), Color::Rgb(br, bg, bb)) = (resolve(color, theme), theme.background()) else {
-        return color;
+/// `None` when the color comes from the terminal's palette rather than RGB this app knows.
+fn toward_background(color: Color, reset: Color, amount: f32, theme: &Theme) -> Option<Color> {
+    let resolved = if color == Color::Reset { reset } else { color };
+    let (Color::Rgb(r, g, b), Color::Rgb(br, bg, bb)) = (resolved, theme.background()) else {
+        return None;
     };
     let mix = |from: u8, to: u8| (f32::from(from) + (f32::from(to) - f32::from(from)) * amount).round() as u8;
-    Color::Rgb(mix(r, br), mix(g, bg), mix(b, bb))
-}
-
-fn resolve(color: Color, theme: &Theme) -> Color {
-    match color {
-        Color::Reset => theme.text(),
-        other => other,
-    }
+    Some(Color::Rgb(mix(r, br), mix(g, bg), mix(b, bb)))
 }
 
 #[cfg(test)]
@@ -337,5 +335,18 @@ mod tests {
         meter(&mut buf, area, 0.375, Style::new(), Style::new());
         let line: String = (0..4).map(|x| buf[(x, 0)].symbol().to_string()).collect();
         assert_eq!(line, "━╸──");
+    }
+
+    #[test]
+    fn dim_keeps_the_page_background_and_fades_palette_accents() {
+        let theme = Theme::new(Some(([200, 200, 200], [20, 20, 20])));
+        let area = Rect::new(0, 0, 2, 1);
+        let mut buf = Buffer::empty(area);
+        buf[(1, 0)].set_fg(Color::Yellow);
+        dim(&mut buf, area, 0.5, &theme, None);
+        assert_eq!(buf[(0, 0)].bg, Color::Rgb(20, 20, 20));
+        assert_eq!(buf[(0, 0)].fg, Color::Rgb(110, 110, 110));
+        assert_eq!(buf[(1, 0)].fg, Color::Yellow);
+        assert!(buf[(1, 0)].modifier.contains(Modifier::DIM));
     }
 }
