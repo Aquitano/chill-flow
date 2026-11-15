@@ -885,6 +885,11 @@ impl App {
             self.timer.start(now);
             self.track_focus(now);
         } else {
+            // A deadline that passed since the last tick still ends its phase, or the timer would
+            // pause at 0:00 with nothing left to end it.
+            if let Some(ended) = self.timer.tick(now) {
+                self.on_phase_ended(ended, true);
+            }
             self.timer.pause(now);
             self.save_focus_block(now);
             self.focus_block = None;
@@ -1122,6 +1127,9 @@ impl App {
     }
 
     fn set_timer_mode(&mut self, mode: TimerMode) {
+        if mode == self.timer.mode() {
+            return;
+        }
         let now = Instant::now();
         let was_running = self.timer.is_running();
         self.save_focus_block(now);
@@ -1191,9 +1199,7 @@ impl App {
         let Some(scene) = self.scenes.get(index).cloned() else {
             return;
         };
-        if self.timer.mode() != scene.timer {
-            self.set_timer_mode(scene.timer);
-        }
+        self.set_timer_mode(scene.timer);
         self.set_balance(scene.balance);
         self.apply_levels(&scene.levels);
         self.mix_name = self.matching_mix_name();
@@ -2061,13 +2067,17 @@ impl App {
 
     fn after_failure(&mut self) {
         self.failures_in_a_row += 1;
-        if self.failures_in_a_row >= 3 || self.queue.upcoming().next().is_none() {
-            self.failures_in_a_row = 0;
-            self.music_ended();
-            return;
-        }
-        if let Some(item) = self.queue.next().cloned() {
-            self.start(item, 0.0);
+        let next = if self.failures_in_a_row >= 3 {
+            None
+        } else {
+            self.queue.next().cloned()
+        };
+        match next {
+            Some(item) => self.start(item, 0.0),
+            None => {
+                self.failures_in_a_row = 0;
+                self.music_ended();
+            }
         }
     }
 
@@ -2860,6 +2870,36 @@ mod tests {
         app.handle_engine(EngineEvent::Failed("HTTP error 404 Not Found".into()));
 
         assert_eq!(app.current().unwrap().key, "r2:next");
+    }
+
+    #[test]
+    fn a_failing_last_track_wraps_around_under_repeat_all() {
+        let mut app = app();
+        let mut next = app.catalog.tracks[0].clone();
+        next.id = "next".into();
+        app.catalog.tracks.push(next);
+        app.fill_queue(&Source::Tracks, None);
+        app.queue.repeat = crate::model::Repeat::All;
+        let first = app.current().unwrap().clone();
+        let last = app.queue.next().unwrap().clone();
+
+        app.start(last, 0.0);
+        app.handle_engine(EngineEvent::Failed("HTTP error 404 Not Found".into()));
+
+        assert_eq!(app.current(), Some(&first));
+    }
+
+    #[test]
+    fn pausing_after_the_deadline_ends_the_phase_instead_of_holding_it_at_zero() {
+        let mut app = app();
+        let start = Instant::now();
+        app.set_timer_running_at(true, start);
+        let late = start + app.timer.phase_length() + Duration::from_millis(100);
+
+        app.set_timer_running_at(false, late);
+
+        assert!(!app.timer.is_running());
+        assert_eq!(app.timer.remaining(late), app.timer.phase_length());
     }
 
     #[test]
