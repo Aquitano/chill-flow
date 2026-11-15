@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Release runs these checks on the tagged commit before it publishes anything.
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
 
 concurrency:
   group: ci-${{ github.ref }}
