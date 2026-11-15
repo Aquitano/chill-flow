@@ -212,10 +212,16 @@ pub fn footer(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
         if app.side_hidden {
             hints.push(("L", "ambience", Some(Action::ToggleSidePanel)));
         }
-        hints.extend(match ui.focus {
-            Panel::Library => [("enter", "play", None), ("a", "queue", None), ("/", "filter", None)],
-            Panel::Queue => [("enter", "jump", None), ("J/K", "move", None), ("d", "remove", None)],
-            Panel::Ambience => [
+        hints.extend(match (ui.focus, app.tab) {
+            (Panel::Library, Tab::Sounds) => vec![
+                ("enter", "ambience only", None),
+                ("a", "with music", None),
+                ("/", "filter", None),
+            ],
+            (Panel::Library, Tab::Scenes) => vec![("enter", "load", None), ("/", "filter", None)],
+            (Panel::Library, _) => vec![("enter", "play", None), ("a", "queue", None), ("/", "filter", None)],
+            (Panel::Queue, _) => vec![("enter", "jump", None), ("J/K", "move", None), ("d", "remove", None)],
+            (Panel::Ambience, _) => vec![
                 ("h/l", "level", None),
                 ("0", "mute", None),
                 ("[ ]", "mix", Some(Action::CycleMix(1))),
@@ -308,21 +314,22 @@ pub fn library(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instan
     };
     let mut x = inner.x + if gap == 2 { 1 } else { 0 };
     for tab in Tab::ALL {
-        let width = tab.label().width() as u16;
-        if x + width > inner.right() {
-            break;
+        let rect = Rect::new(x, inner.y, tab.label().width() as u16, 1);
+        let fits = rect.right() <= inner.right();
+        if fits {
+            let style = if app.tab == tab {
+                Style::new().fg(theme.text()).add_modifier(Modifier::BOLD)
+            } else if ui.hovered(rect) {
+                Style::new().fg(theme.text())
+            } else {
+                Style::new().fg(theme.muted())
+            };
+            put(buf, x, inner.y, tab.label(), style);
+            ui.hit(rect, Hit::Act(Action::ShowTab(tab)));
         }
-        let rect = Rect::new(x, inner.y, width, 1);
-        let style = if app.tab == tab {
-            Style::new().fg(theme.text()).add_modifier(Modifier::BOLD)
-        } else if ui.hovered(rect) {
-            Style::new().fg(theme.text())
-        } else {
-            Style::new().fg(theme.muted())
-        };
-        put(buf, x, inner.y, tab.label(), style);
-        ui.hit(rect, Hit::Act(Action::ShowTab(tab)));
         if app.tab == tab {
+            // An active tab with no room still moves the underline, off the right edge.
+            let (x, width) = if fits { (x, rect.width) } else { (inner.right(), 0) };
             let duration = ui.duration(TAB_SLIDE);
             if ui.tab_width.target() == 0.0 {
                 ui.tab_x.jump(f32::from(x));
@@ -331,7 +338,7 @@ pub fn library(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instan
             ui.tab_x.set(f32::from(x), now, duration);
             ui.tab_width.set(f32::from(width), now, duration);
         }
-        x += width + gap;
+        x += rect.width + gap;
     }
     let rule = Rect::new(inner.x, inner.y + 1, inner.width, 1);
     for column in rule.left()..rule.right() {

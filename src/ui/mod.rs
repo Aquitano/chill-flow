@@ -448,7 +448,7 @@ impl Ui {
             let library_width = if app.library_hidden {
                 0
             } else {
-                (body.width * 30 / 100).clamp(34, 50)
+                (body.width * 30 / 100).clamp(36, 50)
             };
             let side_width = if app.side_hidden { 0 } else { 40 };
             let [library, center, side] = Layout::horizontal([
@@ -800,6 +800,26 @@ mod tests {
         assert_eq!(listed(KeyHints::All, &mut app), [true, true]);
         assert_eq!(listed(KeyHints::Essentials, &mut app), [true, false]);
         assert_eq!(listed(KeyHints::Off, &mut app), [false, false]);
+    }
+
+    #[test]
+    fn the_bottom_bar_says_what_enter_and_a_do_on_each_tab() {
+        let mut app = offline_app();
+        app.config.key_hints = KeyHints::All;
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), true);
+        let mut terminal = Terminal::new(TestBackend::new(160, 30)).unwrap();
+        for (tab, hints) in [
+            (Tab::Tracks, "enter play   a queue   / filter"),
+            (Tab::Sounds, "enter ambience only   a with music   / filter"),
+            (Tab::Scenes, "enter load   / filter"),
+        ] {
+            app.tab = tab;
+            terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+            let footer: String = (0..160)
+                .map(|x| terminal.backend().buffer()[(x, 29)].symbol())
+                .collect();
+            assert!(footer.contains(hints), "{footer}");
+        }
     }
 
     #[test]
@@ -1297,6 +1317,41 @@ mod tests {
                 }),
             );
             assert!(!app.library_hidden);
+        }
+    }
+
+    #[test]
+    fn every_library_tab_fits_and_the_underline_follows_the_active_one() {
+        for width in [30].into_iter().chain(84..=125) {
+            let mut app = offline_app();
+            app.config.reduce_motion = true;
+            let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), true);
+            let mut terminal = Terminal::new(TestBackend::new(width, 30)).unwrap();
+            let tab = |ui: &Ui, tab: Tab| {
+                ui.hits
+                    .iter()
+                    .find(|(_, hit)| *hit == Hit::Act(Action::ShowTab(tab)))
+                    .map(|(rect, _)| *rect)
+            };
+            terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+            assert_eq!(tab(&ui, Tab::Scenes).is_some(), width > 30, "{width}");
+            input::handle(
+                &mut app,
+                &mut ui,
+                Event::Key(KeyEvent::new(KeyCode::Char('5'), KeyModifiers::NONE)),
+            );
+            terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+            let rule = tab(&ui, Tab::Tracks).unwrap().y + 1;
+            let (library, _) = ui
+                .hits
+                .iter()
+                .find(|(_, hit)| *hit == Hit::Panel(Panel::Library))
+                .unwrap();
+            let underline: Vec<u16> = (library.left()..library.right())
+                .filter(|&x| terminal.backend().buffer()[(x, rule)].symbol() == "━")
+                .collect();
+            let expected: Vec<u16> = tab(&ui, Tab::Scenes).map_or(vec![], |rect| (rect.x..rect.right()).collect());
+            assert_eq!(underline, expected, "{width}");
         }
     }
 
