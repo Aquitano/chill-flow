@@ -272,10 +272,11 @@ pub fn draw(buf: &mut Buffer, screen: Rect, app: &App, ui: &mut Ui, now: Instant
     match &mut overlay {
         Overlay::Palette { query, selected } => palette(&mut layer, screen, app, ui, query, *selected),
         Overlay::Prompt { kind, input } => prompt(&mut layer, screen, ui, *kind, input),
-        Overlay::Confirm { message, .. } => confirm(&mut layer, screen, ui, message),
+        Overlay::Confirm { message, action } => confirm(&mut layer, screen, ui, message, action),
         Overlay::Help { scroll } => help(&mut layer, screen, app, ui, scroll),
         Overlay::Diagnostics { selected, scroll } => diagnostics(&mut layer, screen, app, ui, *selected, scroll),
         Overlay::Stats => stats(&mut layer, screen, app, ui, now),
+        Overlay::SyncKey(key) => sync_key(&mut layer, screen, ui, key),
         Overlay::Settings { selected, query } => settings(&mut layer, screen, app, ui, *selected, query.as_deref()),
     }
     if let Some(area) = ui.dialog_area.take() {
@@ -378,11 +379,18 @@ fn prompt(buf: &mut Buffer, screen: Rect, ui: &mut Ui, kind: Prompt, input: &str
     );
 }
 
-fn confirm(buf: &mut Buffer, screen: Rect, ui: &mut Ui, message: &str) {
+fn confirm(buf: &mut Buffer, screen: Rect, ui: &mut Ui, message: &str, action: &Action) {
     let theme = ui.theme;
-    let width = (message.width() as u16 + 8).clamp(44, 72);
-    let lines = wrap(message, usize::from(width - 6), 2);
-    let content = dialog(buf, screen, width, lines.len() as u16 + 6, None, "Remove", ui);
+    let (title, verb) = match action {
+        Action::LeaveSync => ("Turn off sync", "turn off"),
+        Action::EraseSyncData => ("Delete sync data", "delete"),
+        _ => ("Remove", "remove"),
+    };
+    let width = (message.width() as u16 + 8)
+        .clamp(44, 72)
+        .min(screen.width.saturating_sub(4));
+    let lines = wrap(message, usize::from(width.saturating_sub(6)), 3);
+    let content = dialog(buf, screen, width, lines.len() as u16 + 6, None, title, ui);
     for (offset, line) in lines.iter().enumerate() {
         put(
             buf,
@@ -392,16 +400,39 @@ fn confirm(buf: &mut Buffer, screen: Rect, ui: &mut Ui, message: &str) {
             Style::new().fg(theme.text()),
         );
     }
-    key_hints(
-        buf,
-        content.x,
-        content.y + lines.len() as u16 + 1,
-        &[("enter", "remove"), ("esc", "keep")],
-        ui,
-    );
+    let y = content.y + lines.len() as u16 + 1;
+    let mut x = content.x;
+    for (key, label, hit) in [("enter", verb, Hit::Confirm), ("esc", "keep", Hit::Backdrop)] {
+        let start = x;
+        x = put(buf, x, y, key, Style::new().fg(theme.text()));
+        x = put(buf, x + 1, y, label, Style::new().fg(theme.muted()));
+        ui.hit(Rect::new(start, y, x - start, 1), hit);
+        x += 3;
+    }
 }
 
-const KEYS: [(&str, &str); 33] = [
+/// The key broken into rows of the dialog's width, since it's one long word `wrap` would cut.
+fn sync_key(buf: &mut Buffer, screen: Rect, ui: &mut Ui, key: &str) {
+    let theme = ui.theme;
+    let width = (key.width() as u16 + 6).min(screen.width.saturating_sub(4));
+    let chars: Vec<char> = key.chars().collect();
+    let lines: Vec<String> = chars
+        .chunks(usize::from(width.saturating_sub(6)).max(1))
+        .map(|chunk| chunk.iter().collect())
+        .collect();
+    let content = dialog(buf, screen, width, lines.len() as u16 + 4, None, "Sync key", ui);
+    for (offset, line) in lines.iter().enumerate() {
+        put(
+            buf,
+            content.x,
+            content.y + offset as u16,
+            line,
+            Style::new().fg(theme.text()),
+        );
+    }
+}
+
+const KEYS: [(&str, &str); 34] = [
     ("space", "play or pause the sound"),
     ("M", "music off or back on"),
     ("n / p", "next / previous"),
@@ -432,6 +463,7 @@ const KEYS: [(&str, &str); 33] = [
     ("/", "filter the library"),
     ("^p or :", "command palette"),
     ("i", "focus stats"),
+    ("D", "diagnostics"),
     ("c", "settings"),
     ("esc", "close or clear"),
     ("q", "quit"),
@@ -696,7 +728,7 @@ pub fn toasts(buf: &mut Buffer, footer: Rect, ui: &mut Ui, now: Instant) {
         }
         let area = Rect::new(x, y, footer.right().saturating_sub(x + 2).min(width), height);
         let color = match toast.tone {
-            Tone::Info => theme.calm,
+            Tone::Info | Tone::Progress => theme.calm,
             Tone::Done => theme.rest,
             Tone::Error | Tone::Warning => theme.alert,
         };

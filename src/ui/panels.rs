@@ -101,7 +101,11 @@ pub fn header(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui, now: Instant
     let timer = &app.timer;
     let timer_label = show_timer.then(|| {
         let remaining = timer.remaining(now).as_secs_f64().ceil() as u64;
-        let state = if timer.is_running() { "" } else { " paused" };
+        let state = if timer.is_running() || timer.elapsed(now).is_zero() {
+            ""
+        } else {
+            " paused"
+        };
         format!(
             "{} {:02}:{:02}{state}",
             timer.phase().label(),
@@ -637,13 +641,14 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
                 let total = item.duration.map_or(0.0, f64::from);
                 let elapsed_label = format_clock(position as u32);
                 let total_label = item.duration.map(format_clock).unwrap_or_else(|| "--:--".into());
-                let bar_x = left.x + 7;
-                let bar_width = inner.width.saturating_sub(14);
+                let label_width = elapsed_label.len().max(total_label.len());
+                let bar_x = left.x + label_width as u16 + 2;
+                let bar_width = inner.width.saturating_sub(2 * label_width as u16 + 4);
                 put(
                     buf,
                     left.x,
                     progress_y,
-                    &format!("{elapsed_label:>5}"),
+                    &format!("{elapsed_label:>label_width$}"),
                     Style::new().fg(theme.muted()),
                 );
                 put(

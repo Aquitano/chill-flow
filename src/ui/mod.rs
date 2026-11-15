@@ -65,6 +65,7 @@ pub enum Overlay {
     Confirm { message: String, action: Action },
     Help { scroll: usize },
     Stats,
+    SyncKey(String),
     Diagnostics { selected: usize, scroll: usize },
     Settings { selected: usize, query: Option<String> },
 }
@@ -95,6 +96,7 @@ pub enum Hit {
     Setting(usize),
     Backdrop,
     Dialog,
+    Confirm,
     Toast(usize),
     DiagnosticEntry(isize),
     DiagnosticScroll(isize),
@@ -247,7 +249,11 @@ impl Ui {
         if matches!(tone, Tone::Error | Tone::Warning) {
             return;
         }
-        let life = Duration::from_millis(3800);
+        let life = if tone == Tone::Progress {
+            Duration::MAX
+        } else {
+            Duration::from_millis(3800)
+        };
         self.toasts.retain(|toast| toast.message != message);
         self.toasts.push(Toast {
             tone,
@@ -924,6 +930,42 @@ mod tests {
                 .iter()
                 .any(|(rect, hit)| { rect.height == 2 && *hit == Hit::Act(Action::OpenDiagnostics) })
         );
+    }
+
+    #[test]
+    fn a_confirm_dialog_names_its_action_and_confirms_on_click() {
+        let mut app = offline_app();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), true);
+        let mut terminal = Terminal::new(TestBackend::new(90, 24)).unwrap();
+        ui.open(Overlay::Confirm {
+            message: "Turn off sync?".into(),
+            action: Action::LeaveSync,
+        });
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("Turn off sync") && rendered.contains("turn off") && !rendered.contains("Remove"));
+
+        ui.open(Overlay::Confirm {
+            message: "Start the timer?".into(),
+            action: Action::TimerToggle,
+        });
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        let confirm = ui.hits.iter().find(|(_, hit)| *hit == Hit::Confirm).unwrap().0;
+        let click = Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: confirm.x,
+            row: confirm.y,
+            modifiers: KeyModifiers::NONE,
+        });
+        input::handle(&mut app, &mut ui, click);
+        assert!(ui.overlay.is_none());
+        assert!(app.timer.is_running());
     }
 
     #[test]
