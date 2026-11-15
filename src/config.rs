@@ -17,7 +17,9 @@ pub struct Config {
     pub catalogs: Vec<String>,
     pub sync_url: String,
     pub reduce_motion: bool,
+    #[serde(deserialize_with = "known_or_default")]
     pub picture: Picture,
+    #[serde(deserialize_with = "known_or_default")]
     pub look: Look,
     pub season: Season,
     pub key_hints: KeyHints,
@@ -42,6 +44,14 @@ impl Default for Config {
             pomodoro: PomodoroSettings::default(),
         }
     }
+}
+
+/// `save` always writes the picture and look, so one only a newer chill knows reads as the default
+/// rather than stop this one from starting.
+fn known_or_default<'de, D: serde::Deserializer<'de>, T: Deserialize<'de> + Default>(
+    deserializer: D,
+) -> Result<T, D::Error> {
+    Ok(T::deserialize(deserializer).unwrap_or_default())
 }
 
 /// `path` with the home folder shown as `~`.
@@ -215,6 +225,12 @@ mod tests {
         save(&path, &config).unwrap();
         assert!(!std::fs::read_to_string(&path).unwrap().contains("season"));
         assert_eq!(load(&path).unwrap().season, Season::Auto);
+    }
+
+    #[test]
+    fn a_picture_or_look_from_a_newer_version_falls_back_to_the_default() {
+        let config: Config = toml::from_str("picture = \"aurora\"\nlook = \"sixels\"\n").unwrap();
+        assert_eq!((config.picture, config.look), (Picture::Cover, Look::Auto));
     }
 
     #[cfg(unix)]
