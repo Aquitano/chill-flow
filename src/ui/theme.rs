@@ -8,6 +8,7 @@ use ratatui::style::Color;
 #[derive(Debug, Clone, Copy)]
 pub struct Theme {
     known: Option<([u8; 3], [u8; 3])>,
+    light: bool,
     muted_at: f32,
     faint_at: f32,
     pub accent: Color,
@@ -25,22 +26,36 @@ impl Theme {
             let (br, bg, bb) = palette.background.scale_to_8bit();
             ([fr, fg, fb], [br, bg, bb])
         });
-        Theme::new(known)
+        // tmux without passthrough and some SSH setups don't answer the query, but may say
+        // whether the background is light.
+        let light = std::env::var("COLORFGBG").is_ok_and(|value| colorfgbg_is_light(&value));
+        Theme::build(known, light)
     }
 
-    /// `known` is the terminal's (foreground, background); `None` falls back to named colors.
+    #[cfg(test)]
     pub fn new(known: Option<([u8; 3], [u8; 3])>) -> Theme {
+        Theme::build(known, false)
+    }
+
+    /// `known` is the terminal's (foreground, background); `None` falls back to named colors,
+    /// with darker accents when `light` says the background is light.
+    fn build(known: Option<([u8; 3], [u8; 3])>, light: bool) -> Theme {
         let at = |target: f32, fallback: f32| known.map_or(fallback, |(fg, bg)| reach(bg, fg, bg, target));
+        let light_background = match known {
+            Some((fg, bg)) => (luminance(bg) > luminance(fg)).then_some(bg),
+            None => light.then_some([0xff; 3]),
+        };
         // Darkened toward black rather than the foreground, which keeps each hue recognizable.
-        let accent = |named: Color, hue: [u8; 3]| match known {
-            Some((fg, bg)) if luminance(bg) > luminance(fg) => {
+        let accent = |named: Color, hue: [u8; 3]| match light_background {
+            Some(bg) => {
                 let [r, g, b] = blend(hue, [0, 0, 0], reach(hue, [0, 0, 0], bg, 4.5));
                 Color::Rgb(r, g, b)
             }
-            _ => named,
+            None => named,
         };
         Theme {
             known,
+            light: light_background.is_some(),
             muted_at: at(4.5, 0.62),
             faint_at: at(3.0, 0.36),
             accent: accent(Color::Yellow, [0xd4, 0x9a, 0x0c]),
@@ -68,9 +83,10 @@ impl Theme {
         self.known.is_some()
     }
 
-    /// Dark text on a light background. An unknown theme counts as dark.
+    /// Dark text on a light background. An unknown theme counts as dark unless `COLORFGBG`
+    /// says otherwise.
     pub fn is_light(&self) -> bool {
-        self.known.is_some_and(|(fg, bg)| luminance(bg) > luminance(fg))
+        self.light
     }
 
     pub fn text(&self) -> Color {
@@ -130,6 +146,12 @@ impl Theme {
             None => Color::Reset,
         }
     }
+}
+
+/// `COLORFGBG` is "fg;bg" or "fg;default;bg" in ANSI indexes, where white and bright white are
+/// the light backgrounds.
+fn colorfgbg_is_light(value: &str) -> bool {
+    matches!(value.rsplit(';').next().map(str::parse::<u8>), Some(Ok(7 | 15)))
 }
 
 fn luminance(color: [u8; 3]) -> f32 {
@@ -194,12 +216,27 @@ mod tests {
     #[test]
     fn accents_read_as_text_on_light_themes_and_keep_the_palette_on_dark_ones() {
         let (fg, bg) = ([0x00, 0x00, 0x00], [0xff, 0xff, 0xff]);
-        let light = Theme::new(Some((fg, bg)));
-        for accent in [light.accent, light.rest, light.alert, light.calm] {
-            let Color::Rgb(r, g, b) = accent else { unreachable!() };
-            assert!(contrast([r, g, b], bg) >= 4.5);
+        for light in [Theme::new(Some((fg, bg))), Theme::build(None, true)] {
+            for accent in [light.accent, light.rest, light.alert, light.calm] {
+                let Color::Rgb(r, g, b) = accent else { unreachable!() };
+                assert!(contrast([r, g, b], bg) >= 4.5);
+            }
         }
         let dark = Theme::new(Some(([0xcd, 0xd6, 0xf4], [0x1e, 0x1e, 0x2e])));
         assert_eq!(dark.accent, Color::Yellow);
+    }
+
+    #[test]
+    fn colorfgbg_counts_only_a_white_background_as_light() {
+        for (value, light) in [
+            ("0;15", true),
+            ("0;default;7", true),
+            ("15;0", false),
+            ("7;8", false),
+            ("0;default", false),
+            ("", false),
+        ] {
+            assert_eq!(colorfgbg_is_light(value), light, "{value}");
+        }
     }
 }

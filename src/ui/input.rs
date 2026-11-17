@@ -4,7 +4,7 @@ use ratatui::layout::Rect;
 use super::overlay;
 use super::{Drag, Hit, Overlay, Slider, Ui};
 use crate::action::{Action, Panel, Prompt, Removal, Setting, Tab};
-use crate::app::{App, Tone};
+use crate::app::App;
 use crate::youtube;
 
 /// Folds a burst of plain characters into one paste. Windows consoles deliver a paste as
@@ -50,9 +50,16 @@ pub fn coalesce(events: Vec<Event>) -> Vec<Event> {
 
 pub fn handle(app: &mut App, ui: &mut Ui, event: Event) {
     match event {
-        Event::Key(key) if key.kind != KeyEventKind::Release => key_pressed(app, ui, key),
+        Event::Key(key) if key.kind != KeyEventKind::Release => {
+            // A key can move the selection or refilter the rows, so the next click starts over.
+            ui.last_click = None;
+            key_pressed(app, ui, key);
+        }
         Event::Mouse(mouse) => mouse_event(app, ui, mouse),
-        Event::Paste(text) => pasted(app, ui, &text),
+        Event::Paste(text) => {
+            ui.last_click = None;
+            pasted(app, ui, &text);
+        }
         _ => {}
     }
 }
@@ -129,13 +136,13 @@ pub fn apply(app: &mut App, ui: &mut Ui, action: Action) {
         }),
         Action::CopySyncKey => {
             if let Some(key) = app.sync_key().map(str::to_string) {
-                // OSC 52 reaches the system clipboard in Ghostty and Windows Terminal; the toast
-                // shows the key too, for terminals that ignore it.
+                // OSC 52 reaches the system clipboard in Ghostty and Windows Terminal; the dialog
+                // shows the whole key too, for terminals that ignore it.
                 let _ = crossterm::execute!(
                     std::io::stdout(),
                     crossterm::clipboard::CopyToClipboard::to_clipboard_from(&key)
                 );
-                app.toast(Tone::Done, format!("Copied the sync key: {key}"));
+                ui.open(Overlay::SyncKey(key));
             }
         }
         Action::Remove(Removal::Catalog(url)) => {
@@ -451,6 +458,11 @@ fn overlay_key(app: &mut App, ui: &mut Ui, key: KeyEvent) {
                 ui.close();
             }
         }
+        Overlay::SyncKey(_) => {
+            if matches!(key.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) {
+                ui.close();
+            }
+        }
         Overlay::Diagnostics { selected, scroll } => match key.code {
             KeyCode::Esc | KeyCode::Char('q' | 'D') => ui.close(),
             KeyCode::Enter | KeyCode::Char('d') => app.dispatch(Action::DismissDiagnostic(*selected)),
@@ -585,6 +597,7 @@ fn click(app: &mut App, ui: &mut Ui, rect: Rect, hit: Hit, x: u16) {
         Hit::Act(action) => apply(app, ui, action),
         Hit::Row(index) => {
             let tab = app.tab.index();
+            let again = again && ui.selected[tab] == index;
             ui.selected[tab] = index;
             ui.set_focus(Panel::Library);
             if again {
@@ -593,6 +606,7 @@ fn click(app: &mut App, ui: &mut Ui, rect: Rect, hit: Hit, x: u16) {
             }
         }
         Hit::Queue(index) => {
+            let again = again && ui.queue_selected == index;
             ui.queue_selected = index;
             ui.set_focus(Panel::Queue);
             if again {
@@ -638,6 +652,13 @@ fn click(app: &mut App, ui: &mut Ui, rect: Rect, hit: Hit, x: u16) {
         }
         Hit::Backdrop => ui.close(),
         Hit::Dialog => {}
+        Hit::Confirm => {
+            if let Some(Overlay::Confirm { action, .. }) = &ui.overlay {
+                let action = action.clone();
+                ui.close();
+                app.dispatch(action);
+            }
+        }
         Hit::Toast(index) => ui.dismiss_toast(index),
         Hit::DiagnosticEntry(step) => {
             if let Some(Overlay::Diagnostics { selected, scroll }) = &mut ui.overlay {

@@ -65,6 +65,7 @@ pub enum Overlay {
     Confirm { message: String, action: Action },
     Help { scroll: usize },
     Stats,
+    SyncKey(String),
     Diagnostics { selected: usize, scroll: usize },
     Settings { selected: usize, query: Option<String> },
 }
@@ -95,6 +96,7 @@ pub enum Hit {
     Setting(usize),
     Backdrop,
     Dialog,
+    Confirm,
     Toast(usize),
     DiagnosticEntry(isize),
     DiagnosticScroll(isize),
@@ -247,7 +249,11 @@ impl Ui {
         if matches!(tone, Tone::Error | Tone::Warning) {
             return;
         }
-        let life = Duration::from_millis(3800);
+        let life = if tone == Tone::Progress {
+            Duration::MAX
+        } else {
+            Duration::from_millis(3800)
+        };
         self.toasts.retain(|toast| toast.message != message);
         self.toasts.push(Toast {
             tone,
@@ -442,7 +448,7 @@ impl Ui {
             let library_width = if app.library_hidden {
                 0
             } else {
-                (body.width * 30 / 100).clamp(34, 50)
+                (body.width * 30 / 100).clamp(36, 50)
             };
             let side_width = if app.side_hidden { 0 } else { 40 };
             let [library, center, side] = Layout::horizontal([
@@ -797,6 +803,26 @@ mod tests {
     }
 
     #[test]
+    fn the_bottom_bar_says_what_enter_and_a_do_on_each_tab() {
+        let mut app = offline_app();
+        app.config.key_hints = KeyHints::All;
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), true);
+        let mut terminal = Terminal::new(TestBackend::new(160, 30)).unwrap();
+        for (tab, hints) in [
+            (Tab::Tracks, "enter play   a queue   / filter"),
+            (Tab::Sounds, "enter ambience only   a mix in   / filter"),
+            (Tab::Scenes, "enter load   / filter"),
+        ] {
+            app.tab = tab;
+            terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+            let footer: String = (0..160)
+                .map(|x| terminal.backend().buffer()[(x, 29)].symbol())
+                .collect();
+            assert!(footer.contains(hints), "{footer}");
+        }
+    }
+
+    #[test]
     fn a_dialog_dims_the_page_in_its_first_frame() {
         let mut app = offline_app();
         let theme = Theme::new(Some(([205, 214, 244], [30, 30, 46])));
@@ -924,6 +950,64 @@ mod tests {
                 .iter()
                 .any(|(rect, hit)| { rect.height == 2 && *hit == Hit::Act(Action::OpenDiagnostics) })
         );
+    }
+
+    #[test]
+    fn a_key_between_two_clicks_on_a_row_makes_the_second_a_first_click() {
+        let mut app = offline_app();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), true);
+        let mut terminal = Terminal::new(TestBackend::new(160, 40)).unwrap();
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        let row = ui.hits.iter().find(|(_, hit)| *hit == Hit::Row(0)).unwrap().0;
+        let click = Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: row.x,
+            row: row.y,
+            modifiers: KeyModifiers::NONE,
+        });
+        let key = Event::Key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+
+        input::handle(&mut app, &mut ui, click.clone());
+        input::handle(&mut app, &mut ui, key);
+        input::handle(&mut app, &mut ui, click);
+
+        assert_eq!(ui.last_click, Some(Hit::Row(0)));
+    }
+
+    #[test]
+    fn a_confirm_dialog_names_its_action_and_confirms_on_click() {
+        let mut app = offline_app();
+        let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), true);
+        let mut terminal = Terminal::new(TestBackend::new(90, 24)).unwrap();
+        ui.open(Overlay::Confirm {
+            message: "Turn off sync?".into(),
+            action: Action::LeaveSync,
+        });
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("Turn off sync") && rendered.contains("turn off") && !rendered.contains("Remove"));
+
+        ui.open(Overlay::Confirm {
+            message: "Start the timer?".into(),
+            action: Action::TimerToggle,
+        });
+        terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+        let confirm = ui.hits.iter().find(|(_, hit)| *hit == Hit::Confirm).unwrap().0;
+        let click = Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: confirm.x,
+            row: confirm.y,
+            modifiers: KeyModifiers::NONE,
+        });
+        input::handle(&mut app, &mut ui, click);
+        assert!(ui.overlay.is_none());
+        assert!(app.timer.is_running());
     }
 
     #[test]
@@ -1255,6 +1339,41 @@ mod tests {
                 }),
             );
             assert!(!app.library_hidden);
+        }
+    }
+
+    #[test]
+    fn every_library_tab_fits_and_the_underline_follows_the_active_one() {
+        for width in [30].into_iter().chain(84..=125) {
+            let mut app = offline_app();
+            app.config.reduce_motion = true;
+            let mut ui = Ui::new(Theme::new(None), Picker::halfblocks(), true);
+            let mut terminal = Terminal::new(TestBackend::new(width, 30)).unwrap();
+            let tab = |ui: &Ui, tab: Tab| {
+                ui.hits
+                    .iter()
+                    .find(|(_, hit)| *hit == Hit::Act(Action::ShowTab(tab)))
+                    .map(|(rect, _)| *rect)
+            };
+            terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+            assert_eq!(tab(&ui, Tab::Scenes).is_some(), width > 30, "{width}");
+            input::handle(
+                &mut app,
+                &mut ui,
+                Event::Key(KeyEvent::new(KeyCode::Char('5'), KeyModifiers::NONE)),
+            );
+            terminal.draw(|frame| ui.draw(frame, &mut app)).unwrap();
+            let rule = tab(&ui, Tab::Tracks).unwrap().y + 1;
+            let (library, _) = ui
+                .hits
+                .iter()
+                .find(|(_, hit)| *hit == Hit::Panel(Panel::Library))
+                .unwrap();
+            let underline: Vec<u16> = (library.left()..library.right())
+                .filter(|&x| terminal.backend().buffer()[(x, rule)].symbol() == "━")
+                .collect();
+            let expected: Vec<u16> = tab(&ui, Tab::Scenes).map_or(vec![], |rect| (rect.x..rect.right()).collect());
+            assert_eq!(underline, expected, "{width}");
         }
     }
 

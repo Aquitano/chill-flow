@@ -76,6 +76,8 @@ pub enum Stream {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tone {
     Info,
+    /// Work under way, shown until its `DismissToast` arrives.
+    Progress,
     Done,
     Error,
     Warning,
@@ -1442,7 +1444,7 @@ impl App {
         if let Some(previous) = self.inspection.take() {
             self.events.push(Event::DismissToast(previous.purpose.progress()));
         }
-        self.toast(Tone::Info, purpose.progress());
+        self.toast(Tone::Progress, purpose.progress());
         self.next_inspection += 1;
         let (jobs, id) = (self.jobs.clone(), self.next_inspection);
         let lookup = youtube::inspect(url, move |result| {
