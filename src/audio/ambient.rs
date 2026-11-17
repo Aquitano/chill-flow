@@ -3,7 +3,6 @@ use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::Duration;
@@ -16,6 +15,7 @@ use super::{EngineEvent, LoopSource, file};
 const SEAM_SECS: f32 = 0.5;
 const QUIET_WINDOW_SECS: f32 = 0.05;
 const QUIET_POWER_RATIO: f64 = 0.01;
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub(super) struct LoadedLoop {
     pub(super) samples: Box<[i16]>,
@@ -97,22 +97,45 @@ fn cached_file(url: &str, cache_dir: &Path) -> Result<PathBuf, String> {
     fs::create_dir_all(&dir).map_err(io_error)?;
     let response = ureq::get(url)
         .config()
-        .timeout_global(Some(Duration::from_secs(60)))
+        .timeout_global(Some(DOWNLOAD_TIMEOUT))
         .build()
         .call()
         .map_err(|error| format!("could not download {name}: {error}"))?;
     // Each download writes a partial file of its own, so two loads of one sound can't interleave.
-    static DOWNLOADS: AtomicU64 = AtomicU64::new(0);
-    let download = DOWNLOADS.fetch_add(1, Ordering::Relaxed);
-    let partial = dir.join(format!("{name}.{}-{download}.part", std::process::id()));
-    let written = File::create(&partial)
-        .and_then(|mut file| io::copy(&mut response.into_body().into_reader(), &mut file))
-        .and_then(|_| fs::rename(&partial, &path));
-    if let Err(error) = written {
-        let _ = fs::remove_file(&partial);
-        return Err(io_error(error));
-    }
+    let mut partial = tempfile::Builder::new()
+        .suffix(".part")
+        .tempfile_in(&dir)
+        .map_err(io_error)?;
+    io::copy(&mut response.into_body().into_reader(), &mut partial).map_err(io_error)?;
+    partial.persist(&path).map_err(|error| io_error(error.error))?;
     Ok(path)
+}
+
+/// Deletes, once the download timeout has passed, partial files that an earlier chill quit in the
+/// middle of, which no destructor got to.
+pub(super) fn remove_abandoned_downloads_later(cache_dir: &Path) {
+    let dir = cache_dir.join("ambient");
+    thread::spawn(move || {
+        thread::sleep(DOWNLOAD_TIMEOUT);
+        remove_abandoned_downloads(&dir);
+    });
+}
+
+/// One older than the download timeout can't belong to a download still running, in this chill
+/// or another.
+fn remove_abandoned_downloads(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let abandoned = path.extension().is_some_and(|extension| extension == "part")
+            && entry
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .is_ok_and(|modified| modified.elapsed().is_ok_and(|age| age > DOWNLOAD_TIMEOUT));
+        if abandoned {
+            let _ = fs::remove_file(path);
+        }
+    }
 }
 
 fn cache_name(url: &str) -> Option<String> {
@@ -265,6 +288,28 @@ mod tests {
         assert!(load(&source, cache.path(), 48_000, &off).unwrap().is_none());
         // Giving up retired the level, so turning the sound up again starts a fresh load.
         assert!(!off.set(0.5));
+    }
+
+    #[test]
+    fn only_partial_downloads_older_than_the_timeout_are_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = |name: &str, age: Duration| {
+            let path = dir.path().join(name);
+            File::create(&path)
+                .unwrap()
+                .set_modified(std::time::SystemTime::now() - age)
+                .unwrap();
+            path
+        };
+        let abandoned = file("rain.123-0.part", DOWNLOAD_TIMEOUT * 2);
+        let running = file("wind.part", Duration::ZERO);
+        let cached = file("rain", DOWNLOAD_TIMEOUT * 2);
+
+        remove_abandoned_downloads(dir.path());
+
+        assert!(!abandoned.exists());
+        assert!(running.exists());
+        assert!(cached.exists());
     }
 
     #[test]

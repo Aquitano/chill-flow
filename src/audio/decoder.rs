@@ -233,8 +233,8 @@ impl Reader {
 fn collect_last_line(stderr: ChildStderr) -> JoinHandle<String> {
     thread::spawn(move || {
         let mut last = String::new();
-        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-            if let Some(line) = ffmpeg::last_line(&line) {
+        for line in BufReader::new(stderr).split(b'\n').map_while(Result::ok) {
+            if let Some(line) = ffmpeg::last_line(&String::from_utf8_lossy(&line)) {
                 last = line.to_owned();
             }
         }

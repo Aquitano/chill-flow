@@ -18,8 +18,8 @@ use symphonia::core::units::Time;
 
 use super::mixer::MusicState;
 
-/// How long a download may go without a byte before playback gives up on it, so the app
-/// reconnects instead of waiting on a connection that went silent.
+/// How long a download may go without a byte, once the server has answered, before playback
+/// gives up on it, so the app reconnects instead of waiting on a connection that went silent.
 const STALL: Duration = Duration::from_secs(10);
 /// The most a file may hold, about three hours of a catalog track, so a wrong link can't fill
 /// memory.
@@ -38,7 +38,7 @@ pub(super) struct Download {
 struct Progress {
     bytes: Vec<u8>,
     end: Option<Result<(), String>>,
-    arrived_at: Instant,
+    arrived_at: Option<Instant>,
 }
 
 impl Download {
@@ -48,7 +48,7 @@ impl Download {
             progress: Mutex::new(Progress {
                 bytes: Vec::new(),
                 end: None,
-                arrived_at: Instant::now(),
+                arrived_at: None,
             }),
             arrived: Condvar::new(),
         });
@@ -83,7 +83,7 @@ impl Download {
             return false;
         }
         progress.bytes.extend_from_slice(chunk);
-        progress.arrived_at = Instant::now();
+        progress.arrived_at = Some(Instant::now());
         self.arrived.notify_all();
         true
     }
@@ -106,6 +106,11 @@ fn fetch(url: &str, download: &Weak<Download>) -> Result<(), String> {
         .build()
         .call()
         .map_err(|error| error.to_string())?;
+    // An empty arrival starts the stall clock once the server answers.
+    match download.upgrade() {
+        Some(download) if download.append(&[]) => {}
+        _ => return Ok(()),
+    }
     let mut body = response.into_body().into_with_config().limit(SIZE_LIMIT).reader();
     let mut chunk = vec![0; 64 * 1024];
     loop {
@@ -159,7 +164,7 @@ impl Read for Bytes {
             match &progress.end {
                 Some(Ok(())) => return Ok(0),
                 Some(Err(message)) => return Err(io::Error::other(message.clone())),
-                None if progress.arrived_at.elapsed() >= STALL => {
+                None if progress.arrived_at.is_some_and(|at| at.elapsed() >= STALL) => {
                     progress.end = Some(Err("the download stopped arriving".to_owned()));
                 }
                 None => {
@@ -445,7 +450,7 @@ mod tests {
             progress: Mutex::new(Progress {
                 bytes: bytes.to_vec(),
                 end,
-                arrived_at: Instant::now(),
+                arrived_at: None,
             }),
             arrived: Condvar::new(),
         })

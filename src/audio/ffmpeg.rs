@@ -1,8 +1,10 @@
 use std::io;
 use std::process::{Command, Stdio};
 
+use crate::tools::Tool;
+
 pub(super) fn command() -> Command {
-    let mut command = Command::new("ffmpeg");
+    let mut command = Tool::Ffmpeg.command();
     command
         .args(["-nostdin", "-hide_banner", "-loglevel", "error"])
         .stdin(Stdio::null());
