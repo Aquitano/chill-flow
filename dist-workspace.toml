@@ -17,3 +17,5 @@ install-path = "CARGO_HOME"
 hosting = "github"
 # Whether to install an updater program
 install-updater = false
+# Releases publish only after the checks in ci.yml pass on the tagged commit
+global-artifacts-jobs = ["./ci"]
