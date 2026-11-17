@@ -472,9 +472,13 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
     let item = app.current().cloned();
     let soundscape = app.source == Source::Soundscape;
 
-    let controls_y = inner.bottom() - 1;
-    let progress_y = controls_y.saturating_sub(2);
     let picture = app.config.picture;
+    let controls_y = if picture == Picture::Cover {
+        inner.bottom() - 1
+    } else {
+        area.bottom() - 1
+    };
+    let progress_y = controls_y.saturating_sub(if picture == Picture::Cover { 2 } else { 1 });
     let (title, artist, detail) = match (&item, soundscape) {
         (_, true) => {
             let sounds = app.sound_labels(&app.levels);
@@ -580,7 +584,7 @@ pub fn player(buf: &mut Buffer, area: Rect, app: &mut App, ui: &mut Ui, now: Ins
         }
     } else {
         // The picture reaches the panel's edges, with what's playing on a label over its sky.
-        let frame = Rect::new(area.x, area.y, area.width, progress_y.saturating_sub(area.y + 1));
+        let frame = Rect::new(area.x, area.y, area.width, progress_y.saturating_sub(area.y));
         if frame.height >= 3 {
             let weather = ui.weather(app, now);
             ui.scene.draw(buf, frame, &app.config, weather, &theme);
@@ -819,6 +823,17 @@ pub fn queue(buf: &mut Buffer, area: Rect, app: &App, ui: &mut Ui) {
     } else {
         app.queue.upcoming().collect()
     };
+    if area.height == 1 && upcoming.is_empty() {
+        let message = if app.source == Source::Soundscape {
+            "Press M or pick a track to bring the music back"
+        } else {
+            "Press a on a track to queue it"
+        };
+        let style = Style::new().fg(theme.emphasis(glow));
+        centered(buf, area, area.y, &fit(message, usize::from(area.width)), style);
+        ui.hit(area, Hit::Panel(Panel::Queue));
+        return;
+    }
     let title = if upcoming.is_empty() {
         "Up next".to_string()
     } else {

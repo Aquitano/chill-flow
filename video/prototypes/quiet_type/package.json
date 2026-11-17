@@ -1,0 +1,24 @@
+{
+  "name": "chill-quiet-type",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "build": "bun build.ts",
+    "render": "mkdir -p out/tmp && TMPDIR=\"$PWD/out/tmp\" remotion render index.tsx QuietType out/prototype.mp4 --codec h264 --crf 17 --concurrency 2 --browser-executable /home/dev/code/chill-flow/video/node_modules/.remotion/chrome-headless-shell/linux64/chrome-headless-shell-linux64/chrome-headless-shell"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.539",
+    "remotion": "4.0.539",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@fontsource/geist-sans": "5.2.5",
+    "@fontsource/geist-mono": "5.2.6",
+    "@types/bun": "1.3.11",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "typescript": "5.9.3"
+  }
+}

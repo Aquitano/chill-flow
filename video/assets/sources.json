@@ -1,0 +1,33 @@
+{
+  "player": {
+    "file": "player.svg",
+    "source": "src/ui/review.rs::export_ui_review",
+    "data": "Fixed offline sample data"
+  },
+  "music": {
+    "file": "music.mp3",
+    "source": "https://chill-data.aquitano.me/relax-recharge.mp3",
+    "title": "Relax & Recharge",
+    "artist": "UnioMystica",
+    "startSecond": 40,
+    "durationSeconds": 26
+  },
+  "rain": {
+    "file": "rain.mp3",
+    "source": "https://chill-data.aquitano.me/ambient-rain-soft.mp3",
+    "credit": "USC Cinema / Sunset Editorial Collection, CC0 1.0",
+    "durationSeconds": 21
+  },
+  "walkthrough": {
+    "file": "walkthrough.json",
+    "source": "video/capture.rs::export_walkthrough",
+    "renderer": "src/ui/mod.rs::Ui::draw_at",
+    "input": "src/ui/input.rs::handle",
+    "captureFps": 15,
+    "terminalColumns": 144,
+    "terminalRows": 40,
+    "data": "Bundled chill catalog. Scripted offline navigation with audio composed in Remotion.",
+    "scene": "Fuji at dawn",
+    "look": "Pixels"
+  }
+}

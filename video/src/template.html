@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>A quieter state. A chill film.</title>
+  <style>
+    :root { color-scheme: dark; --foreground: #e8e7e1; --muted-foreground: #a5aaa1; --border: #3a4039; --primary: #d8bb8c; --radius: 10px; --font-sans: system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--foreground); font-family: var(--font-sans); font-size: 14px; line-height: 1.55; }
+    main { max-width: 1000px; margin: 0 auto; }
+    canvas { display: block; width: 100%; height: auto; }
+    .film { background: #0a100e; padding: 16px; border-radius: var(--radius); }
+    .controls { display: flex; align-items: center; gap: 14px; margin: 12px 0 8px; }
+    button { font: inherit; color: inherit; background: transparent; cursor: pointer; border: 1px solid var(--border); border-radius: 5px; padding: 7px 12px; }
+    button:hover { border-color: var(--primary); }
+    button:active { background: var(--border); }
+    button:disabled { opacity: .5; cursor: wait; }
+    button:focus-visible, input:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 4px; }
+    #play { min-width: 135px; }
+    input { flex: 1; min-width: 0; accent-color: var(--primary); }
+    output { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted-foreground); }
+    .note { margin: 6px 0 18px; color: var(--muted-foreground); font-size: 12px; }
+    .chapters { display: grid; grid-template-columns: repeat(6, minmax(0,1fr)); gap: 5px; }
+    .chapters button { padding: 8px 4px; font-size: 11px; }
+    .chapters span { display: block; color: var(--muted-foreground); font-size: 10px; }
+    .chapters [aria-pressed="true"] { border-color: var(--primary); }
+    h2 { font-size: 23px; font-weight: 450; letter-spacing: -.025em; margin: 26px 0 8px; }
+    p { margin: 8px 0; }
+    .stills { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; margin-top: 20px; }
+    .stills figure { margin: 0; }
+    .stills canvas { border-radius: 4px; }
+    figcaption { font-size: 12px; margin-top: 7px; color: var(--muted-foreground); }
+    details { border-top: 1px solid var(--border); margin-top: 24px; padding: 12px 0; font-size: 12px; color: var(--muted-foreground); }
+    summary { cursor: pointer; color: var(--foreground); }
+    code { font-size: 12px; }
+    a { color: inherit; text-underline-offset: 3px; }
+    @media(max-width:480px) { .film{padding:8px} .controls{gap:7px} #play{min-width:106px;padding:7px} .chapters{grid-template-columns:repeat(3,minmax(0,1fr))} .stills{gap:7px} }
+  </style>
+</head>
+<body>
+  <div hidden><img id="film-ui" src="../docs/screenshot.png" alt=""><span id="film-font" data-source="__FONT_SOURCE__"></span></div>
+  <main>
+    <div class="film"><canvas id="film" width="1920" height="1080" role="img" aria-label="A quieter state, a scientific and retro film study for chill"></canvas></div>
+    <div class="controls"><button id="play" type="button" disabled>Play from start</button><input id="scrub" type="range" min="0" max="899" value="375" step="1" aria-label="Film frame"><output id="clock" for="scrub">0:12 / 0:30</output></div>
+    <p class="note" id="status">Loading the film’s type and product image.</p>
+    <div class="chapters" id="chapters">
+      <button type="button" data-frame="0">Observation<span>0–5s</span></button>
+      <button type="button" data-frame="150">Interference<span>5–10s</span></button>
+      <button type="button" data-frame="300">Letterforms<span>10–15s</span></button>
+      <button type="button" data-frame="450">Rain<span>15–20s</span></button>
+      <button type="button" data-frame="600">The instrument<span>20–25s</span></button>
+      <button type="button" data-frame="750">chill<span>25–30s</span></button>
+    </div>
+    <h2>A quieter state.</h2>
+    <p>Chill, discovered through sound. A stippled surface becomes an interference pattern. Traces resolve into the name. Terminal rain gives way to the actual instrument.</p>
+    <p>The type has its own choreography. The serif titles develop letter by letter, like ink appearing on a plate. Each stroke in <code>chill</code> is drawn by hand, then assembled from drifting points into a continuous line.</p>
+    <div class="stills">
+      <figure><canvas width="640" height="360" data-still="90" role="img" aria-label="A stippled specimen under the title A quieter state"></canvas><figcaption>Stippled sound surfaces</figcaption></figure>
+      <figure><canvas width="640" height="360" data-still="370" role="img" aria-label="Custom chill letterforms drawn on a paper-colored grid"></canvas><figcaption>Custom vector letterforms</figcaption></figure>
+      <figure><canvas width="640" height="360" data-still="660" role="img" aria-label="The actual terminal app revealed alongside An instrument for focus"></canvas><figcaption>The actual terminal app</figcaption></figure>
+    </div>
+    <p class="note">The product shot currently uses the repository’s existing screenshot. This draft establishes art direction and motion. Audio and a fresh product capture remain to be finished.</p>
+    <details><summary>TypeScript source and Remotion rendering</summary><p>The film is a Remotion composition at 1920 × 1080 and 30 fps. Its Canvas artwork is a pure function of the frame. This review player and the MP4 use the same drawing code.</p><p>From <code>video/</code>, run <code>bun install</code>, then <code>bun run studio</code> to edit the composition or <code>bun run render</code> to export the MP4. <code>bun run build</code> rebuilds this review file.</p><p><a href="https://www.youtube.com/watch?v=1f13Bl1sYkw" target="_blank" rel="noopener noreferrer">Opus 5.5</a> informs the scientific close-ups and the sense of discovery. Early terminal plotting informs the raster, trace, and letter construction. Libre Caslon Display supplies the printed titles; its open font license is included.</p></details>
+  </main>
+  <script>/* FILM_SCRIPT */</script>
+</body>
+</html>

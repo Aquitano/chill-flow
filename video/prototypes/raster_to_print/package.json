@@ -1,0 +1,23 @@
+{
+  "name": "chill-raster-to-print",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "build": "bun build.ts",
+    "render": "bun build.ts && remotion render index.tsx RasterToPrint out/prototype.mp4 --public-dir assets --browser-executable /home/dev/code/chill-flow/video/node_modules/.remotion/chrome-headless-shell/linux64/chrome-headless-shell-linux64/chrome-headless-shell --codec h264 --crf 18 --concurrency 2",
+    "poster": "remotion still index.tsx RasterToPrint out/poster.png --frame 144 --public-dir assets --browser-executable /home/dev/code/chill-flow/video/node_modules/.remotion/chrome-headless-shell/linux64/chrome-headless-shell-linux64/chrome-headless-shell"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.539",
+    "remotion": "4.0.539",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "@types/bun": "1.3.1",
+    "typescript": "5.9.3"
+  }
+}

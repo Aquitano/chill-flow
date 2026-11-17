@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>chill: four minimal motion studies</title>
+  <style>
+    :root { color-scheme: dark; --foreground:#ededeb; --muted-foreground:#a4aaa7; --border:#414440; --primary:#d8c7a4; --card:#202220; --radius:10px; --font-sans:system-ui,sans-serif; }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--foreground); font:14px/1.5 var(--font-sans); }
+    main { max-width:1000px; margin:0 auto; }
+    .stage { background:var(--card); padding:16px; border-radius:var(--radius); }
+    .frame { position:relative; }
+    .frame img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
+    canvas { display:block; width:100%; height:auto; }
+    button { color:inherit; font:inherit; cursor:pointer; background:transparent; border:1px solid var(--border); border-radius:5px; padding:7px 12px; }
+    button:hover,button[aria-pressed="true"] { border-color:var(--primary); }
+    button:focus-visible,input:focus-visible { outline:2px solid var(--primary); outline-offset:3px; }
+    button:disabled { opacity:.5; cursor:wait; }
+    .controls { display:flex; align-items:center; gap:10px; margin-top:12px; }
+    #play { min-width:68px; }
+    #scrub { min-width:0; flex:1; accent-color:var(--primary); }
+    output { color:var(--muted-foreground); font-size:12px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+    .options { display:flex; align-items:center; gap:10px; margin:10px 0; }
+    .options button { font-size:12px; padding:5px 9px; }
+    .note { margin-left:auto; color:var(--muted-foreground); font-size:12px; }
+    #description { margin:14px 0 18px; }
+    #cards { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    #cards button { min-width:0; overflow:hidden; padding:0 0 10px; text-align:left; border-radius:7px; }
+    #cards span,#cards small { display:block; margin:8px 12px 0; }
+    #cards small { margin-top:3px; font-size:12px; color:var(--muted-foreground); }
+    .footer { margin:14px 0 0; color:var(--muted-foreground); font-size:12px; }
+    @media(max-width:480px) { .stage{padding:8px} .controls{gap:6px} .controls button{padding:7px} .options{flex-wrap:wrap} .note{flex-basis:100%;margin-left:0} #cards{gap:8px} #cards small{font-size:11px} #cards span,#cards small{margin-left:8px;margin-right:8px} }
+  </style>
+</head>
+<body>
+  <div hidden><img id="ui-source" src="../../docs/screenshot.png" alt=""><img id="landscape-source" src="../../docs/pictures.png" alt=""></div>
+  <main>
+    <div class="stage"><div class="frame"><canvas id="film" width="1920" height="1080" role="img" aria-label="Film prototype"></canvas><img id="initial-poster" src="quiet_type/out/poster.png" alt="Quiet type prototype"></div></div>
+    <div class="controls"><button id="play" type="button" disabled>Play</button><input id="scrub" type="range" min="0" max="329" value="80" step="1" aria-label="Film frame"><output id="clock" for="scrub">0.0 / 11s</output></div>
+    <div class="options"><button id="play-all" type="button" disabled>Play all four</button><button id="speed" type="button" aria-pressed="false" disabled>Half speed</button><span class="note">Four independent Remotion studies. 11 seconds each. Silent.</span></div>
+    <p id="description" aria-live="polite">Loading the four studies.</p>
+    <div id="cards" aria-label="Choose a motion study">
+      <button type="button" aria-pressed="true"><div class="frame"><canvas width="640" height="360" aria-hidden="true"></canvas><img src="quiet_type/out/poster.png" alt=""></div><span>Quiet type</span><small>Counter-moving letter strokes.</small></button>
+      <button type="button" aria-pressed="false"><div class="frame"><canvas width="640" height="360" aria-hidden="true"></canvas><img src="single_horizon/out/poster.png" alt=""></div><span>Single horizon</span><small>One line opens into Fuji at dawn.</small></button>
+      <button type="button" aria-pressed="false"><div class="frame"><canvas width="640" height="360" aria-hidden="true"></canvas><img src="raster_to_print/out/poster.png" alt=""></div><span>Raster to print</span><small>Pixels settle into solid typography.</small></button>
+      <button type="button" aria-pressed="false"><div class="frame"><canvas width="640" height="360" aria-hidden="true"></canvas><img src="one_key/out/poster.png" alt=""></div><span>One key</span><small>A key becomes the opening into the app.</small></button>
+    </div>
+    <p class="footer">The product shots use the existing app screenshots. The motion, typefaces, and timing are the four agents’ original prototypes.</p>
+  </main>
+  <script type="application/json" id="font-data">__FONTS__</script>
+  <script>/* COMPARISON_SCRIPT */</script>
+</body>
+</html>
