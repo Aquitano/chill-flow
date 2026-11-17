@@ -6,7 +6,12 @@ export default defineConfig({
     cloudflareTest({
       experimental: { newConfig: true },
       miniflare: {
-        bindings: { SYNC_SECRET: "test-secret", DAILY_NEW_SPACES: "8", DAILY_CHANGES_PER_SPACE: "6000" },
+        bindings: {
+          SYNC_SECRET: "test-secret",
+          DAILY_NEW_SPACES: "1000",
+          DAILY_NEW_SPACES_PER_ADDRESS: "3",
+          DAILY_CHANGES_PER_SPACE: "6000",
+        },
         // The Worker reaches its Durable Objects through `exports`; listing their ids in a test
         // needs a named binding.
         durableObjects: { SYNC_SPACE: "SyncSpace" },

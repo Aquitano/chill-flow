@@ -99,6 +99,29 @@ impl std::fmt::Display for Gone {
 
 impl std::error::Error for Gone {}
 
+/// An answer outside 2xx, with the reason the server gave.
+#[derive(Debug)]
+struct Refusal {
+    status: u16,
+    reason: String,
+}
+
+impl Refusal {
+    /// Whether the server turned down the changes a request carried, because the space is full or
+    /// over its allowance, while it would still hand out changes from elsewhere.
+    fn of_push(&self) -> bool {
+        matches!(self.status, 429 | 507)
+    }
+}
+
+impl std::fmt::Display for Refusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "the sync server answered HTTP {}: {}", self.status, self.reason)
+    }
+}
+
+impl std::error::Error for Refusal {}
+
 /// Whether `value` is something chill can use as the synced setting `name`. Anything else from
 /// another machine is left out, so it can't sit in one library and not another.
 pub fn readable_setting(name: &str, value: &Value) -> bool {
@@ -175,16 +198,26 @@ fn run_with(store: &Store, token: &str, mut exchange: impl FnMut(u64, &[Record])
         .filter(|record| size(record) <= RECORD_LIMIT && record.id.encode_utf16().count() <= ID_LIMIT)
         .collect();
     let mut batches = batches(&outgoing).into_iter();
+    // Once the server refuses an upload, the rest of this run only takes in changes from
+    // elsewhere, then reports the refusal.
+    let mut refused = None;
     loop {
         let changes = batches.next().unwrap_or(&[]);
-        let response = exchange(cursor, changes)?;
+        let response = match exchange(cursor, changes) {
+            Err(error) if !changes.is_empty() && error.downcast_ref::<Refusal>().is_some_and(Refusal::of_push) => {
+                refused = Some(error);
+                batches = Default::default();
+                continue;
+            }
+            response => response?,
+        };
         match store.record_exchange(token, changes, &response.changes, response.cursor)? {
             Some(changed) => library_changed |= changed,
             None => return Ok(library_changed),
         }
         cursor = response.cursor;
         if !response.more && batches.len() == 0 {
-            return Ok(library_changed);
+            return refused.map_or(Ok(library_changed), Err);
         }
     }
 }
@@ -221,7 +254,7 @@ fn answer(response: Result<ureq::http::Response<ureq::Body>, ureq::Error>) -> Re
         .context("reading the sync server's answer")?;
     if !(200..300).contains(&status) {
         let reason = serde_json::from_str::<Failure>(&text).map_or(text, |failure| failure.error);
-        bail!("the sync server answered HTTP {status}: {reason}");
+        return Err(Refusal { status, reason }.into());
     }
     Ok(text)
 }
@@ -472,6 +505,31 @@ mod tests {
             }
             assert_eq!(a.snapshot(), b.snapshot(), "seed {seed}");
         }
+    }
+
+    #[test]
+    fn a_refused_upload_still_takes_in_changes_from_elsewhere_and_stays_pending() {
+        let (here, elsewhere) = (machine(), machine());
+        let mut server = Server::default();
+        elsewhere.set_liked(&item(1), true).unwrap();
+        sync(&elsewhere, &mut server);
+        here.set_liked(&item(2), true).unwrap();
+
+        let result = run_with(&here, "key", |cursor, changes| {
+            if changes.is_empty() {
+                Ok(server.exchange(cursor, changes))
+            } else {
+                Err(Refusal {
+                    status: 507,
+                    reason: "this sync space is full".into(),
+                }
+                .into())
+            }
+        });
+
+        assert!(result.unwrap_err().downcast_ref::<Refusal>().is_some());
+        assert_eq!(here.likes().unwrap().len(), 2);
+        assert_eq!(here.outgoing().unwrap().len(), 1);
     }
 
     #[test]

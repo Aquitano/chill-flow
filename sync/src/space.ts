@@ -1,4 +1,4 @@
-import { DurableObject } from "cloudflare:workers";
+import { DurableObject, exports } from "cloudflare:workers";
 import { limits, type StoredChange, type SyncFailure, type SyncRecord, type SyncResult } from "./protocol";
 
 type Row = {
@@ -28,27 +28,41 @@ class Refused extends Error {
 }
 
 export class SyncSpace extends DurableObject<Env> {
+  /**
+   * Whether the space has storage. Tokens cost nothing to mint, so a space gets storage, and
+   * counts against the day's admissions, only when it first stores a change.
+   */
+  private opened: boolean;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    ctx.blockConcurrencyWhile(async () => {
-      ctx.storage.sql.exec(`
-        CREATE TABLE IF NOT EXISTS records (
-          kind TEXT NOT NULL,
-          id TEXT NOT NULL,
-          updated_at INTEGER NOT NULL,
-          deleted INTEGER NOT NULL,
-          body TEXT NOT NULL,
-          seq INTEGER NOT NULL,
-          PRIMARY KEY (kind, id)
-        );
-        CREATE INDEX IF NOT EXISTS records_by_seq ON records (seq);
-        CREATE TABLE IF NOT EXISTS budget (day TEXT PRIMARY KEY, changes INTEGER NOT NULL);
-        CREATE TABLE IF NOT EXISTS closed (at INTEGER NOT NULL);
-      `);
-    });
+    this.opened = ctx.storage.sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'records'").toArray().length > 0;
+    if (this.opened) this.createTables();
   }
 
-  sync(cursor: number, changes: StoredChange[]): SyncResult {
+  private createTables() {
+    this.ctx.storage.sql.exec(`
+      CREATE TABLE IF NOT EXISTS records (
+        kind TEXT NOT NULL,
+        id TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        deleted INTEGER NOT NULL,
+        body TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        PRIMARY KEY (kind, id)
+      );
+      CREATE INDEX IF NOT EXISTS records_by_seq ON records (seq);
+      CREATE TABLE IF NOT EXISTS budget (day TEXT PRIMARY KEY, changes INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS closed (at INTEGER NOT NULL);
+    `);
+  }
+
+  async sync(cursor: number, changes: StoredChange[], address: string): Promise<SyncResult> {
+    if (!this.opened) {
+      if (changes.length === 0) return Response.json({ cursor, changes: [], more: false });
+      const admission = await this.ctx.blockConcurrencyWhile(() => this.open(address));
+      if (admission.type !== "admitted") return admission;
+    }
     const sql = this.ctx.storage.sql;
     if (this.isClosed()) return { type: "deleted" };
     const lostTies: StoredChange[] = [];
@@ -123,12 +137,23 @@ export class SyncSpace extends DurableObject<Env> {
    * the space is gone, rather than filling it again, and a seq is never reused.
    */
   deleteSpace() {
+    if (!this.opened) return;
     const sql = this.ctx.storage.sql;
     this.ctx.storage.transactionSync(() => {
       sql.exec("DELETE FROM records");
       sql.exec("DELETE FROM budget");
       if (!this.isClosed()) sql.exec("INSERT INTO closed (at) VALUES (?)", Date.now());
     });
+  }
+
+  private async open(address: string) {
+    if (this.opened) return { type: "admitted" } as const;
+    const admission = await exports.Admission.getByName("spaces").admit(address);
+    if (admission.type === "admitted") {
+      this.createTables();
+      this.opened = true;
+    }
+    return admission;
   }
 
   private isClosed() {
